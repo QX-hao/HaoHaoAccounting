@@ -1,6 +1,6 @@
 # HaoHaoAccounting
 
-基于你给的产品文档与 UIUX 稿实现的 MVP 记账系统：
+面向个人用户的极简跨端记账 MVP 系统：
 
 - 后端：Go + Gin + GORM（支持 PostgreSQL / MySQL）
 - Web：React + Next.js
@@ -28,12 +28,14 @@
 
 ## 快速启动
 
+`<repo-root>` 表示你本机上 clone 下来的仓库根目录（包含 `backend/`、`web/`、`mobile/`）。
+
 ### 1) 启动基础服务
 
 默认启动：`PostgreSQL + Redis`
 
 ```bash
-cd /Users/sealos/data/HaoHaoAccounting
+cd <repo-root>
 docker compose up -d
 ```
 
@@ -52,7 +54,7 @@ docker compose --profile mysql up -d mysql redis
 ### 2) 启动后端
 
 ```bash
-cd /Users/sealos/data/HaoHaoAccounting/backend
+cd <repo-root>/backend
 cp .env.example .env
 # 按需修改 DB_DRIVER / DB_DSN / REDIS_ADDR
 go run ./cmd/server
@@ -63,7 +65,7 @@ go run ./cmd/server
 ### 3) 启动 Web
 
 ```bash
-cd /Users/sealos/data/HaoHaoAccounting/web
+cd <repo-root>/web
 cp .env.example .env.local
 npm install
 npm run dev
@@ -74,7 +76,7 @@ npm run dev
 ### 4) 启动移动端
 
 ```bash
-cd /Users/sealos/data/HaoHaoAccounting/mobile
+cd <repo-root>/mobile
 cp .env.example .env
 npm install
 npm run start
@@ -96,4 +98,4 @@ npm run start
 
 ## 说明
 
-你提到的参考项目 `journal-flutter`，本实现只借鉴了功能思路（AI 记账、跨端一致流程、导入导出），未复用其技术栈。
+当前实现采用 Go + Gin + GORM（后端）与 Next.js / React Native（前端），支持 PostgreSQL 或 MySQL（二选一）以及 Redis 缓存。
