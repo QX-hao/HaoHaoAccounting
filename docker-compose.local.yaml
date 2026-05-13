@@ -1,3 +1,9 @@
+# Local test environment compose file.
+#
+# This file is for local development and testing only. It starts PostgreSQL,
+# Redis, and optional MySQL with simple local credentials and host port mappings.
+# Production deployment should use docker-compose.yaml instead.
+
 services:
   postgres:
     image: postgres:16

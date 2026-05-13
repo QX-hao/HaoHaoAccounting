@@ -1,0 +1,173 @@
+# Production compose file.
+#
+# Before deployment, replace NEXT_PUBLIC_API_BASE with the public URL that the
+# user's browser can use to reach the backend, for example:
+# https://api.example.com/api/v1
+#
+# This file defaults the app to PostgreSQL + Redis. MySQL is included as an
+# optional profile because the backend uses either PostgreSQL or MySQL, not both.
+
+name: haohaoaccounting
+
+services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: https://api.example.com/api/v1
+    image: haohaoaccounting-web:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      NEXT_PUBLIC_API_BASE: https://api.example.com/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - public
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: haohaoaccounting-backend:latest
+    restart: unless-stopped
+    environment:
+      GIN_MODE: release
+      PORT: 8080
+      DB_DRIVER: postgres
+      DB_DSN: "host=postgres user=haohao password=haohao_postgres_password dbname=haohaoaccounting port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: haohao_redis_password
+      REDIS_DB: 0
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - public
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    image: haohaoaccounting-postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: haohaoaccounting
+      POSTGRES_USER: haohao
+      POSTGRES_PASSWORD: haohao_postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    build:
+      context: .
+      dockerfile: Dockerfile.redis
+    image: haohaoaccounting-redis:7
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "haohao_redis_password",
+      ]
+    environment:
+      REDIS_PASSWORD: haohao_redis_password
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql:
+    profiles:
+      - mysql
+    build:
+      context: .
+      dockerfile: Dockerfile.mysql
+    image: haohaoaccounting-mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: haohaoaccounting
+      MYSQL_ROOT_PASSWORD: haohao_mysql_root_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    expose:
+      - "3306"
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  redis_data:
+  mysql_data:
+
+networks:
+  public:
+  internal:
+    internal: true
