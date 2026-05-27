@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sealos/haohaoaccounting/backend/internal/models"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

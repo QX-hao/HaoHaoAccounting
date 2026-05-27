@@ -10,9 +10,9 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/sealos/haohaoaccounting/backend/internal/cache"
-	"github.com/sealos/haohaoaccounting/backend/internal/handlers"
-	"github.com/sealos/haohaoaccounting/backend/internal/store"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/cache"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/handlers"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 )
 
 func main() {

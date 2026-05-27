@@ -16,11 +16,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sealos/haohaoaccounting/backend/internal/cache"
-	"github.com/sealos/haohaoaccounting/backend/internal/middleware"
-	"github.com/sealos/haohaoaccounting/backend/internal/models"
-	"github.com/sealos/haohaoaccounting/backend/internal/services"
-	"github.com/sealos/haohaoaccounting/backend/internal/store"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/cache"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/services"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 )

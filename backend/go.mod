@@ -1,4 +1,4 @@
-module github.com/sealos/haohaoaccounting/backend
+module github.com/QX-hao/HaoHaoAccounting/backend
 
 go 1.23.0
 

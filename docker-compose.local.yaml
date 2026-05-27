@@ -7,7 +7,7 @@
 services:
   postgres:
     image: postgres:16
-    container_name: haohao-postgres
+    container_name: haohao-local-test-postgres
     environment:
       POSTGRES_DB: haohaoaccounting
       POSTGRES_USER: postgres
@@ -19,7 +19,7 @@ services:
 
   redis:
     image: redis:7
-    container_name: haohao-redis
+    container_name: haohao-local-test-redis
     ports:
       - "56379:6379"
     command: ["redis-server", "--appendonly", "yes"]
@@ -28,7 +28,7 @@ services:
 
   mysql:
     image: mysql:8.4
-    container_name: haohao-mysql
+    container_name: haohao-local-test-mysql
     profiles:
       - mysql
     environment:
