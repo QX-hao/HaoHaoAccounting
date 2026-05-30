@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/app"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/cache"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/QX-hao/HaoHaoAccounting/backend/internal/cache"
-	"github.com/QX-hao/HaoHaoAccounting/backend/internal/handlers"
-	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 		if strings.EqualFold(driver, "mysql") {
 			dsn = "root:root@tcp(127.0.0.1:53306)/haohaoaccounting?charset=utf8mb4&parseTime=True&loc=Local"
 		} else {
-			dsn = "host=127.0.0.1 user=postgres password=postgres dbname=haohaoaccounting port=55432 sslmode=disable TimeZone=Asia/Shanghai"
+			dsn = "host=127.0.0.1 user=postgres password=haohao123 dbname=haohaoaccounting port=55432 sslmode=disable TimeZone=Asia/Shanghai"
 		}
 	}
 
@@ -32,7 +32,7 @@ func main() {
 	}
 
 	redisAddr := fallbackEnv("REDIS_ADDR", "127.0.0.1:56379")
-	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisPassword := fallbackEnv("REDIS_PASSWORD", "haohao123")
 	redisDB := fallbackIntEnv("REDIS_DB", 0)
 
 	var redisCache *cache.RedisCache
@@ -57,8 +57,7 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	h := handlers.New(s, redisCache)
-	h.Register(r)
+	app.RegisterRoutes(r, s, redisCache)
 
 	port := fallbackEnv("PORT", "8080")
 	log.Printf(

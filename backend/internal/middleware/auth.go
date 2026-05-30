@@ -1,36 +1,86 @@
 package middleware
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 const userContextKey = "user_id"
+const defaultJWTSecret = "haohao-dev-jwt-secret"
+
+type jwtClaims struct {
+	Subject   string `json:"sub"`
+	IssuedAt  int64  `json:"iat"`
+	ExpiresAt int64  `json:"exp"`
+}
 
 func BuildToken(userID uint) string {
-	payload := "u:" + strconv.FormatUint(uint64(userID), 10)
-	return base64.StdEncoding.EncodeToString([]byte(payload))
+	now := time.Now()
+	header := map[string]string{"alg": "HS256", "typ": "JWT"}
+	claims := jwtClaims{
+		Subject:   strconv.FormatUint(uint64(userID), 10),
+		IssuedAt:  now.Unix(),
+		ExpiresAt: now.Add(7 * 24 * time.Hour).Unix(),
+	}
+
+	headerJSON, _ := json.Marshal(header)
+	claimsJSON, _ := json.Marshal(claims)
+	unsigned := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+	return unsigned + "." + signJWT(unsigned)
 }
 
 func ParseToken(token string) (uint, error) {
-	decoded, err := base64.StdEncoding.DecodeString(token)
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return 0, errors.New("invalid token")
+	}
+
+	unsigned := parts[0] + "." + parts[1]
+	if !hmac.Equal([]byte(parts[2]), []byte(signJWT(unsigned))) {
+		return 0, errors.New("invalid token signature")
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		return 0, err
 	}
-	parts := strings.Split(string(decoded), ":")
-	if len(parts) != 2 || parts[0] != "u" {
-		return 0, errors.New("invalid token")
+
+	var claims jwtClaims
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return 0, err
 	}
-	id, err := strconv.ParseUint(parts[1], 10, 64)
+	if claims.ExpiresAt <= time.Now().Unix() {
+		return 0, errors.New("token expired")
+	}
+
+	id, err := strconv.ParseUint(strings.TrimSpace(claims.Subject), 10, 64)
 	if err != nil {
 		return 0, err
 	}
 	return uint(id), nil
+}
+
+func signJWT(unsigned string) string {
+	mac := hmac.New(sha256.New, []byte(jwtSecret()))
+	mac.Write([]byte(unsigned))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func jwtSecret() string {
+	if value := strings.TrimSpace(os.Getenv("JWT_SECRET")); value != "" {
+		return value
+	}
+	return defaultJWTSecret
 }
 
 func RequireAuth() gin.HandlerFunc {

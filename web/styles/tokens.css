@@ -1,0 +1,22 @@
+:root {
+  color-scheme: light;
+  --bg: #f4fbf7;
+  --bg-strong: #e6f7ef;
+  --surface: #ffffff;
+  --surface-soft: #eef8f3;
+  --surface-muted: #e3f0ea;
+  --text: #18251f;
+  --muted: #66736c;
+  --brand: #10b981;
+  --brand-strong: #078866;
+  --brand-soft: #d7f8eb;
+  --accent: #124d3b;
+  --warm: #fff4d8;
+  --income: #059669;
+  --expense: #ef6a45;
+  --danger: #b42318;
+  --danger-soft: #ffebe7;
+  --border: rgba(24, 37, 31, 0.1);
+  --shadow: 0 22px 70px rgba(18, 77, 59, 0.1);
+  --shadow-soft: 0 12px 36px rgba(18, 77, 59, 0.08);
+}

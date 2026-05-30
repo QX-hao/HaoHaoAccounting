@@ -2,19 +2,40 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getToken } from '@/lib/auth';
+import { request } from '@/lib/api';
+import { clearToken, getToken } from '@/lib/auth';
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      router.replace('/login');
-      return;
+    let active = true;
+
+    async function verifyToken() {
+      const token = getToken();
+      if (!token) {
+        router.replace('/login');
+        return;
+      }
+
+      setReady(true);
+
+      try {
+        await request('/me');
+      } catch {
+        clearToken();
+        if (active) {
+          router.replace('/login');
+        }
+      }
     }
-    setReady(true);
+
+    verifyToken();
+
+    return () => {
+      active = false;
+    };
   }, [router]);
 
   if (!ready) {

@@ -1,0 +1,235 @@
+package transactions
+
+import (
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/stringutil"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
+	"gorm.io/gorm"
+)
+
+type Service struct {
+	store       *store.Store
+	invalidator CacheInvalidator
+}
+
+func NewService(s *store.Store, invalidator CacheInvalidator) *Service {
+	if invalidator == nil {
+		invalidator = noopInvalidator{}
+	}
+	return &Service{store: s, invalidator: invalidator}
+}
+
+func (s *Service) List(userID uint, filter ListFilter) ([]models.Transaction, int64, error) {
+	page := filter.Page
+	pageSize := filter.PageSize
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 20
+	}
+
+	query := s.store.DB.Model(&models.Transaction{}).Where("user_id = ?", userID)
+	if !filter.Start.IsZero() {
+		query = query.Where("occurred_at >= ?", filter.Start)
+	}
+	if !filter.End.IsZero() {
+		query = query.Where("occurred_at <= ?", filter.End)
+	}
+	if filter.Type != "" {
+		query = query.Where("type = ?", filter.Type)
+	}
+	if filter.CategoryID > 0 {
+		query = query.Where("category_id = ?", filter.CategoryID)
+	}
+	if filter.AccountID > 0 {
+		query = query.Where("account_id = ?", filter.AccountID)
+	}
+	if filter.Keyword != "" {
+		like := "%" + filter.Keyword + "%"
+		query = query.Where("note LIKE ? OR tags LIKE ?", like, like)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var rows []models.Transaction
+	if err := query.Preload("Category").Preload("Account").
+		Order("occurred_at desc, id desc").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return rows, total, nil
+}
+
+func (s *Service) Create(userID uint, req Request) (models.Transaction, error) {
+	if err := validateRequest(req); err != nil {
+		return models.Transaction{}, err
+	}
+	if err := s.ensureCategoryAndAccount(userID, req.Type, req.CategoryID, req.AccountID); err != nil {
+		return models.Transaction{}, err
+	}
+	if req.OccurredAt.IsZero() {
+		req.OccurredAt = time.Now()
+	}
+
+	tx := models.Transaction{
+		UserID:     userID,
+		Type:       req.Type,
+		Amount:     req.Amount,
+		CategoryID: req.CategoryID,
+		AccountID:  req.AccountID,
+		Note:       strings.TrimSpace(req.Note),
+		Tags:       strings.Join(req.Tags, ","),
+		OccurredAt: req.OccurredAt,
+		Source:     stringutil.FallbackName(req.Source, "manual"),
+	}
+
+	// Transaction rows and account balance movement are one business invariant.
+	// Keeping them in one DB transaction prevents ledger/balance drift.
+	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+		if err := dbtx.Create(&tx).Error; err != nil {
+			return err
+		}
+		return applyAccountDelta(dbtx, tx.AccountID, tx.Type, tx.Amount)
+	}); err != nil {
+		return models.Transaction{}, err
+	}
+
+	s.store.DB.Preload("Category").Preload("Account").First(&tx, tx.ID)
+	s.invalidator.InvalidateUser(userID)
+	return tx, nil
+}
+
+func (s *Service) Update(userID, id uint, req Request) (models.Transaction, error) {
+	var existing models.Transaction
+	if err := s.store.DB.Where("id = ? AND user_id = ?", id, userID).First(&existing).Error; err != nil {
+		return models.Transaction{}, errors.New("transaction not found")
+	}
+
+	if err := validateRequest(req); err != nil {
+		return models.Transaction{}, err
+	}
+	if err := s.ensureCategoryAndAccount(userID, req.Type, req.CategoryID, req.AccountID); err != nil {
+		return models.Transaction{}, err
+	}
+	if req.OccurredAt.IsZero() {
+		req.OccurredAt = existing.OccurredAt
+	}
+
+	updated := existing
+	updated.Type = req.Type
+	updated.Amount = req.Amount
+	updated.CategoryID = req.CategoryID
+	updated.AccountID = req.AccountID
+	updated.Note = strings.TrimSpace(req.Note)
+	updated.Tags = strings.Join(req.Tags, ",")
+	updated.OccurredAt = req.OccurredAt
+	updated.Source = stringutil.FallbackName(req.Source, existing.Source)
+
+	// Balance must be reconciled around the old and new transaction values.
+	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+		if err := revertAccountDelta(dbtx, existing.AccountID, existing.Type, existing.Amount); err != nil {
+			return err
+		}
+		if err := applyAccountDelta(dbtx, updated.AccountID, updated.Type, updated.Amount); err != nil {
+			return err
+		}
+		return dbtx.Save(&updated).Error
+	}); err != nil {
+		return models.Transaction{}, err
+	}
+
+	s.store.DB.Preload("Category").Preload("Account").First(&updated, updated.ID)
+	s.invalidator.InvalidateUser(userID)
+	return updated, nil
+}
+
+func (s *Service) Delete(userID, id uint) error {
+	var tx models.Transaction
+	if err := s.store.DB.Where("id = ? AND user_id = ?", id, userID).First(&tx).Error; err != nil {
+		return errors.New("transaction not found")
+	}
+
+	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+		if err := revertAccountDelta(dbtx, tx.AccountID, tx.Type, tx.Amount); err != nil {
+			return err
+		}
+		return dbtx.Delete(&tx).Error
+	}); err != nil {
+		return err
+	}
+
+	s.invalidator.InvalidateUser(userID)
+	return nil
+}
+
+func (s *Service) ensureCategoryAndAccount(userID uint, txType string, categoryID, accountID uint) error {
+	var category models.Category
+	if err := s.store.DB.Where("id = ?", categoryID).First(&category).Error; err != nil {
+		return errors.New("category not found")
+	}
+	if category.Type != txType {
+		return errors.New("category type mismatch")
+	}
+	if !category.IsSystem {
+		if category.UserID == nil || *category.UserID != userID {
+			return errors.New("category not accessible")
+		}
+	}
+
+	var account models.Account
+	if err := s.store.DB.Where("id = ? AND user_id = ?", accountID, userID).First(&account).Error; err != nil {
+		return errors.New("account not found")
+	}
+	return nil
+}
+
+func validateRequest(req Request) error {
+	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
+	if req.Type != "income" && req.Type != "expense" {
+		return errors.New("type must be income or expense")
+	}
+	if req.Amount <= 0 {
+		return errors.New("amount must be > 0")
+	}
+	if req.CategoryID == 0 {
+		return errors.New("categoryId is required")
+	}
+	if req.AccountID == 0 {
+		return errors.New("accountId is required")
+	}
+	if !req.AllowEmptyNote && strings.TrimSpace(req.Note) == "" {
+		return errors.New("note is required")
+	}
+	return nil
+}
+
+func applyAccountDelta(dbtx *gorm.DB, accountID uint, txType string, amount float64) error {
+	delta := amount
+	if txType == "expense" {
+		delta = -amount
+	}
+	return dbtx.Model(&models.Account{}).
+		Where("id = ?", accountID).
+		Update("balance", gorm.Expr("balance + ?", delta)).Error
+}
+
+func revertAccountDelta(dbtx *gorm.DB, accountID uint, txType string, amount float64) error {
+	delta := amount
+	if txType == "expense" {
+		delta = -amount
+	}
+	return dbtx.Model(&models.Account{}).
+		Where("id = ?", accountID).
+		Update("balance", gorm.Expr("balance - ?", delta)).Error
+}

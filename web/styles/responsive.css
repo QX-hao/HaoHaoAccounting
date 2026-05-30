@@ -1,0 +1,92 @@
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    padding: 14px 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    padding-bottom: 8px;
+  }
+
+  .sidebar nav {
+    grid-template-columns: repeat(7, minmax(92px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .sidebar nav a {
+    justify-content: center;
+  }
+
+  .sidebar-panel,
+  .logout {
+    display: none;
+  }
+
+  .content {
+    padding-top: 24px;
+  }
+
+  .grid.three,
+  .feature-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .content {
+    padding: 18px 14px 32px;
+  }
+
+  .page-heading {
+    display: grid;
+    align-items: start;
+  }
+
+  .grid.two,
+  .grid.three,
+  .hero-metrics,
+  .form-grid,
+  .feature-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sidebar nav {
+    grid-template-columns: repeat(4, minmax(86px, 1fr));
+  }
+
+  .sidebar nav a {
+    min-height: 38px;
+    padding: 8px;
+    font-size: 13px;
+  }
+
+  .nav-icon {
+    display: none;
+  }
+
+  .login-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-preview {
+    display: none;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}

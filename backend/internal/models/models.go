@@ -4,6 +4,7 @@ import "time"
 
 type User struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
+	Username  string    `gorm:"size:64;index" json:"username"`
 	Phone     string    `gorm:"size:32;index" json:"phone"`
 	Email     string    `gorm:"size:128;index" json:"email"`
 	WechatID  string    `gorm:"size:128;index" json:"wechatId"`
