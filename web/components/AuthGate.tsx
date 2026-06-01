@@ -19,10 +19,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      setReady(true);
-
       try {
         await request('/me');
+        if (active) {
+          setReady(true);
+        }
       } catch {
         clearToken();
         if (active) {

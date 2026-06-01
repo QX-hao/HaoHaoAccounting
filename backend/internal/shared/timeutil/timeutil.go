@@ -27,7 +27,24 @@ func ResolveRange(startRaw, endRaw string) (time.Time, time.Time) {
 		start = t
 	}
 	if t, err := ParseDateTime(endRaw); strings.TrimSpace(endRaw) != "" && err == nil {
-		end = t
+		end = normalizeRangeEnd(strings.TrimSpace(endRaw), t)
 	}
 	return start, end
+}
+
+func normalizeRangeEnd(raw string, value time.Time) time.Time {
+	if isDateOnly(raw) {
+		return value.AddDate(0, 0, 1).Add(-time.Nanosecond)
+	}
+	return value
+}
+
+func isDateOnly(raw string) bool {
+	if _, err := time.Parse("2006-01-02", raw); err == nil {
+		return true
+	}
+	if _, err := time.Parse("2006/01/02", raw); err == nil {
+		return true
+	}
+	return false
 }

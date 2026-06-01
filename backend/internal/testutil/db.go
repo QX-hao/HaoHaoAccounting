@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
@@ -12,7 +13,7 @@ import (
 func NewStore(t *testing.T) *store.Store {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

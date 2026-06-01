@@ -2,6 +2,7 @@ package reports
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -21,8 +22,8 @@ func NewService(s *store.Store, redisCache *cache.RedisCache) *Service {
 	return &Service{store: s, cache: redisCache}
 }
 
-func (s *Service) Summary(userID uint, start, end time.Time) (gin.H, error) {
-	cacheKey := cache.UserReportKey(userID, start, end)
+func (s *Service) Summary(userID uint, filter SummaryFilter) (gin.H, error) {
+	cacheKey := cache.UserReportKey(userID, filter.Start, filter.End) + filter.CacheSuffix()
 	if s.cache != nil && s.cache.Enabled() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -34,14 +35,18 @@ func (s *Service) Summary(userID uint, start, end time.Time) (gin.H, error) {
 	}
 
 	var rows []models.Transaction
-	if err := s.store.DB.Where("user_id = ? AND occurred_at >= ? AND occurred_at <= ?", userID, start, end).
-		Preload("Category").Preload("Account").
-		Order("occurred_at asc").
-		Find(&rows).Error; err != nil {
+	query := s.store.DB.Where("user_id = ? AND occurred_at >= ? AND occurred_at <= ?", userID, filter.Start, filter.End)
+	if filter.CategoryID > 0 {
+		query = query.Where("category_id = ?", filter.CategoryID)
+	}
+	if filter.AccountID > 0 {
+		query = query.Where("account_id = ?", filter.AccountID)
+	}
+	if err := query.Preload("Category").Preload("Account").Order("occurred_at asc").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
-	summary := gin.H{"start": start, "end": end}
+	summary := gin.H{"start": filter.Start, "end": filter.End}
 	incomeCents := int64(0)
 	expenseCents := int64(0)
 	categoryMap := map[uint]*CategoryStat{}
@@ -111,9 +116,14 @@ func (s *Service) Summary(userID uint, start, end time.Time) (gin.H, error) {
 		})
 	}
 
-	prevStart := start.Add(-end.Sub(start) - time.Second)
-	prevEnd := start.Add(-time.Second)
-	prevIncomeCents, prevExpenseCents := s.sumIncomeExpense(userID, prevStart, prevEnd)
+	prevStart := filter.Start.Add(-filter.End.Sub(filter.Start) - time.Second)
+	prevEnd := filter.Start.Add(-time.Second)
+	prevIncomeCents, prevExpenseCents := s.sumIncomeExpense(userID, SummaryFilter{
+		Start:      prevStart,
+		End:        prevEnd,
+		CategoryID: filter.CategoryID,
+		AccountID:  filter.AccountID,
+	})
 
 	summary["income"] = money.FromCents(incomeCents)
 	summary["expense"] = money.FromCents(expenseCents)
@@ -135,11 +145,16 @@ func (s *Service) Summary(userID uint, start, end time.Time) (gin.H, error) {
 	return summary, nil
 }
 
-func (s *Service) sumIncomeExpense(userID uint, start, end time.Time) (int64, int64) {
+func (s *Service) sumIncomeExpense(userID uint, filter SummaryFilter) (int64, int64) {
 	var rows []models.Transaction
-	if err := s.store.DB.Where("user_id = ? AND occurred_at >= ? AND occurred_at <= ?", userID, start, end).
-		Select("type, amount_cents").
-		Find(&rows).Error; err != nil {
+	query := s.store.DB.Where("user_id = ? AND occurred_at >= ? AND occurred_at <= ?", userID, filter.Start, filter.End)
+	if filter.CategoryID > 0 {
+		query = query.Where("category_id = ?", filter.CategoryID)
+	}
+	if filter.AccountID > 0 {
+		query = query.Where("account_id = ?", filter.AccountID)
+	}
+	if err := query.Select("type, amount_cents").Find(&rows).Error; err != nil {
 		return 0, 0
 	}
 	income, expense := int64(0), int64(0)
@@ -151,4 +166,11 @@ func (s *Service) sumIncomeExpense(userID uint, start, end time.Time) (int64, in
 		}
 	}
 	return income, expense
+}
+
+func (f SummaryFilter) CacheSuffix() string {
+	if f.CategoryID == 0 && f.AccountID == 0 {
+		return ""
+	}
+	return fmt.Sprintf(":category:%d:account:%d", f.CategoryID, f.AccountID)
 }

@@ -43,7 +43,12 @@ export async function upload<T>(path: string, formData: FormData): Promise<T> {
   return data as T;
 }
 
-export async function download(path: string): Promise<Blob> {
+export type DownloadResult = {
+  blob: Blob;
+  filename: string;
+};
+
+export async function download(path: string): Promise<DownloadResult> {
   const token = getToken();
   const resp = await fetch(`${API_BASE}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -53,7 +58,10 @@ export async function download(path: string): Promise<Blob> {
     const text = await resp.text();
     throw new Error(text || 'Request failed');
   }
-  return resp.blob();
+  return {
+    blob: await resp.blob(),
+    filename: filenameFromDisposition(resp.headers.get('Content-Disposition')) || 'download',
+  };
 }
 
 function handleUnauthorized(status: number) {
@@ -62,4 +70,14 @@ function handleUnauthorized(status: number) {
   if (window.location.pathname !== '/login') {
     window.location.assign('/login');
   }
+}
+
+function filenameFromDisposition(disposition: string | null) {
+  if (!disposition) return '';
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+  const asciiMatch = disposition.match(/filename="?([^";]+)"?/i);
+  return asciiMatch?.[1] || '';
 }
