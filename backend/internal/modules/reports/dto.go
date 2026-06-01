@@ -1,13 +1,15 @@
 package reports
 
 type CategoryStat struct {
-	CategoryID uint    `json:"categoryId"`
-	Category   string  `json:"category"`
-	Amount     float64 `json:"amount"`
+	CategoryID  uint    `json:"categoryId"`
+	Category    string  `json:"category"`
+	Amount      float64 `json:"amount"`
+	amountCents int64
 }
 
 type AccountStat struct {
-	AccountID uint    `json:"accountId"`
-	Account   string  `json:"account"`
-	Amount    float64 `json:"amount"`
+	AccountID   uint    `json:"accountId"`
+	Account     string  `json:"account"`
+	Amount      float64 `json:"amount"`
+	amountCents int64
 }

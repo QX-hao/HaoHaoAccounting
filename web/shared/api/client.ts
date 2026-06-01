@@ -1,5 +1,5 @@
 import { API_BASE } from '@/lib/config';
-import { getToken } from '@/shared/auth/token';
+import { clearToken, getToken } from '@/shared/auth/token';
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers || {});
@@ -17,6 +17,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
+    handleUnauthorized(resp.status);
     throw new Error(data.error || 'Request failed');
   }
   return data as T;
@@ -36,6 +37,7 @@ export async function upload<T>(path: string, formData: FormData): Promise<T> {
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
+    handleUnauthorized(resp.status);
     throw new Error(data.error || 'Request failed');
   }
   return data as T;
@@ -47,8 +49,17 @@ export async function download(path: string): Promise<Blob> {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!resp.ok) {
+    handleUnauthorized(resp.status);
     const text = await resp.text();
     throw new Error(text || 'Request failed');
   }
   return resp.blob();
+}
+
+function handleUnauthorized(status: number) {
+  if (status !== 401 || typeof window === 'undefined') return;
+  clearToken();
+  if (window.location.pathname !== '/login') {
+    window.location.assign('/login');
+  }
 }

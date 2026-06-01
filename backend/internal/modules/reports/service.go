@@ -7,6 +7,7 @@ import (
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/cache"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/money"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"github.com/gin-gonic/gin"
 )
@@ -41,17 +42,17 @@ func (s *Service) Summary(userID uint, start, end time.Time) (gin.H, error) {
 	}
 
 	summary := gin.H{"start": start, "end": end}
-	income := 0.0
-	expense := 0.0
+	incomeCents := int64(0)
+	expenseCents := int64(0)
 	categoryMap := map[uint]*CategoryStat{}
 	accountMap := map[uint]*AccountStat{}
 	monthly := map[string]gin.H{}
 
 	for _, row := range rows {
 		if row.Type == "income" {
-			income += row.Amount
+			incomeCents += row.AmountCents
 		} else {
-			expense += row.Amount
+			expenseCents += row.AmountCents
 		}
 
 		if row.Type == "expense" {
@@ -60,24 +61,26 @@ func (s *Service) Summary(userID uint, start, end time.Time) (gin.H, error) {
 				categoryStat = &CategoryStat{CategoryID: row.CategoryID, Category: row.Category.Name}
 				categoryMap[row.CategoryID] = categoryStat
 			}
-			categoryStat.Amount += row.Amount
+			categoryStat.amountCents += row.AmountCents
+			categoryStat.Amount = money.FromCents(categoryStat.amountCents)
 
 			accountStat, ok := accountMap[row.AccountID]
 			if !ok {
 				accountStat = &AccountStat{AccountID: row.AccountID, Account: row.Account.Name}
 				accountMap[row.AccountID] = accountStat
 			}
-			accountStat.Amount += row.Amount
+			accountStat.amountCents += row.AmountCents
+			accountStat.Amount = money.FromCents(accountStat.amountCents)
 		}
 
 		monthKey := row.OccurredAt.Format("2006-01")
 		if _, ok := monthly[monthKey]; !ok {
-			monthly[monthKey] = gin.H{"month": monthKey, "income": 0.0, "expense": 0.0}
+			monthly[monthKey] = gin.H{"month": monthKey, "incomeCents": int64(0), "expenseCents": int64(0)}
 		}
 		if row.Type == "income" {
-			monthly[monthKey]["income"] = monthly[monthKey]["income"].(float64) + row.Amount
+			monthly[monthKey]["incomeCents"] = monthly[monthKey]["incomeCents"].(int64) + row.AmountCents
 		} else {
-			monthly[monthKey]["expense"] = monthly[monthKey]["expense"].(float64) + row.Amount
+			monthly[monthKey]["expenseCents"] = monthly[monthKey]["expenseCents"].(int64) + row.AmountCents
 		}
 	}
 
@@ -100,22 +103,27 @@ func (s *Service) Summary(userID uint, start, end time.Time) (gin.H, error) {
 	sort.Strings(monthKeys)
 	monthlyTrend := make([]gin.H, 0, len(monthKeys))
 	for _, k := range monthKeys {
-		monthlyTrend = append(monthlyTrend, monthly[k])
+		item := monthly[k]
+		monthlyTrend = append(monthlyTrend, gin.H{
+			"month":   item["month"],
+			"income":  money.FromCents(item["incomeCents"].(int64)),
+			"expense": money.FromCents(item["expenseCents"].(int64)),
+		})
 	}
 
 	prevStart := start.Add(-end.Sub(start) - time.Second)
 	prevEnd := start.Add(-time.Second)
-	prevIncome, prevExpense := s.sumIncomeExpense(userID, prevStart, prevEnd)
+	prevIncomeCents, prevExpenseCents := s.sumIncomeExpense(userID, prevStart, prevEnd)
 
-	summary["income"] = income
-	summary["expense"] = expense
-	summary["balance"] = income - expense
+	summary["income"] = money.FromCents(incomeCents)
+	summary["expense"] = money.FromCents(expenseCents)
+	summary["balance"] = money.FromCents(incomeCents - expenseCents)
 	summary["byCategory"] = categoryList
 	summary["byAccount"] = accountList
 	summary["monthlyTrend"] = monthlyTrend
 	summary["periodCompare"] = gin.H{
-		"current":  gin.H{"income": income, "expense": expense},
-		"previous": gin.H{"income": prevIncome, "expense": prevExpense},
+		"current":  gin.H{"income": money.FromCents(incomeCents), "expense": money.FromCents(expenseCents)},
+		"previous": gin.H{"income": money.FromCents(prevIncomeCents), "expense": money.FromCents(prevExpenseCents)},
 	}
 
 	if s.cache != nil && s.cache.Enabled() {
@@ -127,19 +135,19 @@ func (s *Service) Summary(userID uint, start, end time.Time) (gin.H, error) {
 	return summary, nil
 }
 
-func (s *Service) sumIncomeExpense(userID uint, start, end time.Time) (float64, float64) {
+func (s *Service) sumIncomeExpense(userID uint, start, end time.Time) (int64, int64) {
 	var rows []models.Transaction
 	if err := s.store.DB.Where("user_id = ? AND occurred_at >= ? AND occurred_at <= ?", userID, start, end).
-		Select("type, amount").
+		Select("type, amount_cents").
 		Find(&rows).Error; err != nil {
 		return 0, 0
 	}
-	income, expense := 0.0, 0.0
+	income, expense := int64(0), int64(0)
 	for _, row := range rows {
 		if row.Type == "income" {
-			income += row.Amount
+			income += row.AmountCents
 		} else {
-			expense += row.Amount
+			expense += row.AmountCents
 		}
 	}
 	return income, expense

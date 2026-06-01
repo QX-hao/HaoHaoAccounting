@@ -54,11 +54,43 @@ func New(cfg Config) (*Store, error) {
 	}
 
 	s := &Store{DB: db}
+	if err := s.migrateFloatAmountsToCents(); err != nil {
+		return nil, err
+	}
 	if err := s.seedSystemCategories(); err != nil {
 		return nil, err
 	}
 
 	return s, nil
+}
+
+func (s *Store) migrateFloatAmountsToCents() error {
+	if hasDBColumn(s.DB, &models.Account{}, "balance") && hasDBColumn(s.DB, &models.Account{}, "balance_cents") {
+		if err := s.DB.Exec("UPDATE accounts SET balance_cents = ROUND(balance * 100) WHERE balance_cents = 0 AND balance IS NOT NULL AND balance <> 0").Error; err != nil {
+			return err
+		}
+	}
+
+	if hasDBColumn(s.DB, &models.Transaction{}, "amount") && hasDBColumn(s.DB, &models.Transaction{}, "amount_cents") {
+		if err := s.DB.Exec("UPDATE transactions SET amount_cents = ROUND(amount * 100) WHERE amount_cents = 0 AND amount IS NOT NULL AND amount <> 0").Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func hasDBColumn(db *gorm.DB, model any, name string) bool {
+	columns, err := db.Migrator().ColumnTypes(model)
+	if err != nil {
+		return false
+	}
+	for _, column := range columns {
+		if strings.EqualFold(column.Name(), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) seedSystemCategories() error {
@@ -91,10 +123,10 @@ func (s *Store) seedSystemCategories() error {
 
 func (s *Store) EnsureDefaultDataForUser(userID uint) error {
 	defaultAccounts := []models.Account{
-		{UserID: userID, Name: "现金", Type: "cash", Balance: 0},
-		{UserID: userID, Name: "银行卡", Type: "bank", Balance: 0},
-		{UserID: userID, Name: "支付宝", Type: "alipay", Balance: 0},
-		{UserID: userID, Name: "微信", Type: "wechat", Balance: 0},
+		{UserID: userID, Name: "现金", Type: "cash", BalanceCents: 0},
+		{UserID: userID, Name: "银行卡", Type: "bank", BalanceCents: 0},
+		{UserID: userID, Name: "支付宝", Type: "alipay", BalanceCents: 0},
+		{UserID: userID, Name: "微信", Type: "wechat", BalanceCents: 0},
 	}
 
 	for _, a := range defaultAccounts {
@@ -172,7 +204,7 @@ func (s *Store) FindOrCreateAccount(userID uint, name string) (*models.Account, 
 		return nil, err
 	}
 
-	account = models.Account{UserID: userID, Name: cleanName, Type: "custom", Balance: 0}
+	account = models.Account{UserID: userID, Name: cleanName, Type: "custom", BalanceCents: 0}
 	if err := s.DB.Create(&account).Error; err != nil {
 		return nil, err
 	}

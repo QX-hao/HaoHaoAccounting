@@ -16,6 +16,10 @@ import (
 )
 
 func main() {
+	if err := loadDotEnv(".env"); err != nil {
+		log.Printf("skip .env: %v", err)
+	}
+
 	driver := fallbackEnv("DB_DRIVER", "postgres")
 	dsn := os.Getenv("DB_DSN")
 	if strings.TrimSpace(dsn) == "" {
@@ -57,7 +61,9 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	app.RegisterRoutes(r, s, redisCache)
+	if err := app.RegisterRoutes(r, s, redisCache); err != nil {
+		log.Fatalf("failed to register routes: %v", err)
+	}
 
 	port := fallbackEnv("PORT", "8080")
 	log.Printf(
@@ -88,4 +94,35 @@ func fallbackIntEnv(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func loadDotEnv(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		clean := strings.TrimSpace(line)
+		if clean == "" || strings.HasPrefix(clean, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(clean, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if key == "" || os.Getenv(key) != "" {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return err
+		}
+	}
+	return nil
 }

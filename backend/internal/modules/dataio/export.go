@@ -3,10 +3,10 @@ package dataio
 import (
 	"encoding/csv"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/money"
 	"github.com/gin-gonic/gin"
 	"github.com/xuri/excelize/v2"
 )
@@ -24,7 +24,7 @@ func writeCSV(c *gin.Context, rows []models.Transaction) {
 		_ = writer.Write([]string{
 			row.OccurredAt.Format(time.RFC3339),
 			row.Type,
-			strconv.FormatFloat(row.Amount, 'f', 2, 64),
+			money.FormatCents(row.AmountCents),
 			row.Category.Name,
 			row.Account.Name,
 			row.Note,
@@ -50,7 +50,7 @@ func writeXLSX(c *gin.Context, rows []models.Transaction) error {
 		line := idx + 2
 		_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", line), row.OccurredAt.Format(time.RFC3339))
 		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", line), row.Type)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", line), row.Amount)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", line), money.FromCents(row.AmountCents))
 		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", line), row.Category.Name)
 		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", line), row.Account.Name)
 		_ = f.SetCellValue(sheet, fmt.Sprintf("F%d", line), row.Note)

@@ -33,6 +33,9 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
+    if (resp.status === 401) {
+      await clearToken();
+    }
     throw new Error(data.error || '请求失败');
   }
   return data as T;

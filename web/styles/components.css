@@ -457,6 +457,10 @@ button.ghost {
   background: var(--surface);
 }
 
+.category-grid .empty-state {
+  grid-column: 1 / -1;
+}
+
 .notice,
 .success,
 .error {

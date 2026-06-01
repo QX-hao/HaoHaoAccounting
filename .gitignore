@@ -29,6 +29,7 @@ pnpm-debug.log*
 **/coverage/
 **/.turbo/
 **/.cache/
+**/*.tsbuildinfo
 mobile/.expo/
 mobile/.expo-shared/
 mobile/android/app/build/

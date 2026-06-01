@@ -84,7 +84,7 @@ npm run dev
 http://localhost:3000/login
 ```
 
-当前登录账号：
+当前本地登录账号来自 `backend/.env.example`：
 
 ```text
 username: admin
@@ -138,6 +138,8 @@ NEXT_PUBLIC_API_BASE: http://localhost:8080/api/v1
 - `backend.environment.DB_DSN` 里的 PostgreSQL 密码
 - `backend.environment.REDIS_PASSWORD`
 - `backend.environment.JWT_SECRET`
+- `backend.environment.ADMIN_USERNAME`
+- `backend.environment.ADMIN_PASSWORD`
 - `postgres.environment.POSTGRES_PASSWORD`
 - `redis.command` 里的 `--requirepass`
 - `redis.environment.REDIS_PASSWORD`

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/money"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/stringutil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"gorm.io/gorm"
@@ -83,15 +84,15 @@ func (s *Service) Create(userID uint, req Request) (models.Transaction, error) {
 	}
 
 	tx := models.Transaction{
-		UserID:     userID,
-		Type:       req.Type,
-		Amount:     req.Amount,
-		CategoryID: req.CategoryID,
-		AccountID:  req.AccountID,
-		Note:       strings.TrimSpace(req.Note),
-		Tags:       strings.Join(req.Tags, ","),
-		OccurredAt: req.OccurredAt,
-		Source:     stringutil.FallbackName(req.Source, "manual"),
+		UserID:      userID,
+		Type:        req.Type,
+		AmountCents: money.ToCents(req.Amount),
+		CategoryID:  req.CategoryID,
+		AccountID:   req.AccountID,
+		Note:        strings.TrimSpace(req.Note),
+		Tags:        strings.Join(req.Tags, ","),
+		OccurredAt:  req.OccurredAt,
+		Source:      stringutil.FallbackName(req.Source, "manual"),
 	}
 
 	// Transaction rows and account balance movement are one business invariant.
@@ -100,7 +101,7 @@ func (s *Service) Create(userID uint, req Request) (models.Transaction, error) {
 		if err := dbtx.Create(&tx).Error; err != nil {
 			return err
 		}
-		return applyAccountDelta(dbtx, tx.AccountID, tx.Type, tx.Amount)
+		return applyAccountDelta(dbtx, tx.AccountID, tx.Type, tx.AmountCents)
 	}); err != nil {
 		return models.Transaction{}, err
 	}
@@ -128,7 +129,7 @@ func (s *Service) Update(userID, id uint, req Request) (models.Transaction, erro
 
 	updated := existing
 	updated.Type = req.Type
-	updated.Amount = req.Amount
+	updated.AmountCents = money.ToCents(req.Amount)
 	updated.CategoryID = req.CategoryID
 	updated.AccountID = req.AccountID
 	updated.Note = strings.TrimSpace(req.Note)
@@ -138,10 +139,10 @@ func (s *Service) Update(userID, id uint, req Request) (models.Transaction, erro
 
 	// Balance must be reconciled around the old and new transaction values.
 	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
-		if err := revertAccountDelta(dbtx, existing.AccountID, existing.Type, existing.Amount); err != nil {
+		if err := revertAccountDelta(dbtx, existing.AccountID, existing.Type, existing.AmountCents); err != nil {
 			return err
 		}
-		if err := applyAccountDelta(dbtx, updated.AccountID, updated.Type, updated.Amount); err != nil {
+		if err := applyAccountDelta(dbtx, updated.AccountID, updated.Type, updated.AmountCents); err != nil {
 			return err
 		}
 		return dbtx.Save(&updated).Error
@@ -161,7 +162,7 @@ func (s *Service) Delete(userID, id uint) error {
 	}
 
 	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
-		if err := revertAccountDelta(dbtx, tx.AccountID, tx.Type, tx.Amount); err != nil {
+		if err := revertAccountDelta(dbtx, tx.AccountID, tx.Type, tx.AmountCents); err != nil {
 			return err
 		}
 		return dbtx.Delete(&tx).Error
@@ -214,22 +215,22 @@ func validateRequest(req Request) error {
 	return nil
 }
 
-func applyAccountDelta(dbtx *gorm.DB, accountID uint, txType string, amount float64) error {
-	delta := amount
+func applyAccountDelta(dbtx *gorm.DB, accountID uint, txType string, amountCents int64) error {
+	delta := amountCents
 	if txType == "expense" {
-		delta = -amount
+		delta = -amountCents
 	}
 	return dbtx.Model(&models.Account{}).
 		Where("id = ?", accountID).
-		Update("balance", gorm.Expr("balance + ?", delta)).Error
+		Update("balance_cents", gorm.Expr("balance_cents + ?", delta)).Error
 }
 
-func revertAccountDelta(dbtx *gorm.DB, accountID uint, txType string, amount float64) error {
-	delta := amount
+func revertAccountDelta(dbtx *gorm.DB, accountID uint, txType string, amountCents int64) error {
+	delta := amountCents
 	if txType == "expense" {
-		delta = -amount
+		delta = -amountCents
 	}
 	return dbtx.Model(&models.Account{}).
 		Where("id = ?", accountID).
-		Update("balance", gorm.Expr("balance - ?", delta)).Error
+		Update("balance_cents", gorm.Expr("balance_cents - ?", delta)).Error
 }

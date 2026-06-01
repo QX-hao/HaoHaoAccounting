@@ -18,7 +18,7 @@ import (
 
 // RegisterRoutes is the only place that knows the public HTTP route tree.
 // Modules own their handlers and business behavior; this layer only composes them.
-func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisCache) {
+func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisCache) error {
 	engine.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":       "ok",
@@ -29,6 +29,9 @@ func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisC
 	api := engine.Group("/api/v1")
 
 	authHandler := auth.NewHandler(s)
+	if err := authHandler.EnsureBootstrapAdmin(); err != nil {
+		return err
+	}
 	authHandler.RegisterPublic(api)
 
 	authGroup := api.Group("")
@@ -45,4 +48,5 @@ func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisC
 	ai.NewHandler(ai.NewService(redisCache)).Register(authGroup)
 	reports.NewHandler(reports.NewService(s, redisCache)).Register(authGroup)
 	dataio.NewHandler(dataio.NewService(s, transactionService, cacheInvalidator)).Register(authGroup)
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/transactions"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/money"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/stringutil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 )
@@ -27,10 +28,10 @@ func (s *Service) List(userID uint) ([]models.Account, error) {
 
 func (s *Service) Create(userID uint, req accountRequest) (models.Account, error) {
 	account := models.Account{
-		UserID:  userID,
-		Name:    strings.TrimSpace(req.Name),
-		Type:    stringutil.FallbackName(req.Type, "custom"),
-		Balance: req.Balance,
+		UserID:       userID,
+		Name:         strings.TrimSpace(req.Name),
+		Type:         stringutil.FallbackName(req.Type, "custom"),
+		BalanceCents: money.ToCents(req.Balance),
 	}
 	if account.Name == "" {
 		return models.Account{}, errors.New("name is required")
@@ -54,7 +55,7 @@ func (s *Service) Update(userID, id uint, req accountRequest) (models.Account, e
 	if strings.TrimSpace(req.Type) != "" {
 		account.Type = strings.TrimSpace(req.Type)
 	}
-	account.Balance = req.Balance
+	account.BalanceCents = money.ToCents(req.Balance)
 
 	if err := s.store.DB.Save(&account).Error; err != nil {
 		return models.Account{}, err

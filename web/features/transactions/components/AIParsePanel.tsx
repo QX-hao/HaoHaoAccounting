@@ -5,20 +5,21 @@ import { formatMoney } from '@/lib/format';
 type Props = {
   aiText: string;
   amount: string;
+  disabled: boolean;
   onAITextChange: (value: string) => void;
   onParse: () => void;
 };
 
-export function AIParsePanel({ aiText, amount, onAITextChange, onParse }: Props) {
+export function AIParsePanel({ aiText, amount, disabled, onAITextChange, onParse }: Props) {
   return (
     <div className="card grid">
       <div>
         <span className="eyebrow">AI Assistant</span>
         <h3>对话记账</h3>
       </div>
-      <textarea rows={7} value={aiText} onChange={(e) => onAITextChange(e.target.value)} placeholder="例如：今天午饭35" />
-      <button className="secondary" type="button" onClick={onParse}>
-        AI 解析
+      <textarea rows={7} value={aiText} onChange={(e) => onAITextChange(e.target.value)} placeholder="例如：今天午饭35" disabled={disabled} />
+      <button className="secondary" type="button" onClick={onParse} disabled={disabled || aiText.trim().length === 0}>
+        {disabled ? '解析中...' : 'AI 解析'}
       </button>
       <div className="panel">
         <span className="eyebrow">Preview</span>

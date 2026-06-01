@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageFrame } from '@/components/PageFrame';
 import type { Account, Category, Transaction, TransactionType } from '@/lib/types';
 import { AIParsePanel } from './components/AIParsePanel';
@@ -14,6 +14,11 @@ export default function TransactionsFeaturePage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const amountInputRef = useRef<HTMLInputElement>(null);
+  const initializedRef = useRef(false);
 
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState('');
@@ -26,17 +31,32 @@ export default function TransactionsFeaturePage() {
 
   const filteredCategories = useMemo(() => categories.filter((c) => c.type === type), [categories, type]);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setError('');
     try {
+      setLoading(true);
       const [a, c, t] = await Promise.all([listAccounts(), listCategories(), listTransactions()]);
       setAccounts(a);
       setCategories(c);
       setTransactions(t.items || []);
 
-      if (a[0] && !accountId) setAccountId(a[0].id);
-      const firstCategory = c.find((item) => item.type === type);
-      if (firstCategory && !categoryId) setCategoryId(firstCategory.id);
+      if (!initializedRef.current) {
+        if (a[0]) setAccountId(a[0].id);
+        const firstCategory = c.find((item) => item.type === type);
+        if (firstCategory) setCategoryId(firstCategory.id);
+        initializedRef.current = true;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [type]);
+
+  async function reloadTransactions() {
+    try {
+      const t = await listTransactions();
+      setTransactions(t.items || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败');
     }
@@ -44,24 +64,53 @@ export default function TransactionsFeaturePage() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   useEffect(() => {
-    const firstCategory = filteredCategories[0];
-    if (firstCategory) setCategoryId(firstCategory.id);
-  }, [type]);
+    if (!initializedRef.current) return;
+    const selected = categories.find((item) => item.id === categoryId);
+    if (selected?.type === type) return;
+    const firstCategory = categories.find((item) => item.type === type);
+    if (firstCategory) {
+      setCategoryId(firstCategory.id);
+    } else {
+      setCategoryId(0);
+    }
+  }, [categories, categoryId, type]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (saving) return;
     setError('');
     setNotice('');
+
+    const nextAmount = Number(amount);
+    if (!Number.isFinite(nextAmount) || nextAmount <= 0) {
+      setError('请输入大于 0 的金额');
+      amountInputRef.current?.focus();
+      return;
+    }
+    if (!accountId) {
+      setError('请先选择或创建账户');
+      return;
+    }
+    if (!categoryId) {
+      setError('请先选择或创建分类');
+      return;
+    }
+    if (!note.trim()) {
+      setError('请输入备注');
+      return;
+    }
+
     try {
+      setSaving(true);
       await createTransaction({
         type,
-        amount: Number(amount),
+        amount: nextAmount,
         categoryId,
         accountId,
-        note,
+        note: note.trim(),
         tags: tags
           .split(',')
           .map((v) => v.trim())
@@ -73,16 +122,25 @@ export default function TransactionsFeaturePage() {
       setAmount('');
       setNote('');
       setTags('');
-      await loadData();
+      await reloadTransactions();
+      requestAnimationFrame(() => amountInputRef.current?.focus());
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setSaving(false);
     }
   }
 
   async function runAIParse() {
+    if (parsing) return;
     setError('');
     setNotice('');
+    if (!aiText.trim()) {
+      setError('请输入要解析的记账文本');
+      return;
+    }
     try {
+      setParsing(true);
       const resp = await parseAIText(aiText);
       const result = resp.result;
       setType(result.type);
@@ -98,6 +156,8 @@ export default function TransactionsFeaturePage() {
       setNotice('AI 已解析，请确认后点击“保存账单”');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'AI 解析失败');
+    } finally {
+      setParsing(false);
     }
   }
 
@@ -108,9 +168,11 @@ export default function TransactionsFeaturePage() {
     >
       {error ? <div className="error">{error}</div> : null}
       {notice ? <div className="success">{notice}</div> : null}
+      {loading ? <div className="notice">正在加载账户、分类和最近账单...</div> : null}
 
       <div className="grid two">
         <TransactionForm
+          ref={amountInputRef}
           accounts={accounts}
           filteredCategories={filteredCategories}
           type={type}
@@ -128,8 +190,9 @@ export default function TransactionsFeaturePage() {
           onTagsChange={setTags}
           onOccurredAtChange={setOccurredAt}
           onSubmit={submit}
+          disabled={loading || saving}
         />
-        <AIParsePanel aiText={aiText} amount={amount} onAITextChange={setAiText} onParse={runAIParse} />
+        <AIParsePanel aiText={aiText} amount={amount} disabled={loading || parsing} onAITextChange={setAiText} onParse={runAIParse} />
       </div>
 
       <TransactionList transactions={transactions} />

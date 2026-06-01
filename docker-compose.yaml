@@ -55,7 +55,10 @@ services:
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: haohao_redis_password
       REDIS_DB: 0
-      JWT_SECRET: haohao_change_me_jwt_secret
+      JWT_SECRET: haohao_change_me_jwt_secret_at_least_32_chars
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: haohao_change_me_admin_password
+      ADMIN_NAME: 好好用户
     ports:
       - "8080:8080"
     depends_on:

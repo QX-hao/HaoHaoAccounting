@@ -16,7 +16,7 @@ import (
 )
 
 const userContextKey = "user_id"
-const defaultJWTSecret = "haohao-dev-jwt-secret"
+const minJWTSecretLength = 32
 
 type jwtClaims struct {
 	Subject   string `json:"sub"`
@@ -24,29 +24,41 @@ type jwtClaims struct {
 	ExpiresAt int64  `json:"exp"`
 }
 
-func BuildToken(userID uint) string {
+func BuildToken(userID uint) (string, error) {
+	return BuildTokenWithTTL(userID, 7*24*time.Hour)
+}
+
+func BuildTokenWithTTL(userID uint, ttl time.Duration) (string, error) {
+	secret, err := JWTSecret()
+	if err != nil {
+		return "", err
+	}
 	now := time.Now()
 	header := map[string]string{"alg": "HS256", "typ": "JWT"}
 	claims := jwtClaims{
 		Subject:   strconv.FormatUint(uint64(userID), 10),
 		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(7 * 24 * time.Hour).Unix(),
+		ExpiresAt: now.Add(ttl).Unix(),
 	}
 
 	headerJSON, _ := json.Marshal(header)
 	claimsJSON, _ := json.Marshal(claims)
 	unsigned := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
-	return unsigned + "." + signJWT(unsigned)
+	return unsigned + "." + signJWT(unsigned, secret), nil
 }
 
 func ParseToken(token string) (uint, error) {
+	secret, err := JWTSecret()
+	if err != nil {
+		return 0, err
+	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return 0, errors.New("invalid token")
 	}
 
 	unsigned := parts[0] + "." + parts[1]
-	if !hmac.Equal([]byte(parts[2]), []byte(signJWT(unsigned))) {
+	if !hmac.Equal([]byte(parts[2]), []byte(signJWT(unsigned, secret))) {
 		return 0, errors.New("invalid token signature")
 	}
 
@@ -70,17 +82,20 @@ func ParseToken(token string) (uint, error) {
 	return uint(id), nil
 }
 
-func signJWT(unsigned string) string {
-	mac := hmac.New(sha256.New, []byte(jwtSecret()))
+func signJWT(unsigned, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(unsigned))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func jwtSecret() string {
+func JWTSecret() (string, error) {
 	if value := strings.TrimSpace(os.Getenv("JWT_SECRET")); value != "" {
-		return value
+		if len(value) < minJWTSecretLength {
+			return "", errors.New("JWT_SECRET must be at least 32 characters")
+		}
+		return value, nil
 	}
-	return defaultJWTSecret
+	return "", errors.New("JWT_SECRET is required")
 }
 
 func RequireAuth() gin.HandlerFunc {
