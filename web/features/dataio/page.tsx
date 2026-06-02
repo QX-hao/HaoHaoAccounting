@@ -2,13 +2,15 @@
 
 import { FormEvent, useState } from 'react';
 import { PageFrame } from '@/components/PageFrame';
-import { ExportFormat, exportTransactions, importTransactions } from './api';
+import type { ImportPreview } from '@/lib/types';
+import { ExportFormat, exportTransactions, importTransactions, previewImport } from './api';
 import { ExportPanel } from './components/ExportPanel';
 import { ImportPanel } from './components/ImportPanel';
 
 export default function DataIOFeaturePage() {
   const [format, setFormat] = useState<ExportFormat>('csv');
   const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -62,12 +64,35 @@ export default function DataIOFeaturePage() {
       const formData = new FormData();
       formData.append('file', file);
       const resp = await importTransactions(formData);
-      setNotice(`导入完成：成功 ${resp.success} 条，失败 ${resp.failed} 条`);
+      setNotice(`导入完成：成功 ${resp.success} 条，失败 ${resp.failed} 条，总计 ${resp.total} 条`);
       if (resp.errors.length > 0) {
         setError(resp.errors.slice(0, 5).join('\n'));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '导入失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runPreview() {
+    setError('');
+    setNotice('');
+    setPreview(null);
+    if (!file) {
+      setError('请选择文件');
+      return;
+    }
+
+    try {
+      setBusy(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const resp = await previewImport(formData);
+      setPreview(resp);
+      setNotice(`预览完成：有效 ${resp.validRows} 条，失败 ${resp.failedRows} 条`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '预览失败');
     } finally {
       setBusy(false);
     }
@@ -84,7 +109,18 @@ export default function DataIOFeaturePage() {
 
       <div className="grid two">
         <ExportPanel format={format} disabled={busy} onFormatChange={setFormat} onExport={runExport} />
-        <ImportPanel file={file} disabled={busy} onDownloadTemplate={downloadTemplate} onFileChange={setFile} onImport={runImport} />
+        <ImportPanel
+          file={file}
+          disabled={busy}
+          preview={preview}
+          onDownloadTemplate={downloadTemplate}
+          onFileChange={(nextFile) => {
+            setFile(nextFile);
+            setPreview(null);
+          }}
+          onPreview={runPreview}
+          onImport={runImport}
+        />
       </div>
     </PageFrame>
   );

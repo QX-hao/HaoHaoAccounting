@@ -19,7 +19,10 @@ func NewHandler(service *Service) *Handler {
 }
 
 func (h *Handler) Register(group *gin.RouterGroup) {
+	group.POST("/io/import/preview", h.previewImport)
+	group.POST("/io/import/text/preview", h.previewImportText)
 	group.POST("/io/import", h.importData)
+	group.POST("/io/import/text", h.importText)
 	group.GET("/io/export", h.exportData)
 }
 
@@ -52,6 +55,62 @@ func (h *Handler) importData(c *gin.Context) {
 	}
 
 	result, err := h.service.Import(uid, file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) previewImport(c *gin.Context) {
+	uid := middleware.UserIDFromContext(c)
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		return
+	}
+
+	result, err := h.service.Preview(uid, file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) importText(c *gin.Context) {
+	uid := middleware.UserIDFromContext(c)
+	var req ImportTextRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "content is required"})
+		return
+	}
+
+	result, err := h.service.ImportText(uid, req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) previewImportText(c *gin.Context) {
+	uid := middleware.UserIDFromContext(c)
+	var req ImportTextRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "content is required"})
+		return
+	}
+
+	result, err := h.service.PreviewText(uid, req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

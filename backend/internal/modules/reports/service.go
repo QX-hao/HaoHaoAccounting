@@ -11,6 +11,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/money"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type Service struct {
@@ -34,96 +35,36 @@ func (s *Service) Summary(userID uint, filter SummaryFilter) (gin.H, error) {
 		}
 	}
 
-	var rows []models.Transaction
-	query := s.store.DB.Where("user_id = ? AND occurred_at >= ? AND occurred_at <= ?", userID, filter.Start, filter.End)
-	if filter.CategoryID > 0 {
-		query = query.Where("category_id = ?", filter.CategoryID)
+	incomeCents, expenseCents, err := s.sumIncomeExpense(userID, filter)
+	if err != nil {
+		return nil, err
 	}
-	if filter.AccountID > 0 {
-		query = query.Where("account_id = ?", filter.AccountID)
+	categoryList, err := s.categoryBreakdown(userID, filter)
+	if err != nil {
+		return nil, err
 	}
-	if err := query.Preload("Category").Preload("Account").Order("occurred_at asc").Find(&rows).Error; err != nil {
+	accountList, err := s.accountBreakdown(userID, filter)
+	if err != nil {
+		return nil, err
+	}
+	monthlyTrend, err := s.monthlyTrend(userID, filter)
+	if err != nil {
 		return nil, err
 	}
 
 	summary := gin.H{"start": filter.Start, "end": filter.End}
-	incomeCents := int64(0)
-	expenseCents := int64(0)
-	categoryMap := map[uint]*CategoryStat{}
-	accountMap := map[uint]*AccountStat{}
-	monthly := map[string]gin.H{}
-
-	for _, row := range rows {
-		if row.Type == "income" {
-			incomeCents += row.AmountCents
-		} else {
-			expenseCents += row.AmountCents
-		}
-
-		if row.Type == "expense" {
-			categoryStat, ok := categoryMap[row.CategoryID]
-			if !ok {
-				categoryStat = &CategoryStat{CategoryID: row.CategoryID, Category: row.Category.Name}
-				categoryMap[row.CategoryID] = categoryStat
-			}
-			categoryStat.amountCents += row.AmountCents
-			categoryStat.Amount = money.FromCents(categoryStat.amountCents)
-
-			accountStat, ok := accountMap[row.AccountID]
-			if !ok {
-				accountStat = &AccountStat{AccountID: row.AccountID, Account: row.Account.Name}
-				accountMap[row.AccountID] = accountStat
-			}
-			accountStat.amountCents += row.AmountCents
-			accountStat.Amount = money.FromCents(accountStat.amountCents)
-		}
-
-		monthKey := row.OccurredAt.Format("2006-01")
-		if _, ok := monthly[monthKey]; !ok {
-			monthly[monthKey] = gin.H{"month": monthKey, "incomeCents": int64(0), "expenseCents": int64(0)}
-		}
-		if row.Type == "income" {
-			monthly[monthKey]["incomeCents"] = monthly[monthKey]["incomeCents"].(int64) + row.AmountCents
-		} else {
-			monthly[monthKey]["expenseCents"] = monthly[monthKey]["expenseCents"].(int64) + row.AmountCents
-		}
-	}
-
-	categoryList := make([]CategoryStat, 0, len(categoryMap))
-	for _, v := range categoryMap {
-		categoryList = append(categoryList, *v)
-	}
-	sort.Slice(categoryList, func(i, j int) bool { return categoryList[i].Amount > categoryList[j].Amount })
-
-	accountList := make([]AccountStat, 0, len(accountMap))
-	for _, v := range accountMap {
-		accountList = append(accountList, *v)
-	}
-	sort.Slice(accountList, func(i, j int) bool { return accountList[i].Amount > accountList[j].Amount })
-
-	monthKeys := make([]string, 0, len(monthly))
-	for k := range monthly {
-		monthKeys = append(monthKeys, k)
-	}
-	sort.Strings(monthKeys)
-	monthlyTrend := make([]gin.H, 0, len(monthKeys))
-	for _, k := range monthKeys {
-		item := monthly[k]
-		monthlyTrend = append(monthlyTrend, gin.H{
-			"month":   item["month"],
-			"income":  money.FromCents(item["incomeCents"].(int64)),
-			"expense": money.FromCents(item["expenseCents"].(int64)),
-		})
-	}
 
 	prevStart := filter.Start.Add(-filter.End.Sub(filter.Start) - time.Second)
 	prevEnd := filter.Start.Add(-time.Second)
-	prevIncomeCents, prevExpenseCents := s.sumIncomeExpense(userID, SummaryFilter{
+	prevIncomeCents, prevExpenseCents, err := s.sumIncomeExpense(userID, SummaryFilter{
 		Start:      prevStart,
 		End:        prevEnd,
 		CategoryID: filter.CategoryID,
 		AccountID:  filter.AccountID,
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	summary["income"] = money.FromCents(incomeCents)
 	summary["expense"] = money.FromCents(expenseCents)
@@ -145,18 +86,31 @@ func (s *Service) Summary(userID uint, filter SummaryFilter) (gin.H, error) {
 	return summary, nil
 }
 
-func (s *Service) sumIncomeExpense(userID uint, filter SummaryFilter) (int64, int64) {
-	var rows []models.Transaction
-	query := s.store.DB.Where("user_id = ? AND occurred_at >= ? AND occurred_at <= ?", userID, filter.Start, filter.End)
+func (s *Service) reportQuery(userID uint, filter SummaryFilter) *gorm.DB {
+	query := s.store.DB.Model(&models.Transaction{}).
+		Where("transactions.user_id = ? AND transactions.occurred_at >= ? AND transactions.occurred_at <= ?", userID, filter.Start, filter.End)
 	if filter.CategoryID > 0 {
-		query = query.Where("category_id = ?", filter.CategoryID)
+		query = query.Where("transactions.category_id = ?", filter.CategoryID)
 	}
 	if filter.AccountID > 0 {
-		query = query.Where("account_id = ?", filter.AccountID)
+		query = query.Where("transactions.account_id = ?", filter.AccountID)
 	}
-	if err := query.Select("type, amount_cents").Find(&rows).Error; err != nil {
-		return 0, 0
+	return query
+}
+
+func (s *Service) sumIncomeExpense(userID uint, filter SummaryFilter) (int64, int64, error) {
+	var rows []struct {
+		Type        string
+		AmountCents int64
 	}
+
+	if err := s.reportQuery(userID, filter).
+		Select("type, COALESCE(SUM(amount_cents), 0) AS amount_cents").
+		Group("type").
+		Scan(&rows).Error; err != nil {
+		return 0, 0, err
+	}
+
 	income, expense := int64(0), int64(0)
 	for _, row := range rows {
 		if row.Type == "income" {
@@ -165,7 +119,120 @@ func (s *Service) sumIncomeExpense(userID uint, filter SummaryFilter) (int64, in
 			expense += row.AmountCents
 		}
 	}
-	return income, expense
+	return income, expense, nil
+}
+
+func (s *Service) categoryBreakdown(userID uint, filter SummaryFilter) ([]CategoryStat, error) {
+	var rows []struct {
+		CategoryID  uint
+		Category    string
+		AmountCents int64
+	}
+	if err := s.reportQuery(userID, filter).
+		Joins("JOIN categories ON categories.id = transactions.category_id").
+		Where("transactions.type = ?", "expense").
+		Select("transactions.category_id AS category_id, categories.name AS category, COALESCE(SUM(transactions.amount_cents), 0) AS amount_cents").
+		Group("transactions.category_id, categories.name").
+		Order("amount_cents DESC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]CategoryStat, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, CategoryStat{
+			CategoryID:  row.CategoryID,
+			Category:    row.Category,
+			Amount:      money.FromCents(row.AmountCents),
+			amountCents: row.AmountCents,
+		})
+	}
+	return result, nil
+}
+
+func (s *Service) accountBreakdown(userID uint, filter SummaryFilter) ([]AccountStat, error) {
+	var rows []struct {
+		AccountID   uint
+		Account     string
+		AmountCents int64
+	}
+	if err := s.reportQuery(userID, filter).
+		Joins("JOIN accounts ON accounts.id = transactions.account_id").
+		Where("transactions.type = ?", "expense").
+		Select("transactions.account_id AS account_id, accounts.name AS account, COALESCE(SUM(transactions.amount_cents), 0) AS amount_cents").
+		Group("transactions.account_id, accounts.name").
+		Order("amount_cents DESC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]AccountStat, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, AccountStat{
+			AccountID:   row.AccountID,
+			Account:     row.Account,
+			Amount:      money.FromCents(row.AmountCents),
+			amountCents: row.AmountCents,
+		})
+	}
+	return result, nil
+}
+
+func (s *Service) monthlyTrend(userID uint, filter SummaryFilter) ([]gin.H, error) {
+	monthExpr := s.monthExpression()
+	var rows []struct {
+		Month       string
+		Type        string
+		AmountCents int64
+	}
+	if err := s.reportQuery(userID, filter).
+		Select(monthExpr + " AS month, type, COALESCE(SUM(amount_cents), 0) AS amount_cents").
+		Group(monthExpr).
+		Group("type").
+		Order("month ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	monthly := map[string]gin.H{}
+	for _, row := range rows {
+		if _, ok := monthly[row.Month]; !ok {
+			monthly[row.Month] = gin.H{"month": row.Month, "incomeCents": int64(0), "expenseCents": int64(0)}
+		}
+		if row.Type == "income" {
+			monthly[row.Month]["incomeCents"] = row.AmountCents
+		} else {
+			monthly[row.Month]["expenseCents"] = row.AmountCents
+		}
+	}
+
+	monthKeys := make([]string, 0, len(monthly))
+	for key := range monthly {
+		monthKeys = append(monthKeys, key)
+	}
+	sort.Strings(monthKeys)
+
+	result := make([]gin.H, 0, len(monthKeys))
+	for _, key := range monthKeys {
+		item := monthly[key]
+		result = append(result, gin.H{
+			"month":   item["month"],
+			"income":  money.FromCents(item["incomeCents"].(int64)),
+			"expense": money.FromCents(item["expenseCents"].(int64)),
+		})
+	}
+	return result, nil
+}
+
+func (s *Service) monthExpression() string {
+	switch s.store.DB.Dialector.Name() {
+	case "postgres":
+		return "to_char(occurred_at, 'YYYY-MM')"
+	case "mysql":
+		return "DATE_FORMAT(occurred_at, '%Y-%m')"
+	default:
+		return "strftime('%Y-%m', occurred_at)"
+	}
 }
 
 func (f SummaryFilter) CacheSuffix() string {

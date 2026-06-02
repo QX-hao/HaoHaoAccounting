@@ -9,7 +9,14 @@ const accountTypeLabel: Record<string, string> = {
   custom: '自定义',
 };
 
-export function AccountGrid({ accounts }: { accounts: Account[] }) {
+type Props = {
+  accounts: Account[];
+  onEdit: (account: Account) => void;
+  onDelete: (account: Account) => void;
+  disabled?: boolean;
+};
+
+export function AccountGrid({ accounts, onEdit, onDelete, disabled = false }: Props) {
   return (
     <section className="grid three">
       {accounts.length === 0 ? <div className="empty-state">暂无账户。</div> : null}
@@ -21,6 +28,14 @@ export function AccountGrid({ accounts }: { accounts: Account[] }) {
           <span className="label">{accountTypeLabel[item.type] || item.type}</span>
           <span className="value">{formatMoney(item.balance)}</span>
           <span className="hint">{item.name}</span>
+          <div className="row-actions">
+            <button className="ghost" type="button" disabled={disabled} onClick={() => onEdit(item)}>
+              编辑
+            </button>
+            <button className="ghost danger" type="button" disabled={disabled} onClick={() => onDelete(item)}>
+              删除
+            </button>
+          </div>
         </div>
       ))}
     </section>

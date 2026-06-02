@@ -6,7 +6,9 @@ import type { Account, Category, Transaction, TransactionType } from '@/lib/type
 import { AIParsePanel } from './components/AIParsePanel';
 import { TransactionForm } from './components/TransactionForm';
 import { TransactionList } from './components/TransactionList';
-import { createTransaction, listAccounts, listCategories, listTransactions, parseAIText } from './api';
+import { createTransaction, deleteTransaction, listAccounts, listCategories, listTransactions, parseAIText, updateTransaction, type TransactionFilters } from './api';
+
+const defaultPageSize = 20;
 
 export default function TransactionsFeaturePage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -17,8 +19,13 @@ export default function TransactionsFeaturePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [editing, setEditing] = useState<Transaction | null>(null);
+  const [total, setTotal] = useState(0);
   const amountInputRef = useRef<HTMLInputElement>(null);
   const initializedRef = useRef(false);
+
+  const [filters, setFilters] = useState<TransactionFilters>({ page: 1, pageSize: defaultPageSize, type: '' });
+  const [draftFilters, setDraftFilters] = useState({ start: '', end: '', type: '', categoryId: 0, accountId: 0, q: '' });
 
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState('');
@@ -35,10 +42,11 @@ export default function TransactionsFeaturePage() {
     setError('');
     try {
       setLoading(true);
-      const [a, c, t] = await Promise.all([listAccounts(), listCategories(), listTransactions()]);
+      const [a, c, t] = await Promise.all([listAccounts(), listCategories(), listTransactions(filters)]);
       setAccounts(a);
       setCategories(c);
       setTransactions(t.items || []);
+      setTotal(t.pagination?.total ?? t.items?.length ?? 0);
 
       if (!initializedRef.current) {
         if (a[0]) setAccountId(a[0].id);
@@ -51,12 +59,13 @@ export default function TransactionsFeaturePage() {
     } finally {
       setLoading(false);
     }
-  }, [type]);
+  }, [filters, type]);
 
   async function reloadTransactions() {
     try {
-      const t = await listTransactions();
+      const t = await listTransactions(filters);
       setTransactions(t.items || []);
+      setTotal(t.pagination?.total ?? t.items?.length ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败');
     }
@@ -105,7 +114,7 @@ export default function TransactionsFeaturePage() {
 
     try {
       setSaving(true);
-      await createTransaction({
+      const payload = {
         type,
         amount: nextAmount,
         categoryId,
@@ -117,11 +126,15 @@ export default function TransactionsFeaturePage() {
           .filter(Boolean),
         occurredAt: new Date(occurredAt).toISOString(),
         source: 'manual',
-      });
-      setNotice('账单已保存');
-      setAmount('');
-      setNote('');
-      setTags('');
+      };
+      if (editing) {
+        await updateTransaction(editing.id, payload);
+        setNotice('账单已更新');
+      } else {
+        await createTransaction(payload);
+        setNotice('账单已保存');
+      }
+      resetForm();
       await reloadTransactions();
       requestAnimationFrame(() => amountInputRef.current?.focus());
     } catch (err) {
@@ -129,6 +142,69 @@ export default function TransactionsFeaturePage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function applyFilters(e: FormEvent) {
+    e.preventDefault();
+    setFilters({
+      page: 1,
+      pageSize: filters.pageSize,
+      start: draftFilters.start,
+      end: draftFilters.end,
+      type: draftFilters.type as '' | TransactionType,
+      categoryId: draftFilters.categoryId,
+      accountId: draftFilters.accountId,
+      q: draftFilters.q,
+    });
+  }
+
+  function resetFilters() {
+    setDraftFilters({ start: '', end: '', type: '', categoryId: 0, accountId: 0, q: '' });
+    setFilters({ page: 1, pageSize: defaultPageSize, type: '' });
+  }
+
+  function changePage(page: number) {
+    setFilters((current) => ({ ...current, page }));
+  }
+
+  function startEdit(row: Transaction) {
+    setEditing(row);
+    setType(row.type);
+    setAmount(String(row.amount));
+    setCategoryId(row.categoryId || row.category?.id || 0);
+    setAccountId(row.accountId || row.account?.id || 0);
+    setNote(row.note || '');
+    setTags(row.tags || '');
+    setOccurredAt(toDateTimeLocal(row.occurredAt));
+    setError('');
+    setNotice('');
+    requestAnimationFrame(() => amountInputRef.current?.focus());
+  }
+
+  async function remove(row: Transaction) {
+    const ok = window.confirm(`确定删除账单「${row.note || row.category?.name || row.id}」吗？删除后会同步回滚账户余额。`);
+    if (!ok) return;
+    setError('');
+    setNotice('');
+    try {
+      setSaving(true);
+      await deleteTransaction(row.id);
+      if (editing?.id === row.id) resetForm();
+      setNotice('账单已删除');
+      await reloadTransactions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function resetForm() {
+    setEditing(null);
+    setAmount('');
+    setNote('');
+    setTags('');
+    setOccurredAt(new Date().toISOString().slice(0, 16));
   }
 
   async function runAIParse() {
@@ -190,12 +266,80 @@ export default function TransactionsFeaturePage() {
           onTagsChange={setTags}
           onOccurredAtChange={setOccurredAt}
           onSubmit={submit}
+          onCancelEdit={resetForm}
           disabled={loading || saving}
+          editing={Boolean(editing)}
         />
         <AIParsePanel aiText={aiText} amount={amount} disabled={loading || parsing} onAITextChange={setAiText} onParse={runAIParse} />
       </div>
 
-      <TransactionList transactions={transactions} />
+      <form className="panel grid" onSubmit={applyFilters}>
+        <div className="hero-topline">
+          <div>
+            <span className="eyebrow">Filter</span>
+            <h3>筛选账单</h3>
+          </div>
+          <button className="ghost" type="button" onClick={resetFilters}>
+            重置
+          </button>
+        </div>
+        <div className="form-grid">
+          <input type="date" value={draftFilters.start} onChange={(e) => setDraftFilters((v) => ({ ...v, start: e.target.value }))} />
+          <input type="date" value={draftFilters.end} onChange={(e) => setDraftFilters((v) => ({ ...v, end: e.target.value }))} />
+          <select value={draftFilters.type} onChange={(e) => setDraftFilters((v) => ({ ...v, type: e.target.value }))}>
+            <option value="">全部类型</option>
+            <option value="expense">支出</option>
+            <option value="income">收入</option>
+          </select>
+          <select value={draftFilters.categoryId} onChange={(e) => setDraftFilters((v) => ({ ...v, categoryId: Number(e.target.value) }))}>
+            <option value={0}>全部分类</option>
+            {categories.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <select value={draftFilters.accountId} onChange={(e) => setDraftFilters((v) => ({ ...v, accountId: Number(e.target.value) }))}>
+            <option value={0}>全部账户</option>
+            {accounts.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <input value={draftFilters.q} onChange={(e) => setDraftFilters((v) => ({ ...v, q: e.target.value }))} placeholder="搜索备注或标签" />
+        </div>
+        <div className="toolbar">
+          <button className="secondary" type="submit" disabled={loading}>
+            应用筛选
+          </button>
+          <select value={filters.pageSize} onChange={(e) => setFilters((current) => ({ ...current, page: 1, pageSize: Number(e.target.value) }))}>
+            <option value={10}>每页 10 条</option>
+            <option value={20}>每页 20 条</option>
+            <option value={50}>每页 50 条</option>
+          </select>
+        </div>
+      </form>
+
+      <TransactionList
+        transactions={transactions}
+        total={total}
+        page={filters.page}
+        pageSize={filters.pageSize}
+        disabled={saving || loading}
+        onEdit={startEdit}
+        onDelete={remove}
+        onPageChange={changePage}
+      />
     </PageFrame>
   );
+}
+
+function toDateTimeLocal(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString().slice(0, 16);
+  }
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }

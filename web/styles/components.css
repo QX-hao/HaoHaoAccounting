@@ -247,6 +247,10 @@ button.ghost {
   box-shadow: inset 0 0 0 1px var(--border);
 }
 
+.transaction-row.actionable {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .row-main {
   min-width: 0;
   display: flex;
@@ -282,6 +286,34 @@ button.ghost {
 .amount {
   font-weight: 850;
   white-space: nowrap;
+}
+
+.row-actions,
+.pagination {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.row-actions button {
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.ghost.danger,
+button.ghost.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.pagination {
+  margin-top: 14px;
+}
+
+.table-wrap {
+  overflow-x: auto;
 }
 
 .amount.income {

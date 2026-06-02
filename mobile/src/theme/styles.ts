@@ -83,6 +83,10 @@ export const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: '#fff',
   },
+  inputHalf: {
+    minWidth: 140,
+    flex: 1,
+  },
   primaryBtn: {
     borderRadius: 10,
     backgroundColor: '#2563eb',
@@ -99,8 +103,33 @@ export const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
   },
+  primaryBtnCompact: {
+    borderRadius: 10,
+    backgroundColor: '#2563eb',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  secondaryBtnCompact: {
+    borderRadius: 10,
+    backgroundColor: '#eef2ff',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  dangerBtnCompact: {
+    borderRadius: 10,
+    backgroundColor: '#fee2e2',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
   secondaryBtnText: {
     color: '#3730a3',
+    fontWeight: '600',
+  },
+  dangerBtnText: {
+    color: '#991b1b',
     fontWeight: '600',
   },
   listItem: {
@@ -114,14 +143,17 @@ export const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    flexDirection: 'row',
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
     backgroundColor: '#fff',
     paddingVertical: 8,
   },
+  tabBarContent: {
+    flexDirection: 'row',
+    paddingHorizontal: 8,
+  },
   tabBtn: {
-    flex: 1,
+    minWidth: 68,
     alignItems: 'center',
     paddingVertical: 6,
   },

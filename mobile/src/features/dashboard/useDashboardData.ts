@@ -7,6 +7,7 @@ export function useDashboardData() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [transactionTotal, setTransactionTotal] = useState(0);
   const [error, setError] = useState('');
 
   async function loadAll() {
@@ -15,6 +16,7 @@ export function useDashboardData() {
       const data = await loadDashboardData();
       setSummary(data.summary);
       setTransactions(data.transactions);
+      setTransactionTotal(data.transactionTotal || data.transactions.length);
       setAccounts(data.accounts);
       setCategories(data.categories);
       return data;
@@ -27,6 +29,7 @@ export function useDashboardData() {
   function clear() {
     setSummary(null);
     setTransactions([]);
+    setTransactionTotal(0);
     setAccounts([]);
     setCategories([]);
   }
@@ -34,6 +37,7 @@ export function useDashboardData() {
   return {
     summary,
     transactions,
+    transactionTotal,
     accounts,
     categories,
     error,

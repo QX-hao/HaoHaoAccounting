@@ -73,10 +73,68 @@ func (s *Service) List(userID uint, filter ListFilter) ([]models.Transaction, in
 }
 
 func (s *Service) Create(userID uint, req Request) (models.Transaction, error) {
+	var tx models.Transaction
+	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+		next, err := s.createWithDB(dbtx, userID, req)
+		if err != nil {
+			return err
+		}
+		tx = next
+		return nil
+	}); err != nil {
+		return models.Transaction{}, err
+	}
+
+	s.store.DB.Preload("Category").Preload("Account").First(&tx, tx.ID)
+	s.invalidator.InvalidateUser(userID)
+	return tx, nil
+}
+
+func (s *Service) CreateMany(userID uint, requests []Request) ([]models.Transaction, error) {
+	if len(requests) == 0 {
+		return nil, nil
+	}
+
+	created := make([]models.Transaction, 0, len(requests))
+	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+		next, err := s.CreateManyWithDB(dbtx, userID, requests)
+		if err != nil {
+			return err
+		}
+		created = next
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	ids := make([]uint, 0, len(created))
+	for _, tx := range created {
+		ids = append(ids, tx.ID)
+	}
+	if len(ids) > 0 {
+		s.store.DB.Preload("Category").Preload("Account").Find(&created, ids)
+	}
+	s.invalidator.InvalidateUser(userID)
+	return created, nil
+}
+
+func (s *Service) CreateManyWithDB(dbtx *gorm.DB, userID uint, requests []Request) ([]models.Transaction, error) {
+	created := make([]models.Transaction, 0, len(requests))
+	for _, req := range requests {
+		tx, err := s.createWithDB(dbtx, userID, req)
+		if err != nil {
+			return nil, err
+		}
+		created = append(created, tx)
+	}
+	return created, nil
+}
+
+func (s *Service) createWithDB(dbtx *gorm.DB, userID uint, req Request) (models.Transaction, error) {
 	if err := validateRequest(req); err != nil {
 		return models.Transaction{}, err
 	}
-	if err := s.ensureCategoryAndAccount(userID, req.Type, req.CategoryID, req.AccountID); err != nil {
+	if err := s.ensureCategoryAndAccountWithDB(dbtx, userID, req.Type, req.CategoryID, req.AccountID); err != nil {
 		return models.Transaction{}, err
 	}
 	if req.OccurredAt.IsZero() {
@@ -95,19 +153,12 @@ func (s *Service) Create(userID uint, req Request) (models.Transaction, error) {
 		Source:      stringutil.FallbackName(req.Source, "manual"),
 	}
 
-	// Transaction rows and account balance movement are one business invariant.
-	// Keeping them in one DB transaction prevents ledger/balance drift.
-	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
-		if err := dbtx.Create(&tx).Error; err != nil {
-			return err
-		}
-		return applyAccountDelta(dbtx, tx.AccountID, tx.Type, tx.AmountCents)
-	}); err != nil {
+	if err := dbtx.Create(&tx).Error; err != nil {
 		return models.Transaction{}, err
 	}
-
-	s.store.DB.Preload("Category").Preload("Account").First(&tx, tx.ID)
-	s.invalidator.InvalidateUser(userID)
+	if err := applyAccountDelta(dbtx, tx.AccountID, tx.Type, tx.AmountCents); err != nil {
+		return models.Transaction{}, err
+	}
 	return tx, nil
 }
 
@@ -175,8 +226,12 @@ func (s *Service) Delete(userID, id uint) error {
 }
 
 func (s *Service) ensureCategoryAndAccount(userID uint, txType string, categoryID, accountID uint) error {
+	return s.ensureCategoryAndAccountWithDB(s.store.DB, userID, txType, categoryID, accountID)
+}
+
+func (s *Service) ensureCategoryAndAccountWithDB(db *gorm.DB, userID uint, txType string, categoryID, accountID uint) error {
 	var category models.Category
-	if err := s.store.DB.Where("id = ?", categoryID).First(&category).Error; err != nil {
+	if err := db.Where("id = ?", categoryID).First(&category).Error; err != nil {
 		return errors.New("category not found")
 	}
 	if category.Type != txType {
@@ -189,7 +244,7 @@ func (s *Service) ensureCategoryAndAccount(userID uint, txType string, categoryI
 	}
 
 	var account models.Account
-	if err := s.store.DB.Where("id = ? AND user_id = ?", accountID, userID).First(&account).Error; err != nil {
+	if err := db.Where("id = ? AND user_id = ?", accountID, userID).First(&account).Error; err != nil {
 		return errors.New("account not found")
 	}
 	return nil

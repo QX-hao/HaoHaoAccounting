@@ -22,7 +22,9 @@ type Props = {
   onTagsChange: (value: string) => void;
   onOccurredAtChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
+  onCancelEdit?: () => void;
   disabled: boolean;
+  editing?: boolean;
 };
 
 export const TransactionForm = forwardRef<HTMLInputElement, Props>(function TransactionForm({
@@ -43,7 +45,9 @@ export const TransactionForm = forwardRef<HTMLInputElement, Props>(function Tran
   onTagsChange,
   onOccurredAtChange,
   onSubmit,
+  onCancelEdit,
   disabled,
+  editing = false,
 }, amountInputRef) {
   const canSubmit = !disabled && accounts.length > 0 && filteredCategories.length > 0;
 
@@ -52,7 +56,7 @@ export const TransactionForm = forwardRef<HTMLInputElement, Props>(function Tran
       <div className="hero-topline">
         <div>
           <span className="eyebrow">Manual</span>
-          <h3>手动记账</h3>
+          <h3>{editing ? '编辑账单' : '手动记账'}</h3>
         </div>
         <span className={`pill ${type}`}>{transactionTypeLabel(type)}</span>
       </div>
@@ -117,9 +121,16 @@ export const TransactionForm = forwardRef<HTMLInputElement, Props>(function Tran
         <input className="field-full" value={note} onChange={(e) => onNoteChange(e.target.value)} placeholder="备注" disabled={disabled} required />
         <input className="field-full" value={tags} onChange={(e) => onTagsChange(e.target.value)} placeholder="标签，用逗号分隔" disabled={disabled} />
       </div>
-      <button className="primary" disabled={!canSubmit} type="submit">
-        {disabled ? '保存中...' : '保存账单'}
-      </button>
+      <div className="toolbar">
+        <button className="primary" disabled={!canSubmit} type="submit">
+          {disabled ? '保存中...' : editing ? '保存修改' : '保存账单'}
+        </button>
+        {editing && onCancelEdit ? (
+          <button className="ghost" disabled={disabled} type="button" onClick={onCancelEdit}>
+            取消编辑
+          </button>
+        ) : null}
+      </div>
     </form>
   );
 });

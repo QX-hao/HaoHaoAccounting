@@ -147,13 +147,17 @@ func (s *Store) EnsureDefaultDataForUser(userID uint) error {
 }
 
 func (s *Store) FindCategoryByName(userID uint, txType, name string) (*models.Category, error) {
+	return s.FindCategoryByNameWithDB(s.DB, userID, txType, name)
+}
+
+func (s *Store) FindCategoryByNameWithDB(db *gorm.DB, userID uint, txType, name string) (*models.Category, error) {
 	cleanName := strings.TrimSpace(name)
 	if cleanName == "" {
 		return nil, errors.New("empty category name")
 	}
 
 	var category models.Category
-	err := s.DB.Where("name = ? AND type = ? AND user_id = ?", cleanName, txType, userID).First(&category).Error
+	err := db.Where("name = ? AND type = ? AND user_id = ?", cleanName, txType, userID).First(&category).Error
 	if err == nil {
 		return &category, nil
 	}
@@ -161,7 +165,7 @@ func (s *Store) FindCategoryByName(userID uint, txType, name string) (*models.Ca
 		return nil, err
 	}
 
-	err = s.DB.Where("name = ? AND type = ? AND is_system = ?", cleanName, txType, true).First(&category).Error
+	err = db.Where("name = ? AND type = ? AND is_system = ?", cleanName, txType, true).First(&category).Error
 	if err == nil {
 		return &category, nil
 	}
@@ -173,30 +177,56 @@ func (s *Store) FindCategoryByName(userID uint, txType, name string) (*models.Ca
 }
 
 func (s *Store) FindOrCreateCategory(userID uint, txType, name string) (*models.Category, error) {
-	if category, err := s.FindCategoryByName(userID, txType, name); err == nil {
-		return category, nil
+	return s.FindOrCreateCategoryWithDB(s.DB, userID, txType, name)
+}
+
+func (s *Store) FindOrCreateCategoryWithDB(db *gorm.DB, userID uint, txType, name string) (*models.Category, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, errors.New("empty category name")
 	}
 
-	category := models.Category{
+	var category models.Category
+	err := db.Where("name = ? AND type = ? AND user_id = ?", cleanName, txType, userID).First(&category).Error
+	if err == nil {
+		return &category, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	err = db.Where("name = ? AND type = ? AND is_system = ?", cleanName, txType, true).First(&category).Error
+	if err == nil {
+		return &category, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	nextCategory := &models.Category{
 		UserID:   &userID,
-		Name:     strings.TrimSpace(name),
+		Name:     cleanName,
 		Type:     txType,
 		IsSystem: false,
 	}
-	if err := s.DB.Create(&category).Error; err != nil {
+	if err := db.Create(nextCategory).Error; err != nil {
 		return nil, err
 	}
-	return &category, nil
+	return nextCategory, nil
 }
 
 func (s *Store) FindOrCreateAccount(userID uint, name string) (*models.Account, error) {
+	return s.FindOrCreateAccountWithDB(s.DB, userID, name)
+}
+
+func (s *Store) FindOrCreateAccountWithDB(db *gorm.DB, userID uint, name string) (*models.Account, error) {
 	cleanName := strings.TrimSpace(name)
 	if cleanName == "" {
 		cleanName = "现金"
 	}
 
 	var account models.Account
-	err := s.DB.Where("user_id = ? AND name = ?", userID, cleanName).First(&account).Error
+	err := db.Where("user_id = ? AND name = ?", userID, cleanName).First(&account).Error
 	if err == nil {
 		return &account, nil
 	}
@@ -205,7 +235,7 @@ func (s *Store) FindOrCreateAccount(userID uint, name string) (*models.Account, 
 	}
 
 	account = models.Account{UserID: userID, Name: cleanName, Type: "custom", BalanceCents: 0}
-	if err := s.DB.Create(&account).Error; err != nil {
+	if err := db.Create(&account).Error; err != nil {
 		return nil, err
 	}
 	return &account, nil

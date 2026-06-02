@@ -11,3 +11,16 @@ export function createAccount(payload: { name: string; type: string; balance: nu
     body: JSON.stringify(payload),
   });
 }
+
+export function updateAccount(id: number, payload: { name: string; type: string; balance: number }) {
+  return request<Account>(`/accounts/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteAccount(id: number) {
+  return request<{ ok: boolean }>(`/accounts/${id}`, {
+    method: 'DELETE',
+  });
+}

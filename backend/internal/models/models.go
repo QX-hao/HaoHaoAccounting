@@ -42,15 +42,15 @@ type Category struct {
 
 type Transaction struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	UserID      uint      `gorm:"index;not null" json:"userId"`
-	Type        string    `gorm:"size:16;not null" json:"type"`
+	UserID      uint      `gorm:"index;index:idx_transactions_user_occurred,priority:1;index:idx_transactions_user_type_occurred,priority:1;index:idx_transactions_user_category_occurred,priority:1;index:idx_transactions_user_account_occurred,priority:1;not null" json:"userId"`
+	Type        string    `gorm:"size:16;index:idx_transactions_user_type_occurred,priority:2;not null" json:"type"`
 	AmountCents int64     `gorm:"not null;default:0" json:"-"`
-	CategoryID  uint      `gorm:"index;not null" json:"categoryId"`
-	AccountID   uint      `gorm:"index;not null" json:"accountId"`
+	CategoryID  uint      `gorm:"index;index:idx_transactions_user_category_occurred,priority:2;not null" json:"categoryId"`
+	AccountID   uint      `gorm:"index;index:idx_transactions_user_account_occurred,priority:2;not null" json:"accountId"`
 	Note        string    `gorm:"size:255" json:"note"`
 	Tags        string    `gorm:"size:255" json:"tags"`
 	Source      string    `gorm:"size:32;not null;default:manual" json:"source"`
-	OccurredAt  time.Time `gorm:"index;not null" json:"occurredAt"`
+	OccurredAt  time.Time `gorm:"index;index:idx_transactions_user_occurred,priority:2;index:idx_transactions_user_type_occurred,priority:3;index:idx_transactions_user_category_occurred,priority:3;index:idx_transactions_user_account_occurred,priority:3;not null" json:"occurredAt"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 	Category    Category  `gorm:"foreignKey:CategoryID" json:"category"`

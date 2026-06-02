@@ -1,6 +1,9 @@
 package dataio
 
 import (
+	"encoding/csv"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -30,5 +33,20 @@ func TestParseImportRecordRejectsInvalidAmount(t *testing.T) {
 	_, err := parseImportRecord([]string{"2026-06-01T12:30:00+08:00", "expense", "0", "餐饮", "现金"})
 	if err == nil {
 		t.Fatal("expected invalid amount error")
+	}
+}
+
+func TestReadCSVDataRowsRejectsTooManyRows(t *testing.T) {
+	var buf strings.Builder
+	writer := csv.NewWriter(&buf)
+	_ = writer.Write([]string{"occurred_at", "type", "amount", "category", "account", "note", "tags"})
+	for i := 0; i < MaxImportRows+1; i++ {
+		_ = writer.Write([]string{"2026-06-01T12:30:00+08:00", "expense", "1", "餐饮", "现金", fmt.Sprintf("row-%d", i), ""})
+	}
+	writer.Flush()
+
+	_, err := readCSVDataRows(strings.NewReader(buf.String()))
+	if err == nil {
+		t.Fatal("expected too many rows error")
 	}
 }

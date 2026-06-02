@@ -72,6 +72,16 @@
     font-size: 13px;
   }
 
+  .transaction-row,
+  .list-row {
+    grid-template-columns: 1fr;
+  }
+
+  .amount,
+  .row-actions {
+    justify-content: flex-start;
+  }
+
   .nav-icon {
     display: none;
   }

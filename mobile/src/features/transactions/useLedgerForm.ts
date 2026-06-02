@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Account, Category, TransactionType } from '../../shared/types/accounting';
-import { createTransaction, parseAIText } from './api';
+import type { Account, Category, Transaction, TransactionType } from '../../shared/types/accounting';
+import { createTransaction, parseAIText, updateTransaction } from './api';
 
 export function useLedgerForm(accounts: Account[], categories: Category[], reload: () => Promise<unknown>) {
   const [txType, setTxType] = useState<TransactionType>('expense');
@@ -8,7 +8,9 @@ export function useLedgerForm(accounts: Account[], categories: Category[], reloa
   const [categoryId, setCategoryId] = useState(0);
   const [accountId, setAccountId] = useState(0);
   const [note, setNote] = useState('');
+  const [occurredAt, setOccurredAt] = useState('');
   const [aiText, setAiText] = useState('今天午饭35');
+  const [editing, setEditing] = useState<Transaction | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -43,7 +45,7 @@ export function useLedgerForm(accounts: Account[], categories: Category[], reloa
     try {
       setError('');
       setMessage('');
-      await createTransaction({
+      const payload = {
         type: txType,
         amount: nextAmount,
         categoryId,
@@ -51,17 +53,41 @@ export function useLedgerForm(accounts: Account[], categories: Category[], reloa
         note: note.trim(),
         tags: [],
         source: 'manual',
-        occurredAt: new Date().toISOString(),
-      });
-      setAmount('');
-      setNote('');
-      setMessage('账单已保存');
+        occurredAt: occurredAt.trim() || new Date().toISOString(),
+      };
+      if (editing) {
+        await updateTransaction(editing.id, payload);
+        setMessage('账单已更新');
+      } else {
+        await createTransaction(payload);
+        setMessage('账单已保存');
+      }
+      resetForm();
       await reload();
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存失败');
       return false;
     }
+  }
+
+  function startEdit(transaction: Transaction) {
+    setEditing(transaction);
+    setTxType(transaction.type);
+    setAmount(String(transaction.amount));
+    setCategoryId(transaction.categoryId || transaction.category?.id || 0);
+    setAccountId(transaction.accountId || transaction.account?.id || 0);
+    setNote(transaction.note || '');
+    setOccurredAt(transaction.occurredAt || '');
+    setMessage('');
+    setError('');
+  }
+
+  function resetForm() {
+    setEditing(null);
+    setAmount('');
+    setNote('');
+    setOccurredAt('');
   }
 
   async function parseAI() {
@@ -72,6 +98,7 @@ export function useLedgerForm(accounts: Account[], categories: Category[], reloa
       setTxType(result.type);
       setAmount(String(result.amount));
       setNote(result.note || aiText);
+      setOccurredAt(result.occurredAt || '');
 
       const matchedCategory = categories.find((item) => item.name === result.category && item.type === result.type);
       if (matchedCategory) setCategoryId(matchedCategory.id);
@@ -89,7 +116,9 @@ export function useLedgerForm(accounts: Account[], categories: Category[], reloa
     txType,
     amount,
     note,
+    occurredAt,
     aiText,
+    editing,
     categoryId,
     accountId,
     filteredCategories,
@@ -99,10 +128,13 @@ export function useLedgerForm(accounts: Account[], categories: Category[], reloa
     setTxType,
     setAmount,
     setNote,
+    setOccurredAt,
     setAiText,
     setCategoryId,
     setAccountId,
     save,
     parseAI,
+    startEdit,
+    resetForm,
   };
 }
