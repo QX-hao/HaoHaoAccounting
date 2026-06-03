@@ -3,20 +3,28 @@
 import { useEffect, useState } from 'react';
 import { PageFrame } from '@/components/PageFrame';
 import { listAccounts } from '@/features/accounts/api';
+import { createBudget, deleteBudget, listBudgets, updateBudget } from '@/features/budgets/api';
 import { listCategories } from '@/features/categories/api';
-import type { Account, Category, Summary } from '@/lib/types';
+import type { Account, Budget, Category, Summary } from '@/lib/types';
 import { getReportSummary } from './api';
+import { AccountBalanceTrendPanel } from './components/AccountBalanceTrendPanel';
 import { BarBreakdown } from './components/BarBreakdown';
-import { MonthlyTrend } from './components/MonthlyTrend';
+import { BudgetExecutionPanel } from './components/BudgetExecutionPanel';
+import { BudgetManager } from './components/BudgetManager';
+import { CategoryTrendPanel } from './components/CategoryTrendPanel';
 import { PeriodCompare } from './components/PeriodCompare';
 import { SummaryCards } from './components/SummaryCards';
+import { SummaryTables } from './components/SummaryTables';
+import { TrendChart } from './components/TrendChart';
 
 type Preset = 'current' | 'previous' | 'custom';
+type TrendGranularity = 'day' | 'week' | 'month';
 
 export default function ReportsFeaturePage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [preset, setPreset] = useState<Preset>('current');
@@ -24,20 +32,27 @@ export default function ReportsFeaturePage() {
   const [end, setEnd] = useState(() => monthRange(new Date()).end);
   const [categoryId, setCategoryId] = useState(0);
   const [accountId, setAccountId] = useState(0);
+  const [trend, setTrend] = useState<TrendGranularity>('month');
+  const [budgetMonth, setBudgetMonth] = useState(() => monthValue(new Date()));
+  const [budgetCategoryId, setBudgetCategoryId] = useState(0);
+  const [budgetAmount, setBudgetAmount] = useState('');
+  const [editingBudgetId, setEditingBudgetId] = useState(0);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
       setError('');
       try {
-        const [nextSummary, nextAccounts, nextCategories] = await Promise.all([
-          getReportSummary({ start, end, categoryId, accountId }),
+        const [nextSummary, nextAccounts, nextCategories, nextBudgets] = await Promise.all([
+          getReportSummary({ start, end, categoryId, accountId, trend }),
           listAccounts(),
           listCategories(),
+          listBudgets(budgetMonth),
         ]);
         setSummary(nextSummary);
         setAccounts(nextAccounts);
         setCategories(nextCategories);
+        setBudgets(nextBudgets);
       } catch (err) {
         setError(err instanceof Error ? err.message : '加载失败');
       } finally {
@@ -45,7 +60,16 @@ export default function ReportsFeaturePage() {
       }
     }
     load();
-  }, [start, end, categoryId, accountId]);
+  }, [start, end, categoryId, accountId, trend, budgetMonth]);
+
+  async function refreshReports() {
+    const [nextSummary, nextBudgets] = await Promise.all([
+      getReportSummary({ start, end, categoryId, accountId, trend }),
+      listBudgets(budgetMonth),
+    ]);
+    setSummary(nextSummary);
+    setBudgets(nextBudgets);
+  }
 
   function selectPreset(nextPreset: Preset) {
     setPreset(nextPreset);
@@ -57,6 +81,50 @@ export default function ReportsFeaturePage() {
     const range = monthRange(base);
     setStart(range.start);
     setEnd(range.end);
+  }
+
+  async function saveBudget() {
+    try {
+      setError('');
+      const payload = {
+        month: budgetMonth,
+        categoryId: budgetCategoryId,
+        amount: Number(budgetAmount || 0),
+      };
+      if (editingBudgetId) {
+        await updateBudget(editingBudgetId, payload);
+      } else {
+        await createBudget(payload);
+      }
+      resetBudgetForm();
+      await refreshReports();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '预算保存失败');
+    }
+  }
+
+  function editBudget(budget: Budget) {
+    setEditingBudgetId(budget.id);
+    setBudgetMonth(budget.month);
+    setBudgetCategoryId(budget.categoryId);
+    setBudgetAmount(String(budget.amount));
+  }
+
+  async function removeBudget(id: number) {
+    try {
+      setError('');
+      await deleteBudget(id);
+      if (editingBudgetId === id) resetBudgetForm();
+      await refreshReports();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '预算删除失败');
+    }
+  }
+
+  function resetBudgetForm() {
+    setEditingBudgetId(0);
+    setBudgetCategoryId(0);
+    setBudgetAmount('');
   }
 
   return (
@@ -97,10 +165,30 @@ export default function ReportsFeaturePage() {
               </option>
             ))}
           </select>
+          <select value={trend} onChange={(e) => setTrend(e.target.value as TrendGranularity)}>
+            <option value="day">按天趋势</option>
+            <option value="week">按周趋势</option>
+            <option value="month">按月趋势</option>
+          </select>
         </div>
       </section>
 
       <SummaryCards summary={summary} />
+      <BudgetManager
+        budgets={budgets}
+        categories={categories}
+        month={budgetMonth}
+        categoryId={budgetCategoryId}
+        amount={budgetAmount}
+        editingId={editingBudgetId}
+        onMonthChange={setBudgetMonth}
+        onCategoryChange={setBudgetCategoryId}
+        onAmountChange={setBudgetAmount}
+        onSave={saveBudget}
+        onEdit={editBudget}
+        onDelete={removeBudget}
+        onCancelEdit={resetBudgetForm}
+      />
 
       <div className="grid two">
         <BarBreakdown
@@ -120,7 +208,13 @@ export default function ReportsFeaturePage() {
         />
       </div>
 
-      <MonthlyTrend items={summary?.monthlyTrend || []} />
+      <TrendChart items={summary?.trend || summary?.monthlyTrend?.map((item) => ({ period: item.month, income: item.income, expense: item.expense })) || []} granularity={summary?.trendGranularity || trend} />
+      <div className="grid two">
+        <BudgetExecutionPanel items={summary?.budgetExecution || []} />
+        <CategoryTrendPanel items={summary?.categoryTrend || []} />
+      </div>
+      <AccountBalanceTrendPanel items={summary?.accountBalanceTrend || []} />
+      <SummaryTables daily={summary?.dailySummaries || []} monthly={summary?.monthlySummaries || []} />
       <PeriodCompare summary={summary} />
     </PageFrame>
   );
@@ -140,6 +234,12 @@ function formatDateInput(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function monthValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
 }
 
 function presetLabel(preset: Preset) {

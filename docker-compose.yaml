@@ -22,7 +22,7 @@ services:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       PORT: 3000
-      NEXT_PUBLIC_API_BASE: https://api.example.com/api/v1
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:?set NEXT_PUBLIC_API_BASE, for example https://api.example.com/api/v1}
     ports:
       - "3000:3000"
     depends_on:
@@ -51,14 +51,17 @@ services:
       GIN_MODE: release
       PORT: 8080
       DB_DRIVER: postgres
-      DB_DSN: "host=postgres user=haohao password=haohao_postgres_password dbname=haohaoaccounting port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+      DB_DSN: "host=postgres user=haohao password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD} dbname=haohaoaccounting port=5432 sslmode=disable TimeZone=Asia/Shanghai"
       REDIS_ADDR: redis:6379
-      REDIS_PASSWORD: haohao_redis_password
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
       REDIS_DB: 0
-      JWT_SECRET: haohao_change_me_jwt_secret_at_least_32_chars
-      ADMIN_USERNAME: admin
-      ADMIN_PASSWORD: haohao_change_me_admin_password
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET with at least 32 characters}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?set ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
       ADMIN_NAME: 好好用户
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?set CORS_ALLOW_ORIGINS}
+      LOGIN_RATE_LIMIT_MAX_FAILURES: 5
+      LOGIN_RATE_LIMIT_WINDOW: 10m
     ports:
       - "8080:8080"
     depends_on:
@@ -89,7 +92,7 @@ services:
     environment:
       POSTGRES_DB: haohaoaccounting
       POSTGRES_USER: haohao
-      POSTGRES_PASSWORD: haohao_postgres_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     expose:
@@ -118,10 +121,10 @@ services:
         "--appendonly",
         "yes",
         "--requirepass",
-        "haohao_redis_password",
+        "${REDIS_PASSWORD:?set REDIS_PASSWORD}",
       ]
     environment:
-      REDIS_PASSWORD: haohao_redis_password
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     expose:
@@ -148,7 +151,7 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: haohaoaccounting
-      MYSQL_ROOT_PASSWORD: haohao_mysql_root_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
     expose:

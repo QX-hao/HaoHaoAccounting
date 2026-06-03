@@ -1,4 +1,4 @@
-import { request } from '@/lib/api';
+import { api } from '@/shared/api';
 import type { Account, AIParseResult, Category, Transaction, TransactionListResponse, TransactionType } from '@/lib/types';
 
 export type TransactionPayload = {
@@ -24,50 +24,38 @@ export type TransactionFilters = {
 };
 
 export function listAccounts() {
-  return request<Account[]>('/accounts');
+  return api.accounts.getAccounts() as Promise<Account[]>;
 }
 
 export function listCategories() {
-  return request<Category[]>('/categories');
+  return api.categories.getCategories({}) as Promise<Category[]>;
 }
 
 export function listTransactions(filters: TransactionFilters = { page: 1, pageSize: 20 }) {
-  const params = new URLSearchParams({
-    page: String(filters.page || 1),
-    pageSize: String(filters.pageSize || 20),
-  });
-  if (filters.start) params.set('start', filters.start);
-  if (filters.end) params.set('end', filters.end);
-  if (filters.type) params.set('type', filters.type);
-  if (filters.categoryId) params.set('categoryId', String(filters.categoryId));
-  if (filters.accountId) params.set('accountId', String(filters.accountId));
-  if (filters.q?.trim()) params.set('q', filters.q.trim());
-  return request<TransactionListResponse>(`/transactions?${params.toString()}`);
+  return api.transactions.getTransactions({
+    page: filters.page || 1,
+    pageSize: filters.pageSize || 20,
+    start: filters.start,
+    end: filters.end,
+    type: filters.type || undefined,
+    categoryId: filters.categoryId,
+    accountId: filters.accountId,
+    q: filters.q?.trim() || undefined,
+  }) as Promise<TransactionListResponse>;
 }
 
 export function createTransaction(payload: TransactionPayload) {
-  return request<Transaction>('/transactions', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  return api.transactions.postTransactions(payload) as Promise<Transaction>;
 }
 
 export function updateTransaction(id: number, payload: TransactionPayload) {
-  return request<Transaction>(`/transactions/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  });
+  return api.transactions.putTransactionsById({ id }, payload) as Promise<Transaction>;
 }
 
 export function deleteTransaction(id: number) {
-  return request<{ ok: boolean }>(`/transactions/${id}`, {
-    method: 'DELETE',
-  });
+  return api.transactions.deleteTransactionsById({ id });
 }
 
 export function parseAIText(text: string) {
-  return request<{ result: AIParseResult }>('/ai/parse', {
-    method: 'POST',
-    body: JSON.stringify({ text }),
-  });
+  return api.ai.postAiParse({ text }) as Promise<{ result: AIParseResult }>;
 }

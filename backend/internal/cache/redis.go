@@ -73,6 +73,21 @@ func (c *RedisCache) SetJSON(ctx context.Context, key string, value any, ttl tim
 	return c.client.Set(ctx, key, payload, ttl).Err()
 }
 
+func (c *RedisCache) Exists(ctx context.Context, key string) (bool, error) {
+	if !c.Enabled() {
+		return false, nil
+	}
+	count, err := c.client.Exists(ctx, key).Result()
+	return count > 0, err
+}
+
+func (c *RedisCache) SetString(ctx context.Context, key, value string, ttl time.Duration) error {
+	if !c.Enabled() {
+		return nil
+	}
+	return c.client.Set(ctx, key, value, ttl).Err()
+}
+
 func (c *RedisCache) DeleteByPrefix(ctx context.Context, prefix string) error {
 	if !c.Enabled() {
 		return nil
@@ -107,4 +122,8 @@ func UserReportKey(userID uint, start, end time.Time) string {
 
 func UserAIParseKey(userID uint, text string) string {
 	return fmt.Sprintf("ai:parse:u:%d:%x", userID, text)
+}
+
+func RevokedTokenKey(tokenHash string) string {
+	return fmt.Sprintf("auth:revoked:%s", tokenHash)
 }

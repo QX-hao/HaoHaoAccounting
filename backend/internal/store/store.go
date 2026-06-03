@@ -49,6 +49,10 @@ func New(cfg Config) (*Store, error) {
 		&models.Account{},
 		&models.Category{},
 		&models.Transaction{},
+		&models.ImportJob{},
+		&models.Budget{},
+		&models.DailySummary{},
+		&models.MonthlySummary{},
 	); err != nil {
 		return nil, err
 	}

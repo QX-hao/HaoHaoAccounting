@@ -40,3 +40,20 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   }
   return data as T;
 }
+
+export function upload<T>(path: string, formData: FormData) {
+  return request<T>(path, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function logout() {
+  const token = await getToken();
+  if (!token) return;
+
+  await fetch(`${API_BASE}/auth/logout`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => undefined);
+}

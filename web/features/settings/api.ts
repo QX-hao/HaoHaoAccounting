@@ -1,6 +1,5 @@
-import { request } from '@/lib/api';
-import type { CurrentUser } from '@/lib/types';
+import { api } from '@/shared/api';
 
 export function getCurrentUser() {
-  return request<CurrentUser>('/me');
+  return api.me.getMe();
 }

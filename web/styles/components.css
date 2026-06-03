@@ -251,6 +251,10 @@ button.ghost {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
+.list-row.actionable {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .row-main {
   min-width: 0;
   display: flex;

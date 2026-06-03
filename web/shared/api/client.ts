@@ -64,6 +64,16 @@ export async function download(path: string): Promise<DownloadResult> {
   };
 }
 
+export async function logout(): Promise<void> {
+  const token = getToken();
+  if (!token) return;
+
+  await fetch(`${API_BASE}/auth/logout`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => undefined);
+}
+
 function handleUnauthorized(status: number) {
   if (status !== 401 || typeof window === 'undefined') return;
   clearToken();

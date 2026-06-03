@@ -17,7 +17,16 @@ func NewStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.Account{}, &models.Category{}, &models.Transaction{}); err != nil {
+	if err := db.AutoMigrate(
+		&models.User{},
+		&models.Account{},
+		&models.Category{},
+		&models.Transaction{},
+		&models.ImportJob{},
+		&models.Budget{},
+		&models.DailySummary{},
+		&models.MonthlySummary{},
+	); err != nil {
 		t.Fatalf("migrate sqlite: %v", err)
 	}
 

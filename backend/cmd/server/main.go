@@ -53,7 +53,7 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
+		AllowOrigins:     corsAllowOrigins(),
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Disposition"},
@@ -94,6 +94,30 @@ func fallbackIntEnv(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func corsAllowOrigins() []string {
+	origins := splitCSVEnv("CORS_ALLOW_ORIGINS")
+	if len(origins) > 0 {
+		return origins
+	}
+	return []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+}
+
+func splitCSVEnv(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if clean := strings.TrimSpace(part); clean != "" {
+			values = append(values, clean)
+		}
+	}
+	return values
 }
 
 func loadDotEnv(path string) error {

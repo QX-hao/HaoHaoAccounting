@@ -6,6 +6,16 @@ on:
   pull_request:
 
 jobs:
+  api-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run generate:api-types
+      - run: git diff --exit-code -- web/shared/types/api.ts mobile/src/shared/types/api.ts web/shared/api/generated-client.ts mobile/src/shared/api/generated-client.ts
+
   backend:
     runs-on: ubuntu-latest
     defaults:
@@ -35,3 +45,20 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
+      - run: npx playwright install --with-deps chrome
+      - run: npm run test:e2e
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { logout } from '@/shared/api/client';
 import { clearToken } from '@/lib/auth';
 
 const navItems = [
@@ -49,7 +50,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <button
           className="logout"
-          onClick={() => {
+          onClick={async () => {
+            await logout();
             clearToken();
             router.replace('/login');
           }}

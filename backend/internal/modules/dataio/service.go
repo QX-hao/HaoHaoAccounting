@@ -1,6 +1,7 @@
 package dataio
 
 import (
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/transactions"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/money"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"gorm.io/gorm"
 )
@@ -16,6 +18,10 @@ type Service struct {
 	store              *store.Store
 	transactionService *transactions.Service
 	invalidator        transactions.CacheInvalidator
+}
+
+type ImportOptions struct {
+	SkipDuplicates bool
 }
 
 func NewService(s *store.Store, transactionService *transactions.Service, invalidator transactions.CacheInvalidator) *Service {
@@ -36,7 +42,7 @@ func (s *Service) Preview(userID uint, file *multipart.FileHeader) (ImportPrevie
 	if err != nil {
 		return ImportPreview{}, err
 	}
-	return s.PreviewRows(file.Filename, file.Size, sourceRows), nil
+	return s.PreviewRows(userID, file.Filename, file.Size, sourceRows), nil
 }
 
 func (s *Service) PreviewText(userID uint, req ImportTextRequest) (ImportPreview, error) {
@@ -48,10 +54,10 @@ func (s *Service) PreviewText(userID uint, req ImportTextRequest) (ImportPreview
 	if filename == "" {
 		filename = "mobile-import.csv"
 	}
-	return s.PreviewRows(filename, int64(len([]byte(req.Content))), sourceRows), nil
+	return s.PreviewRows(userID, filename, int64(len([]byte(req.Content))), sourceRows), nil
 }
 
-func (s *Service) PreviewRows(filename string, size int64, sourceRows [][]string) ImportPreview {
+func (s *Service) PreviewRows(userID uint, filename string, size int64, sourceRows [][]string) ImportPreview {
 	preview := ImportPreview{
 		Filename:     filename,
 		Size:         size,
@@ -60,15 +66,28 @@ func (s *Service) PreviewRows(filename string, size int64, sourceRows [][]string
 		MaxFileBytes: MaxImportFileBytes,
 		Rows:         make([]ImportPreviewRow, 0, min(len(sourceRows), ImportPreviewRows)),
 	}
+	seen := map[duplicateKey]int{}
 	for i, row := range sourceRows {
 		record, err := parseImportRecord(row)
+		duplicateReason := ""
 		if err != nil {
 			preview.FailedRows++
 		} else {
 			preview.ValidRows++
+			key := importDuplicateKey(record)
+			if firstLine, ok := seen[key]; ok {
+				duplicateReason = fmt.Sprintf("与导入文件第 %d 行重复", firstLine+2)
+			} else if s.hasExistingDuplicate(userID, record) {
+				duplicateReason = "账本中已存在相同记录"
+			} else {
+				seen[key] = i
+			}
+			if duplicateReason != "" {
+				preview.DuplicateRows++
+			}
 		}
 		if len(preview.Rows) < ImportPreviewRows {
-			preview.Rows = append(preview.Rows, importPreviewRow(i, record, err))
+			preview.Rows = append(preview.Rows, importPreviewRow(i, record, err, duplicateReason))
 		}
 	}
 	preview.Truncated = len(sourceRows) > len(preview.Rows)
@@ -76,11 +95,92 @@ func (s *Service) PreviewRows(filename string, size int64, sourceRows [][]string
 }
 
 func (s *Service) Import(userID uint, file *multipart.FileHeader) (ImportResult, error) {
+	return s.ImportWithOptions(userID, file, defaultImportOptions())
+}
+
+func (s *Service) ImportWithOptions(userID uint, file *multipart.FileHeader, options ImportOptions) (ImportResult, error) {
 	sourceRows, err := readImportRows(file)
 	if err != nil {
 		return ImportResult{}, err
 	}
-	return s.ImportRows(userID, sourceRows), nil
+	return s.ImportRowsWithOptions(userID, sourceRows, options), nil
+}
+
+func (s *Service) StartImportJob(userID uint, file *multipart.FileHeader, options ImportOptions) (ImportJobResponse, error) {
+	sourceRows, err := readImportRows(file)
+	if err != nil {
+		return ImportJobResponse{}, err
+	}
+	job := models.ImportJob{
+		UserID:   userID,
+		Filename: strings.TrimSpace(file.Filename),
+		Status:   "queued",
+		Total:    len(sourceRows),
+	}
+	if job.Filename == "" {
+		job.Filename = "import.csv"
+	}
+	if err := s.store.DB.Create(&job).Error; err != nil {
+		return ImportJobResponse{}, err
+	}
+
+	go s.runImportJob(job.ID, userID, sourceRows, options)
+	return importJobResponse(job), nil
+}
+
+func (s *Service) ListImportJobs(userID uint) ([]ImportJobResponse, error) {
+	var jobs []models.ImportJob
+	if err := s.store.DB.Where("user_id = ?", userID).Order("created_at desc").Limit(20).Find(&jobs).Error; err != nil {
+		return nil, err
+	}
+	result := make([]ImportJobResponse, 0, len(jobs))
+	for _, job := range jobs {
+		result = append(result, importJobResponse(job))
+	}
+	return result, nil
+}
+
+func (s *Service) ImportJob(userID, id uint) (ImportJobResponse, error) {
+	var job models.ImportJob
+	if err := s.store.DB.Where("id = ? AND user_id = ?", id, userID).First(&job).Error; err != nil {
+		return ImportJobResponse{}, err
+	}
+	return importJobResponse(job), nil
+}
+
+func (s *Service) runImportJob(jobID, userID uint, sourceRows [][]string, options ImportOptions) {
+	s.updateImportJob(jobID, models.ImportJob{Status: "running"})
+	result := s.ImportRowsWithOptions(userID, sourceRows, options)
+	status := "completed"
+	if result.Failed > 0 {
+		status = "failed"
+	}
+	errorsJSON, _ := json.Marshal(result.Errors)
+	s.updateImportJob(jobID, models.ImportJob{
+		Status:  status,
+		Total:   result.Total,
+		Success: result.Success,
+		Failed:  result.Failed,
+		Skipped: result.Skipped,
+		Errors:  string(errorsJSON),
+	})
+}
+
+func (s *Service) updateImportJob(jobID uint, changes models.ImportJob) {
+	values := map[string]any{}
+	if changes.Status != "" {
+		values["status"] = changes.Status
+	}
+	if changes.Total > 0 {
+		values["total"] = changes.Total
+	}
+	values["success"] = changes.Success
+	values["failed"] = changes.Failed
+	values["skipped"] = changes.Skipped
+	if changes.Errors != "" {
+		values["errors"] = changes.Errors
+	}
+	_ = s.store.DB.Model(&models.ImportJob{}).Where("id = ?", jobID).Updates(values).Error
 }
 
 func (s *Service) ImportText(userID uint, req ImportTextRequest) (ImportResult, error) {
@@ -88,12 +188,17 @@ func (s *Service) ImportText(userID uint, req ImportTextRequest) (ImportResult, 
 	if err != nil {
 		return ImportResult{}, err
 	}
-	return s.ImportRows(userID, sourceRows), nil
+	return s.ImportRowsWithOptions(userID, sourceRows, importOptionsFromRequest(req)), nil
 }
 
 func (s *Service) ImportRows(userID uint, sourceRows [][]string) ImportResult {
+	return s.ImportRowsWithOptions(userID, sourceRows, defaultImportOptions())
+}
+
+func (s *Service) ImportRowsWithOptions(userID uint, sourceRows [][]string, options ImportOptions) ImportResult {
 	result := ImportResult{Total: len(sourceRows), Errors: make([]string, 0)}
 	records := make([]importRecord, 0, len(sourceRows))
+	seen := map[duplicateKey]int{}
 	for i, row := range sourceRows {
 		if strings.TrimSpace(strings.Join(row, "")) == "" {
 			continue
@@ -105,6 +210,20 @@ func (s *Service) ImportRows(userID uint, sourceRows [][]string) ImportResult {
 			continue
 		}
 		record.Line = i
+		key := importDuplicateKey(record)
+		if options.SkipDuplicates {
+			if firstLine, ok := seen[key]; ok {
+				result.Skipped++
+				result.Errors = append(result.Errors, fmt.Sprintf("line %d: duplicate of line %d skipped", i+2, firstLine+2))
+				continue
+			}
+			if s.hasExistingDuplicate(userID, record) {
+				result.Skipped++
+				result.Errors = append(result.Errors, fmt.Sprintf("line %d: duplicate transaction skipped", i+2))
+				continue
+			}
+		}
+		seen[key] = i
 		records = append(records, record)
 	}
 
@@ -145,7 +264,7 @@ func (s *Service) ImportRows(userID uint, sourceRows [][]string) ImportResult {
 	return result
 }
 
-func importPreviewRow(index int, record importRecord, err error) ImportPreviewRow {
+func importPreviewRow(index int, record importRecord, err error, duplicateReason string) ImportPreviewRow {
 	row := ImportPreviewRow{Line: index + 2, Valid: err == nil}
 	if err != nil {
 		row.Error = err.Error()
@@ -158,7 +277,76 @@ func importPreviewRow(index int, record importRecord, err error) ImportPreviewRo
 	row.Account = record.Account
 	row.Note = record.Note
 	row.Tags = record.Tags
+	if duplicateReason != "" {
+		row.Duplicate = true
+		row.DuplicateReason = duplicateReason
+	}
 	return row
+}
+
+func defaultImportOptions() ImportOptions {
+	return ImportOptions{SkipDuplicates: true}
+}
+
+func importOptionsFromRequest(req ImportTextRequest) ImportOptions {
+	options := defaultImportOptions()
+	if req.SkipDuplicates != nil {
+		options.SkipDuplicates = *req.SkipDuplicates
+	}
+	return options
+}
+
+type duplicateKey struct {
+	OccurredAt  int64
+	Type        string
+	AmountCents int64
+	Category    string
+	Account     string
+	Note        string
+	Tags        string
+}
+
+func importDuplicateKey(record importRecord) duplicateKey {
+	return duplicateKey{
+		OccurredAt:  record.OccurredAt.Unix(),
+		Type:        record.Type,
+		AmountCents: money.ToCents(record.Amount),
+		Category:    strings.ToLower(strings.TrimSpace(record.Category)),
+		Account:     strings.ToLower(strings.TrimSpace(record.Account)),
+		Note:        strings.TrimSpace(record.Note),
+		Tags:        strings.Join(splitTags(record.Tags), ","),
+	}
+}
+
+func (s *Service) hasExistingDuplicate(userID uint, record importRecord) bool {
+	category, err := s.store.FindCategoryByName(userID, record.Type, record.Category)
+	if err != nil {
+		return false
+	}
+	accountName := strings.TrimSpace(record.Account)
+	if accountName == "" {
+		accountName = "现金"
+	}
+	var account models.Account
+	if err := s.store.DB.Where("user_id = ? AND name = ?", userID, accountName).First(&account).Error; err != nil {
+		return false
+	}
+
+	var count int64
+	err = s.store.DB.Model(&models.Transaction{}).
+		Where(
+			"user_id = ? AND occurred_at = ? AND type = ? AND amount_cents = ? AND category_id = ? AND account_id = ? AND note = ? AND tags = ?",
+			userID,
+			record.OccurredAt,
+			record.Type,
+			money.ToCents(record.Amount),
+			category.ID,
+			account.ID,
+			strings.TrimSpace(record.Note),
+			strings.Join(splitTags(record.Tags), ","),
+		).
+		Count(&count).Error
+	return err == nil && count > 0
 }
 
 func splitTags(tags string) []string {
@@ -173,4 +361,23 @@ func splitTags(tags string) []string {
 		}
 	}
 	return result
+}
+
+func importJobResponse(job models.ImportJob) ImportJobResponse {
+	var errors []string
+	if strings.TrimSpace(job.Errors) != "" {
+		_ = json.Unmarshal([]byte(job.Errors), &errors)
+	}
+	return ImportJobResponse{
+		ID:        job.ID,
+		Filename:  job.Filename,
+		Status:    job.Status,
+		Total:     job.Total,
+		Success:   job.Success,
+		Failed:    job.Failed,
+		Skipped:   job.Skipped,
+		Errors:    errors,
+		CreatedAt: job.CreatedAt,
+		UpdatedAt: job.UpdatedAt,
+	}
 }

@@ -1,10 +1,9 @@
-import { request } from '@/lib/api';
-import type { Summary, TransactionListResponse } from '@/lib/types';
+import { api } from '@/shared/api';
 
 export function getOverviewSummary() {
-  return request<Summary>('/reports/summary');
+  return api.reports.getReportsSummary({});
 }
 
 export function listRecentTransactions() {
-  return request<TransactionListResponse>('/transactions?page=1&pageSize=5');
+  return api.transactions.getTransactions({ page: 1, pageSize: 5 });
 }

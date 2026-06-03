@@ -1,26 +1,17 @@
-import { request } from '@/lib/api';
-import type { Account } from '@/lib/types';
+import { api } from '@/shared/api';
 
 export function listAccounts() {
-  return request<Account[]>('/accounts');
+  return api.accounts.getAccounts();
 }
 
 export function createAccount(payload: { name: string; type: string; balance: number }) {
-  return request<Account>('/accounts', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  return api.accounts.postAccounts(payload);
 }
 
 export function updateAccount(id: number, payload: { name: string; type: string; balance: number }) {
-  return request<Account>(`/accounts/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  });
+  return api.accounts.putAccountsById({ id }, payload);
 }
 
 export function deleteAccount(id: number) {
-  return request<{ ok: boolean }>(`/accounts/${id}`, {
-    method: 'DELETE',
-  });
+  return api.accounts.deleteAccountsById({ id });
 }

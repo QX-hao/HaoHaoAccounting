@@ -69,6 +69,19 @@ go run ./cmd/server
 
 `.env.example` 已经匹配本地 compose 的 PostgreSQL 和 Redis 密码。需要切换数据库时再修改 `DB_DRIVER` 和 `DB_DSN`。
 
+如需显式执行数据库迁移：
+
+```bash
+cd backend
+go run ./cmd/dbmigrate
+```
+
+API 合约维护在 `backend/api/openapi.yaml`。更新接口结构后，在仓库根目录生成 web/mobile 共用类型：
+
+```bash
+npm run generate:api-types
+```
+
 ### 3. 启动 Web
 
 ```bash
@@ -117,36 +130,40 @@ http://127.0.0.1:8080/api/v1
 - `postgres`：PostgreSQL，仅内部网络
 - `redis`：Redis，仅内部网络并启用密码
 
-### 1. 修改公网 API 地址
+### 1. 设置生产环境变量
 
-打开 `docker-compose.yaml`，把两处 `NEXT_PUBLIC_API_BASE` 改成浏览器能访问的后端地址，例如：
+`docker-compose.yaml` 不内置可直接用于生产的默认密码。启动前必须在 shell 或 `.env` 中设置：
 
-```yaml
-NEXT_PUBLIC_API_BASE: https://api.example.com/api/v1
-```
-
-如果 Web 和 API 放在同一台机器上，也可以先用：
-
-```yaml
-NEXT_PUBLIC_API_BASE: http://localhost:8080/api/v1
-```
-
-### 2. 设置生产密码
-
-`docker-compose.yaml` 中的默认密码是示例值，部署前建议改掉：
-
-- `backend.environment.DB_DSN` 里的 PostgreSQL 密码
-- `backend.environment.REDIS_PASSWORD`
-- `backend.environment.JWT_SECRET`
-- `backend.environment.ADMIN_USERNAME`
-- `backend.environment.ADMIN_PASSWORD`
-- `postgres.environment.POSTGRES_PASSWORD`
-- `redis.command` 里的 `--requirepass`
-- `redis.environment.REDIS_PASSWORD`
+- `NEXT_PUBLIC_API_BASE`
+- `POSTGRES_PASSWORD`
+- `REDIS_PASSWORD`
+- `JWT_SECRET`
+- `ADMIN_USERNAME`
+- `ADMIN_PASSWORD`
+- `CORS_ALLOW_ORIGINS`
+- `MYSQL_ROOT_PASSWORD`（仅启用 MySQL profile 时需要）
 
 这些值必须保持一致，否则后端会连不上数据库或 Redis。
 
-### 3. 构建并启动
+示例：
+
+```env
+NEXT_PUBLIC_API_BASE=https://api.example.com/api/v1
+POSTGRES_PASSWORD=replace-with-a-long-random-password
+REDIS_PASSWORD=replace-with-a-long-random-password
+JWT_SECRET=replace-with-at-least-32-random-characters
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=replace-with-a-long-random-password
+CORS_ALLOW_ORIGINS=https://app.example.com
+```
+
+`CORS_ALLOW_ORIGINS` 使用英文逗号分隔多个 Web 来源，例如：
+
+```env
+CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
+```
+
+### 2. 构建并启动
 
 ```bash
 docker compose up -d --build

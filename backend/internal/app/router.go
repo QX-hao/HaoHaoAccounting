@@ -8,6 +8,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/accounts"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/ai"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/auth"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/budgets"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/categories"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/dataio"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/reports"
@@ -34,14 +35,20 @@ func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisC
 	}
 	authHandler.RegisterPublic(api)
 
+	tokenRevoker := auth.NewTokenRevoker(redisCache)
 	authGroup := api.Group("")
-	authGroup.Use(middleware.RequireAuth())
+	authGroup.Use(func(c *gin.Context) {
+		c.Set("token_revoker", tokenRevoker)
+		c.Next()
+	})
+	authGroup.Use(middleware.RequireAuthWithRevocation(tokenRevoker))
 
 	cacheInvalidator := transactions.NewCacheInvalidator(redisCache)
 	transactionService := transactions.NewService(s, cacheInvalidator)
 
 	authHandler.RegisterPrivate(authGroup)
 	accounts.NewHandler(accounts.NewService(s, cacheInvalidator)).Register(authGroup)
+	budgets.NewHandler(budgets.NewService(s, cacheInvalidator)).Register(authGroup)
 	categories.NewHandler(categories.NewService(s, cacheInvalidator)).Register(authGroup)
 	transactionHandler := transactions.NewHandler(transactionService)
 	transactionHandler.Register(authGroup)

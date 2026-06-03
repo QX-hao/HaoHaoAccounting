@@ -1,0 +1,988 @@
+openapi: 3.0.3
+info:
+  title: HaoHaoAccounting API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080/api/v1
+security:
+  - bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/Error'
+  /auth/refresh:
+    post:
+      responses:
+        '200':
+          description: Refreshed token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+  /auth/logout:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+  /me:
+    get:
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+  /accounts:
+    get:
+      responses:
+        '200':
+          description: Account list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Account'
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountRequest'
+      responses:
+        '201':
+          description: Created account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+  /accounts/{id}:
+    put:
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountRequest'
+      responses:
+        '200':
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+    delete:
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+  /budgets:
+    get:
+      parameters:
+        - name: month
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Budget list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Budget'
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BudgetRequest'
+      responses:
+        '201':
+          description: Created budget
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Budget'
+  /budgets/{id}:
+    put:
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BudgetRequest'
+      responses:
+        '200':
+          description: Updated budget
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Budget'
+    delete:
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+  /categories:
+    get:
+      parameters:
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/TransactionType'
+      responses:
+        '200':
+          description: Category list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryRequest'
+      responses:
+        '201':
+          description: Created category
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+  /categories/{id}:
+    put:
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryRequest'
+      responses:
+        '200':
+          description: Updated category
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+    delete:
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+  /transactions:
+    get:
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+        - name: start
+          in: query
+          schema:
+            type: string
+        - name: end
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/TransactionType'
+        - name: categoryId
+          in: query
+          schema:
+            type: integer
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionRequest'
+      responses:
+        '201':
+          description: Created transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+  /transactions/{id}:
+    put:
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionRequest'
+      responses:
+        '200':
+          description: Updated transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+    delete:
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+  /ai/parse:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIParseRequest'
+      responses:
+        '200':
+          description: Parsed ledger text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIParseResponse'
+  /reports/summary:
+    get:
+      parameters:
+        - name: start
+          in: query
+          schema:
+            type: string
+        - name: end
+          in: query
+          schema:
+            type: string
+        - name: categoryId
+          in: query
+          schema:
+            type: integer
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+        - name: trend
+          in: query
+          schema:
+            type: string
+            enum: [day, week, month]
+      responses:
+        '200':
+          description: Report summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Summary'
+  /io/import/preview:
+    post:
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ImportFileRequest'
+      responses:
+        '200':
+          description: Import preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportPreview'
+  /io/import:
+    post:
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ImportFileRequest'
+      responses:
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResult'
+  /io/import/jobs:
+    get:
+      responses:
+        '200':
+          description: Import job history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ImportJob'
+    post:
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ImportFileRequest'
+      responses:
+        '202':
+          description: Queued import job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJob'
+  /io/import/jobs/{id}:
+    get:
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Import job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJob'
+  /io/import/text/preview:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportTextRequest'
+      responses:
+        '200':
+          description: Text import preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportPreview'
+  /io/import/text:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportTextRequest'
+      responses:
+        '200':
+          description: Text import result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResult'
+  /io/export:
+    get:
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [csv, xlsx]
+        - name: start
+          in: query
+          schema:
+            type: string
+        - name: end
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Exported ledger file
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+  responses:
+    Error:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Ok:
+      description: OK response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OkResponse'
+  schemas:
+    TransactionType:
+      type: string
+      enum: [income, expense]
+    CurrentUser:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        username:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        wechatId:
+          type: string
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    LoginResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/CurrentUser'
+    Account:
+      type: object
+      required: [id, userId, name, type, balance]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        name:
+          type: string
+        type:
+          type: string
+        balance:
+          type: number
+    AccountRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        balance:
+          type: number
+    Budget:
+      type: object
+      required: [id, userId, month, categoryId, amount]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        month:
+          type: string
+        categoryId:
+          type: integer
+        amount:
+          type: number
+    BudgetRequest:
+      type: object
+      required: [month, amount]
+      properties:
+        month:
+          type: string
+        categoryId:
+          type: integer
+        amount:
+          type: number
+    Category:
+      type: object
+      required: [id, name, type, isSystem]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/TransactionType'
+        isSystem:
+          type: boolean
+    CategoryRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/TransactionType'
+    Transaction:
+      type: object
+      required: [id, userId, type, amount, categoryId, accountId, note, tags, source, occurredAt, category, account]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        type:
+          $ref: '#/components/schemas/TransactionType'
+        amount:
+          type: number
+        categoryId:
+          type: integer
+        accountId:
+          type: integer
+        note:
+          type: string
+        tags:
+          type: string
+        source:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        category:
+          $ref: '#/components/schemas/Category'
+        account:
+          $ref: '#/components/schemas/Account'
+    TransactionRequest:
+      type: object
+      required: [type, amount, categoryId, accountId, note]
+      properties:
+        type:
+          $ref: '#/components/schemas/TransactionType'
+        amount:
+          type: number
+        categoryId:
+          type: integer
+        accountId:
+          type: integer
+        note:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        occurredAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+    TransactionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    Pagination:
+      type: object
+      required: [page, pageSize, total]
+      properties:
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+    AIParseRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+    AIParseResult:
+      type: object
+      required: [type, amount, category, account, note, occurredAt]
+      properties:
+        type:
+          $ref: '#/components/schemas/TransactionType'
+        amount:
+          type: number
+        category:
+          type: string
+        account:
+          type: string
+        note:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+    AIParseResponse:
+      type: object
+      required: [requiresConfirmation, cached, result]
+      properties:
+        requiresConfirmation:
+          type: boolean
+        cached:
+          type: boolean
+        result:
+          $ref: '#/components/schemas/AIParseResult'
+    CategoryStat:
+      type: object
+      required: [category, amount]
+      properties:
+        categoryId:
+          type: integer
+        category:
+          type: string
+        amount:
+          type: number
+    AccountStat:
+      type: object
+      required: [account, amount]
+      properties:
+        accountId:
+          type: integer
+        account:
+          type: string
+        amount:
+          type: number
+    MonthTrend:
+      type: object
+      required: [month, income, expense]
+      properties:
+        month:
+          type: string
+        income:
+          type: number
+        expense:
+          type: number
+    TrendPoint:
+      type: object
+      required: [period, income, expense]
+      properties:
+        period:
+          type: string
+        income:
+          type: number
+        expense:
+          type: number
+    CategoryTrendPoint:
+      type: object
+      required: [period, categoryId, category, amount]
+      properties:
+        period:
+          type: string
+        categoryId:
+          type: integer
+        category:
+          type: string
+        amount:
+          type: number
+    AccountBalancePoint:
+      type: object
+      required: [period, accountId, account, net, balance]
+      properties:
+        period:
+          type: string
+        accountId:
+          type: integer
+        account:
+          type: string
+        net:
+          type: number
+        balance:
+          type: number
+    BudgetExecution:
+      type: object
+      required: [budgetId, month, categoryId, category, budget, expense, remaining, usageRate]
+      properties:
+        budgetId:
+          type: integer
+        month:
+          type: string
+        categoryId:
+          type: integer
+        category:
+          type: string
+        budget:
+          type: number
+        expense:
+          type: number
+        remaining:
+          type: number
+        usageRate:
+          type: number
+    SummaryTableRow:
+      type: object
+      required: [period, income, expense, balance, txCount]
+      properties:
+        period:
+          type: string
+        income:
+          type: number
+        expense:
+          type: number
+        balance:
+          type: number
+        txCount:
+          type: integer
+    PeriodTotals:
+      type: object
+      required: [income, expense]
+      properties:
+        income:
+          type: number
+        expense:
+          type: number
+    PeriodCompare:
+      type: object
+      required: [current, previous]
+      properties:
+        current:
+          $ref: '#/components/schemas/PeriodTotals'
+        previous:
+          $ref: '#/components/schemas/PeriodTotals'
+    Summary:
+      type: object
+      required: [income, expense, balance, byCategory, byAccount]
+      properties:
+        income:
+          type: number
+        expense:
+          type: number
+        balance:
+          type: number
+        byCategory:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryStat'
+        byAccount:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountStat'
+        monthlyTrend:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonthTrend'
+        trendGranularity:
+          type: string
+        trend:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrendPoint'
+        categoryTrend:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryTrendPoint'
+        accountBalanceTrend:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountBalancePoint'
+        budgetExecution:
+          type: array
+          items:
+            $ref: '#/components/schemas/BudgetExecution'
+        dailySummaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SummaryTableRow'
+        monthlySummaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SummaryTableRow'
+        periodCompare:
+          $ref: '#/components/schemas/PeriodCompare'
+    ImportFileRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+        skipDuplicates:
+          type: boolean
+    ImportTextRequest:
+      type: object
+      required: [content]
+      properties:
+        filename:
+          type: string
+        content:
+          type: string
+        skipDuplicates:
+          type: boolean
+    ImportPreviewRow:
+      type: object
+      required: [line, occurredAt, type, amount, category, account, note, tags, valid, duplicate]
+      properties:
+        line:
+          type: integer
+        occurredAt:
+          type: string
+        type:
+          $ref: '#/components/schemas/TransactionType'
+        amount:
+          type: number
+        category:
+          type: string
+        account:
+          type: string
+        note:
+          type: string
+        tags:
+          type: string
+        valid:
+          type: boolean
+        duplicate:
+          type: boolean
+        error:
+          type: string
+        duplicateReason:
+          type: string
+    ImportPreview:
+      type: object
+      required: [filename, size, totalRows, validRows, failedRows, duplicateRows, maxRows, maxFileBytes, truncated, rows]
+      properties:
+        filename:
+          type: string
+        size:
+          type: integer
+        totalRows:
+          type: integer
+        validRows:
+          type: integer
+        failedRows:
+          type: integer
+        duplicateRows:
+          type: integer
+        maxRows:
+          type: integer
+        maxFileBytes:
+          type: integer
+        truncated:
+          type: boolean
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportPreviewRow'
+    ImportResult:
+      type: object
+      required: [total, success, failed, skipped, errors]
+      properties:
+        total:
+          type: integer
+        success:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+    ImportJob:
+      type: object
+      required: [id, filename, status, total, success, failed, skipped, errors, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, completed, failed]
+        total:
+          type: integer
+        success:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean

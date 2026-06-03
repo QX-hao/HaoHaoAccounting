@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -22,6 +23,10 @@ type jwtClaims struct {
 	Subject   string `json:"sub"`
 	IssuedAt  int64  `json:"iat"`
 	ExpiresAt int64  `json:"exp"`
+}
+
+type TokenRevocationChecker interface {
+	IsTokenRevoked(ctx context.Context, token string) (bool, error)
 }
 
 func BuildToken(userID uint) (string, error) {
@@ -99,20 +104,26 @@ func JWTSecret() (string, error) {
 }
 
 func RequireAuth() gin.HandlerFunc {
+	return RequireAuthWithRevocation(nil)
+}
+
+func RequireAuthWithRevocation(checker TokenRevocationChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		auth := c.GetHeader("Authorization")
-		if auth == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing Authorization header"})
-			c.Abort()
-			return
-		}
-		parts := strings.SplitN(auth, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		token, ok := BearerToken(c.GetHeader("Authorization"))
+		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid Authorization format"})
 			c.Abort()
 			return
 		}
-		userID, err := ParseToken(parts[1])
+		if checker != nil {
+			revoked, err := checker.IsTokenRevoked(c.Request.Context(), token)
+			if err == nil && revoked {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				c.Abort()
+				return
+			}
+		}
+		userID, err := ParseToken(token)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			c.Abort()
@@ -121,6 +132,15 @@ func RequireAuth() gin.HandlerFunc {
 		c.Set(userContextKey, userID)
 		c.Next()
 	}
+}
+
+func BearerToken(auth string) (string, bool) {
+	parts := strings.SplitN(strings.TrimSpace(auth), " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return "", false
+	}
+	token := strings.TrimSpace(parts[1])
+	return token, token != ""
 }
 
 func UserIDFromContext(c *gin.Context) uint {

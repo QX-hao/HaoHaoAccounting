@@ -1,9 +1,9 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { PageFrame } from '@/components/PageFrame';
-import type { ImportPreview } from '@/lib/types';
-import { ExportFormat, exportTransactions, importTransactions, previewImport } from './api';
+import type { ImportJob, ImportPreview } from '@/lib/types';
+import { ExportFormat, exportTransactions, getImportJob, importTransactions, listImportJobs, previewImport } from './api';
 import { ExportPanel } from './components/ExportPanel';
 import { ImportPanel } from './components/ImportPanel';
 
@@ -11,9 +11,33 @@ export default function DataIOFeaturePage() {
   const [format, setFormat] = useState<ExportFormat>('csv');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    loadJobs();
+  }, []);
+
+  useEffect(() => {
+    const running = jobs.filter((job) => job.status === 'queued' || job.status === 'running');
+    if (running.length === 0) return;
+
+    const timer = window.setInterval(async () => {
+      const nextJobs = await Promise.all(running.map((job) => getImportJob(job.id).catch(() => job)));
+      setJobs((current) => current.map((job) => nextJobs.find((next) => next.id === job.id) || job));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [jobs]);
+
+  async function loadJobs() {
+    try {
+      setJobs(await listImportJobs());
+    } catch {
+      setJobs([]);
+    }
+  }
 
   async function runExport() {
     setError('');
@@ -63,11 +87,9 @@ export default function DataIOFeaturePage() {
       setBusy(true);
       const formData = new FormData();
       formData.append('file', file);
-      const resp = await importTransactions(formData);
-      setNotice(`导入完成：成功 ${resp.success} 条，失败 ${resp.failed} 条，总计 ${resp.total} 条`);
-      if (resp.errors.length > 0) {
-        setError(resp.errors.slice(0, 5).join('\n'));
-      }
+      const job = await importTransactions(formData);
+      setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].slice(0, 20));
+      setNotice(`导入任务已创建：${job.filename}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '导入失败');
     } finally {
@@ -90,7 +112,7 @@ export default function DataIOFeaturePage() {
       formData.append('file', file);
       const resp = await previewImport(formData);
       setPreview(resp);
-      setNotice(`预览完成：有效 ${resp.validRows} 条，失败 ${resp.failedRows} 条`);
+      setNotice(`预览完成：有效 ${resp.validRows} 条，重复风险 ${resp.duplicateRows} 条，失败 ${resp.failedRows} 条`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '预览失败');
     } finally {
@@ -122,6 +144,24 @@ export default function DataIOFeaturePage() {
           onImport={runImport}
         />
       </div>
+      <section className="panel grid">
+        <div className="hero-topline">
+          <div>
+            <span className="eyebrow">Import Jobs</span>
+            <h3>导入任务</h3>
+          </div>
+          <button className="ghost" type="button" onClick={loadJobs}>
+            刷新
+          </button>
+        </div>
+        {jobs.length === 0 ? <div className="muted">暂无导入任务。</div> : null}
+        {jobs.map((job) => (
+          <div className="notice" key={job.id}>
+            <strong>{job.filename}</strong> · {job.status} · 总计 {job.total} / 成功 {job.success} / 跳过 {job.skipped} / 失败 {job.failed}
+            {job.errors.length > 0 ? <pre className="error" style={{ whiteSpace: 'pre-wrap' }}>{job.errors.slice(0, 5).join('\n')}</pre> : null}
+          </div>
+        ))}
+      </section>
     </PageFrame>
   );
 }

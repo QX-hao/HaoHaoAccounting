@@ -1,12 +1,9 @@
-import { request } from '@/lib/api';
+import { api } from '@/shared/api';
 
 export function login(payload: { username: string; password: string }) {
-  return request<{ token: string; user: unknown }>('/auth/login', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  return api.auth.postAuthLogin(payload);
 }
 
 export function verifyCurrentUser() {
-  return request('/me');
+  return api.me.getMe();
 }

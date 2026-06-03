@@ -12,3 +12,23 @@ Go/Gin backend for HaoHaoAccounting.
 - `internal/models`: GORM models.
 
 Business behavior should be added to the relevant module under `internal/modules/*`.
+
+## Database Migrations
+
+SQL migrations live in `migrations/<driver>`, currently split by `postgres` and `mysql`.
+
+Run migrations explicitly with:
+
+```bash
+go run ./cmd/dbmigrate
+```
+
+The HTTP server still keeps GORM `AutoMigrate` for local compatibility, but production deployment should run the migration command before starting the API.
+
+## API Contract
+
+The OpenAPI contract lives in `api/openapi.yaml`. Regenerate web/mobile TypeScript types from the repository root:
+
+```bash
+npm run generate:api-types
+```

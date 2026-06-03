@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { clearToken, getToken, setToken } from '../../shared/api/client';
+import { clearToken, getToken, logout, setToken } from '../../shared/api/client';
 import { login, verifyCurrentUser } from './api';
 
 export function useSession() {
@@ -51,6 +51,7 @@ export function useSession() {
   }
 
   async function signOut() {
+    await logout();
     await clearToken();
     setAuthed(false);
   }

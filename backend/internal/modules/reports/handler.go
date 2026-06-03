@@ -30,6 +30,7 @@ func (h *Handler) summary(c *gin.Context) {
 		End:        end,
 		CategoryID: queryutil.ParseUint(c.Query("categoryId")),
 		AccountID:  queryutil.ParseUint(c.Query("accountId")),
+		Trend:      c.Query("trend"),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

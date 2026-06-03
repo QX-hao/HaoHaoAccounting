@@ -57,6 +57,52 @@ type Transaction struct {
 	Account     Account   `gorm:"foreignKey:AccountID" json:"account"`
 }
 
+type ImportJob struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	UserID    uint      `gorm:"index;not null" json:"userId"`
+	Filename  string    `gorm:"size:255;not null" json:"filename"`
+	Status    string    `gorm:"size:24;index;not null" json:"status"`
+	Total     int       `gorm:"not null;default:0" json:"total"`
+	Success   int       `gorm:"not null;default:0" json:"success"`
+	Failed    int       `gorm:"not null;default:0" json:"failed"`
+	Skipped   int       `gorm:"not null;default:0" json:"skipped"`
+	Errors    string    `gorm:"type:text" json:"errors"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type Budget struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	UserID      uint      `gorm:"uniqueIndex:idx_budgets_user_month_category,priority:1;index;not null" json:"userId"`
+	Month       string    `gorm:"size:7;uniqueIndex:idx_budgets_user_month_category,priority:2;index;not null" json:"month"`
+	CategoryID  uint      `gorm:"uniqueIndex:idx_budgets_user_month_category,priority:3;index;not null;default:0" json:"categoryId"`
+	AmountCents int64     `gorm:"not null;default:0" json:"-"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type DailySummary struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	UserID       uint      `gorm:"uniqueIndex:idx_daily_summaries_user_day,priority:1;index;not null" json:"userId"`
+	Day          string    `gorm:"size:10;uniqueIndex:idx_daily_summaries_user_day,priority:2;index;not null" json:"day"`
+	IncomeCents  int64     `gorm:"not null;default:0" json:"-"`
+	ExpenseCents int64     `gorm:"not null;default:0" json:"-"`
+	TxCount      int       `gorm:"not null;default:0" json:"txCount"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type MonthlySummary struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	UserID       uint      `gorm:"uniqueIndex:idx_monthly_summaries_user_month,priority:1;index;not null" json:"userId"`
+	Month        string    `gorm:"size:7;uniqueIndex:idx_monthly_summaries_user_month,priority:2;index;not null" json:"month"`
+	IncomeCents  int64     `gorm:"not null;default:0" json:"-"`
+	ExpenseCents int64     `gorm:"not null;default:0" json:"-"`
+	TxCount      int       `gorm:"not null;default:0" json:"txCount"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
 func (a Account) MarshalJSON() ([]byte, error) {
 	type alias Account
 	return json.Marshal(struct {
@@ -76,5 +122,16 @@ func (t Transaction) MarshalJSON() ([]byte, error) {
 	}{
 		alias:  alias(t),
 		Amount: money.FromCents(t.AmountCents),
+	})
+}
+
+func (b Budget) MarshalJSON() ([]byte, error) {
+	type alias Budget
+	return json.Marshal(struct {
+		alias
+		Amount float64 `json:"amount"`
+	}{
+		alias:  alias(b),
+		Amount: money.FromCents(b.AmountCents),
 	})
 }

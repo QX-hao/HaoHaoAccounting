@@ -1,4 +1,4 @@
-import { request } from '../../shared/api/client';
+import { api } from '../../shared/api';
 import type { AIParseResult, Transaction, TransactionListResponse, TransactionType } from '../../shared/types/accounting';
 
 export type TransactionPayload = {
@@ -24,42 +24,30 @@ export type TransactionFilters = {
 };
 
 export function listTransactions(filters: TransactionFilters) {
-  const params = new URLSearchParams({
-    page: String(filters.page),
-    pageSize: String(filters.pageSize),
-  });
-  if (filters.start) params.set('start', filters.start);
-  if (filters.end) params.set('end', filters.end);
-  if (filters.type) params.set('type', filters.type);
-  if (filters.categoryId) params.set('categoryId', String(filters.categoryId));
-  if (filters.accountId) params.set('accountId', String(filters.accountId));
-  if (filters.q?.trim()) params.set('q', filters.q.trim());
-  return request<TransactionListResponse>(`/transactions?${params.toString()}`);
+  return api.transactions.getTransactions({
+    page: filters.page,
+    pageSize: filters.pageSize,
+    start: filters.start,
+    end: filters.end,
+    type: filters.type || undefined,
+    categoryId: filters.categoryId,
+    accountId: filters.accountId,
+    q: filters.q?.trim() || undefined,
+  }) as Promise<TransactionListResponse>;
 }
 
 export function createTransaction(payload: TransactionPayload) {
-  return request<Transaction>('/transactions', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  return api.transactions.postTransactions(payload) as Promise<Transaction>;
 }
 
 export function updateTransaction(id: number, payload: TransactionPayload) {
-  return request<Transaction>(`/transactions/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  });
+  return api.transactions.putTransactionsById({ id }, payload) as Promise<Transaction>;
 }
 
 export function deleteTransaction(id: number) {
-  return request<{ ok: boolean }>(`/transactions/${id}`, {
-    method: 'DELETE',
-  });
+  return api.transactions.deleteTransactionsById({ id });
 }
 
 export function parseAIText(text: string) {
-  return request<{ result: AIParseResult }>('/ai/parse', {
-    method: 'POST',
-    body: JSON.stringify({ text }),
-  });
+  return api.ai.postAiParse({ text }) as Promise<{ result: AIParseResult }>;
 }

@@ -1,11 +1,22 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, SafeAreaView, ScrollView, Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Clipboard from 'expo-clipboard';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { LoginScreen } from './src/features/auth/LoginScreen';
 import { useSession } from './src/features/auth/useSession';
 import { useDashboardData } from './src/features/dashboard/useDashboardData';
 import { DataIOScreen } from './src/features/dataio/DataIOScreen';
-import { exportCSVText, importText, previewImportText } from './src/features/dataio/api';
+import {
+  exportCSVText,
+  importText,
+  previewImportFile,
+  previewImportText,
+  startImportFileJob,
+  type ImportFileAsset,
+} from './src/features/dataio/api';
 import { HomeScreen } from './src/features/home/HomeScreen';
 import { ManageScreen } from './src/features/profile/ManageScreen';
 import {
@@ -47,6 +58,9 @@ export default function App() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [csvText, setCsvText] = useState('');
   const [exportText, setExportText] = useState('');
+  const [selectedImportFile, setSelectedImportFile] = useState('');
+  const [selectedImportAsset, setSelectedImportAsset] = useState<ImportFileAsset | null>(null);
+  const [exportFileUri, setExportFileUri] = useState('');
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [appNotice, setAppNotice] = useState('');
   const session = useSession();
@@ -243,13 +257,47 @@ export default function App() {
     setCategoryType('expense');
   }
 
+  async function pickImportFile() {
+    try {
+      setAppNotice('');
+      const result = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: false,
+        type: [
+          'text/csv',
+          'text/comma-separated-values',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'text/plain',
+        ],
+      });
+      if (result.canceled || !result.assets[0]) return;
+
+      const asset = result.assets[0];
+      setSelectedImportFile(asset.name);
+      setSelectedImportAsset({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType });
+      setImportPreview(null);
+      dashboard.setError('');
+      if (isTextImportFile(asset.name, asset.mimeType)) {
+        const content = await new FileSystem.File(asset.uri).text();
+        setCsvText(content);
+        setAppNotice(`已读取文件：${asset.name}`);
+        return;
+      }
+      setCsvText('');
+      setAppNotice(`已选择文件：${asset.name}，可直接上传预览或后台导入`);
+    } catch (err) {
+      dashboard.setError(err instanceof Error ? err.message : '读取文件失败');
+    }
+  }
+
   async function previewCSV() {
     try {
       setAppNotice('');
-      const resp = await previewImportText(csvText);
+      const resp = selectedImportAsset ? await previewImportFile(selectedImportAsset) : await previewImportText(csvText);
       setImportPreview(resp);
       dashboard.setError('');
-      setAppNotice(`预览完成：有效 ${resp.validRows} 条，失败 ${resp.failedRows} 条`);
+      setAppNotice(`预览完成：有效 ${resp.validRows} 条，重复 ${resp.duplicateRows} 条，失败 ${resp.failedRows} 条`);
     } catch (err) {
       dashboard.setError(err instanceof Error ? err.message : '预览失败');
     }
@@ -258,11 +306,19 @@ export default function App() {
   async function importCSV() {
     try {
       setAppNotice('');
+      if (selectedImportAsset) {
+        const job = await startImportFileJob(selectedImportAsset);
+        setImportPreview(null);
+        await dashboard.loadAll();
+        dashboard.setError('');
+        setAppNotice(`已创建后台导入任务 #${job.id}：${job.status}`);
+        return;
+      }
       const resp = await importText(csvText);
       setImportPreview(null);
       await dashboard.loadAll();
       dashboard.setError('');
-      setAppNotice(`导入完成：成功 ${resp.success} 条，失败 ${resp.failed} 条`);
+      setAppNotice(`导入完成：成功 ${resp.success} 条，跳过 ${resp.skipped} 条，失败 ${resp.failed} 条`);
     } catch (err) {
       dashboard.setError(err instanceof Error ? err.message : '导入失败');
     }
@@ -271,9 +327,45 @@ export default function App() {
   async function exportCSV() {
     try {
       setAppNotice('');
-      setExportText(await exportCSVText());
+      const text = await exportCSVText();
+      setExportText(text);
+      setExportFileUri('');
+      dashboard.setError('');
+      setAppNotice('导出文本已生成');
     } catch (err) {
       dashboard.setError(err instanceof Error ? err.message : '导出失败');
+    }
+  }
+
+  async function copyExportText() {
+    if (!exportText) return;
+    await Clipboard.setStringAsync(exportText);
+    setAppNotice('导出内容已复制');
+  }
+
+  async function shareExportCSV() {
+    if (!exportText) return;
+    try {
+      const file = exportFileUri
+        ? new FileSystem.File(exportFileUri)
+        : new FileSystem.File(FileSystem.Paths.cache, `haohao-transactions-${Date.now()}.csv`);
+      if (!exportFileUri) {
+        file.write(exportText);
+        setExportFileUri(file.uri);
+      }
+      const available = await Sharing.isAvailableAsync();
+      if (!available) {
+        dashboard.setError('当前设备不支持系统分享');
+        return;
+      }
+      await Sharing.shareAsync(file.uri, {
+        mimeType: 'text/csv',
+        dialogTitle: '分享好好记账 CSV',
+        UTI: 'public.comma-separated-values-text',
+      });
+      setAppNotice('已打开系统分享');
+    } catch (err) {
+      dashboard.setError(err instanceof Error ? err.message : '分享失败');
     }
   }
 
@@ -389,11 +481,20 @@ export default function App() {
           <DataIOScreen
             csvText={csvText}
             exportText={exportText}
+            selectedImportFile={selectedImportFile}
             preview={importPreview}
-            onCSVTextChange={setCsvText}
+            onCSVTextChange={(value) => {
+              setCsvText(value);
+              setSelectedImportFile('');
+              setSelectedImportAsset(null);
+              setImportPreview(null);
+            }}
+            onPickFile={pickImportFile}
             onPreview={previewCSV}
             onImport={importCSV}
             onExport={exportCSV}
+            onCopyExport={copyExportText}
+            onShareExport={shareExportCSV}
           />
         )}
         {tab === 'reports' && <ReportsScreen summary={dashboard.summary} />}
@@ -408,5 +509,17 @@ export default function App() {
 
       <TabBar activeTab={tab} onTabChange={setTab} />
     </SafeAreaView>
+  );
+}
+
+function isTextImportFile(name: string, mimeType?: string) {
+  const lowerName = name.toLowerCase();
+  const lowerMime = (mimeType || '').toLowerCase();
+  return (
+    lowerName.endsWith('.csv') ||
+    lowerName.endsWith('.txt') ||
+    lowerMime === 'text/csv' ||
+    lowerMime === 'text/comma-separated-values' ||
+    lowerMime === 'text/plain'
   );
 }

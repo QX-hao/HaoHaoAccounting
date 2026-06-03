@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "generate:api-types": "node scripts/generate-api-types.mjs"
+  }
+}

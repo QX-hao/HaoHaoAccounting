@@ -1,5 +1,5 @@
 import { download, upload } from '@/lib/api';
-import type { ImportPreview, ImportResult } from '@/lib/types';
+import { api } from '@/shared/api';
 
 export type ExportFormat = 'csv' | 'xlsx';
 
@@ -8,9 +8,17 @@ export function exportTransactions(format: ExportFormat) {
 }
 
 export function importTransactions(formData: FormData) {
-  return upload<ImportResult>('/io/import', formData);
+  return api.dataio.postIoImportJobs(formData);
 }
 
 export function previewImport(formData: FormData) {
-  return upload<ImportPreview>('/io/import/preview', formData);
+  return api.dataio.postIoImportPreview(formData);
+}
+
+export function listImportJobs() {
+  return api.dataio.getIoImportJobs();
+}
+
+export function getImportJob(id: number) {
+  return api.dataio.getIoImportJobsById({ id });
 }

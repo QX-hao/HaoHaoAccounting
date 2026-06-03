@@ -49,7 +49,7 @@ export function ImportPanel({ file, disabled, preview, onDownloadTemplate, onFil
               <h3>导入预览</h3>
             </div>
             <span className="badge">
-              有效 {preview.validRows} / 失败 {preview.failedRows}
+              有效 {preview.validRows} / 重复 {preview.duplicateRows} / 失败 {preview.failedRows}
             </span>
           </div>
           <div className="table-wrap">
@@ -76,7 +76,7 @@ export function ImportPanel({ file, disabled, preview, onDownloadTemplate, onFil
                     <td>{row.category || '-'}</td>
                     <td>{row.account || '-'}</td>
                     <td>{row.note || '-'}</td>
-                    <td>{row.valid ? '可导入' : row.error || '错误'}</td>
+                    <td>{row.valid ? (row.duplicate ? row.duplicateReason || '重复风险' : '可导入') : row.error || '错误'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -86,7 +86,7 @@ export function ImportPanel({ file, disabled, preview, onDownloadTemplate, onFil
         </div>
       ) : null}
       <div className="muted">
-        单个文件最多 {formatFileSize(preview?.maxFileBytes || 5 * 1024 * 1024)}、最多 {preview?.maxRows || 5000} 行；同一文件重复导入暂不会自动去重。
+        单个文件最多 {formatFileSize(preview?.maxFileBytes || 5 * 1024 * 1024)}、最多 {preview?.maxRows || 5000} 行；重复记录会在导入时自动跳过。
       </div>
     </form>
   );
