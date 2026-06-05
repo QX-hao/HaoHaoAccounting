@@ -130,6 +130,46 @@ http://127.0.0.1:8080/api/v1
 - `postgres`：PostgreSQL，仅内部网络
 - `redis`：Redis，仅内部网络并启用密码
 
+### 镜像拆分
+
+项目按 5 个镜像组织：
+
+| 镜像 | Dockerfile | 说明 |
+| --- | --- | --- |
+| `haohaoaccounting-web:latest` | `web/Dockerfile` | Next.js Web 端 |
+| `haohaoaccounting-backend:latest` | `backend/Dockerfile` | Go API 服务 |
+| `haohaoaccounting-postgres:16` | `Dockerfile.postgres` | PostgreSQL 数据库 |
+| `haohaoaccounting-redis:7` | `Dockerfile.redis` | Redis 缓存 |
+| `haohaoaccounting-mysql:8.4` | `Dockerfile.mysql` | 可选 MySQL 数据库 |
+
+默认生产组合是 `web + backend + postgres + redis`。`mysql` 通过 compose profile 启用，和 PostgreSQL 二选一使用。
+
+独立构建 5 个镜像：
+
+```bash
+docker build -t haohaoaccounting-web:latest \
+  --build-arg NEXT_PUBLIC_API_BASE=https://api.example.com/api/v1 \
+  ./web
+
+docker build -t haohaoaccounting-backend:latest ./backend
+
+docker build -t haohaoaccounting-postgres:16 -f Dockerfile.postgres .
+
+docker build -t haohaoaccounting-redis:7 -f Dockerfile.redis .
+
+docker build -t haohaoaccounting-mysql:8.4 -f Dockerfile.mysql .
+```
+
+国内网络构建后端镜像时，可以指定 Go module 代理：
+
+```bash
+docker build -t haohaoaccounting-backend:latest \
+  --build-arg GOPROXY=https://goproxy.cn,direct \
+  ./backend
+```
+
+这些镜像不内置生产密码。K8s、Compose 或其他运行平台需要通过 Secret/ConfigMap/环境变量注入 `DB_DSN`、`REDIS_PASSWORD`、`JWT_SECRET`、`ADMIN_PASSWORD`、`CORS_ALLOW_ORIGINS` 等配置。
+
 ### 1. 设置生产环境变量
 
 `docker-compose.yaml` 不内置可直接用于生产的默认密码。启动前必须在 shell 或 `.env` 中设置：

@@ -1,0 +1,6 @@
+.env
+.env.local
+.expo
+dist
+node_modules
+npm-debug.log

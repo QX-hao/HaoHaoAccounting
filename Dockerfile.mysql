@@ -1,6 +1,3 @@
 FROM mysql:8.4
 
-ENV MYSQL_DATABASE=haohaoaccounting
-ENV MYSQL_ROOT_PASSWORD=root
-
 EXPOSE 3306
