@@ -3,6 +3,7 @@ package dataio
 import (
 	"encoding/csv"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
@@ -11,32 +12,37 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-func writeCSV(c *gin.Context, rows []models.Transaction) {
+func writeCSV(c *gin.Context, rows []models.Transaction) error {
 	filename := "transactions_" + time.Now().Format("20060102150405") + ".csv"
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.Header("Content-Disposition", attachmentDisposition(filename))
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 
 	writer := csv.NewWriter(c.Writer)
-	defer writer.Flush()
 
-	_ = writer.Write([]string{"occurred_at", "type", "amount", "category", "account", "note", "tags", "source"})
+	if err := writer.Write([]string{"occurred_at", "type", "amount", "category", "account", "note", "tags", "source"}); err != nil {
+		return err
+	}
 	for _, row := range rows {
-		_ = writer.Write([]string{
+		if err := writer.Write([]string{
 			row.OccurredAt.Format(time.RFC3339),
 			row.Type,
 			money.FormatCents(row.AmountCents),
-			row.Category.Name,
-			row.Account.Name,
-			row.Note,
-			row.Tags,
-			row.Source,
-		})
+			safeCSVCell(row.Category.Name),
+			safeCSVCell(row.Account.Name),
+			safeCSVCell(row.Note),
+			safeCSVCell(row.Tags),
+			safeCSVCell(row.Source),
+		}); err != nil {
+			return err
+		}
 	}
+	writer.Flush()
+	return writer.Error()
 }
 
 func writeXLSX(c *gin.Context, rows []models.Transaction) error {
 	filename := "transactions_" + time.Now().Format("20060102150405") + ".xlsx"
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.Header("Content-Disposition", attachmentDisposition(filename))
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 	f := excelize.NewFile()
@@ -64,4 +70,21 @@ func writeXLSX(c *gin.Context, rows []models.Transaction) error {
 	}
 	_, err = c.Writer.Write(buf.Bytes())
 	return err
+}
+
+func attachmentDisposition(filename string) string {
+	return fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s", filename, url.PathEscape(filename))
+}
+
+func safeCSVCell(value string) string {
+	if value == "" {
+		return value
+	}
+
+	switch value[0] {
+	case '=', '+', '-', '@', '\t', '\r', '\n':
+		return "'" + value
+	default:
+		return value
+	}
 }

@@ -27,3 +27,14 @@ type ListFilter struct {
 	AccountID  uint
 	Keyword    string
 }
+
+type listQuery struct {
+	Page       *int   `form:"page" binding:"omitempty,min=1"`
+	PageSize   *int   `form:"pageSize" binding:"omitempty,min=1,max=200"`
+	Start      string `form:"start"`
+	End        string `form:"end"`
+	Type       string `form:"type" binding:"omitempty,oneof=income expense"`
+	CategoryID *uint  `form:"categoryId" binding:"omitempty,min=1"`
+	AccountID  *uint  `form:"accountId" binding:"omitempty,min=1"`
+	Keyword    string `form:"q"`
+}

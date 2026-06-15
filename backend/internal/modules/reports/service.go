@@ -24,52 +24,52 @@ func NewService(s *store.Store, redisCache *cache.RedisCache) *Service {
 	return &Service{store: s, cache: redisCache}
 }
 
-func (s *Service) Summary(userID uint, filter SummaryFilter) (gin.H, error) {
+func (s *Service) Summary(ctx context.Context, userID uint, filter SummaryFilter) (gin.H, error) {
 	filter.Trend = normalizeTrend(filter.Trend)
 	cacheKey := cache.UserReportKey(userID, filter.Start, filter.End) + filter.CacheSuffix()
 	if s.cache != nil && s.cache.Enabled() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		cacheCtx, cancel := context.WithTimeout(requestContext(ctx), time.Second)
 		defer cancel()
 		var cached map[string]any
-		ok, err := s.cache.GetJSON(ctx, cacheKey, &cached)
+		ok, err := s.cache.GetJSON(cacheCtx, cacheKey, &cached)
 		if err == nil && ok {
 			return cached, nil
 		}
 	}
 
-	incomeCents, expenseCents, err := s.sumIncomeExpense(userID, filter)
+	incomeCents, expenseCents, err := s.sumIncomeExpense(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
-	categoryList, err := s.categoryBreakdown(userID, filter)
+	categoryList, err := s.categoryBreakdown(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
-	accountList, err := s.accountBreakdown(userID, filter)
+	accountList, err := s.accountBreakdown(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
-	monthlyTrend, err := s.monthlyTrend(userID, filter)
+	monthlyTrend, err := s.monthlyTrend(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
-	trend, err := s.trend(userID, filter)
+	trend, err := s.trend(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
-	categoryTrend, err := s.categoryTrend(userID, filter)
+	categoryTrend, err := s.categoryTrend(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
-	accountBalanceTrend, err := s.accountBalanceTrend(userID, filter)
+	accountBalanceTrend, err := s.accountBalanceTrend(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
-	budgetExecution, err := s.budgetExecution(userID, filter)
+	budgetExecution, err := s.budgetExecution(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
-	dailySummaries, monthlySummaries, err := s.refreshSummaryTables(userID, filter)
+	dailySummaries, monthlySummaries, err := s.refreshSummaryTables(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (s *Service) Summary(userID uint, filter SummaryFilter) (gin.H, error) {
 
 	prevStart := filter.Start.Add(-filter.End.Sub(filter.Start) - time.Second)
 	prevEnd := filter.Start.Add(-time.Second)
-	prevIncomeCents, prevExpenseCents, err := s.sumIncomeExpense(userID, SummaryFilter{
+	prevIncomeCents, prevExpenseCents, err := s.sumIncomeExpense(ctx, userID, SummaryFilter{
 		Start:      prevStart,
 		End:        prevEnd,
 		CategoryID: filter.CategoryID,
@@ -107,16 +107,16 @@ func (s *Service) Summary(userID uint, filter SummaryFilter) (gin.H, error) {
 	}
 
 	if s.cache != nil && s.cache.Enabled() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		cacheCtx, cancel := context.WithTimeout(cacheWriteContext(ctx), time.Second)
 		defer cancel()
-		_ = s.cache.SetJSON(ctx, cacheKey, summary, 2*time.Minute)
+		_ = s.cache.SetJSON(cacheCtx, cacheKey, summary, 2*time.Minute)
 	}
 
 	return summary, nil
 }
 
-func (s *Service) reportQuery(userID uint, filter SummaryFilter) *gorm.DB {
-	query := s.store.DB.Model(&models.Transaction{}).
+func (s *Service) reportQuery(ctx context.Context, userID uint, filter SummaryFilter) *gorm.DB {
+	query := s.db(ctx).Model(&models.Transaction{}).
 		Where("transactions.user_id = ? AND transactions.occurred_at >= ? AND transactions.occurred_at <= ?", userID, filter.Start, filter.End)
 	if filter.CategoryID > 0 {
 		query = query.Where("transactions.category_id = ?", filter.CategoryID)
@@ -127,13 +127,13 @@ func (s *Service) reportQuery(userID uint, filter SummaryFilter) *gorm.DB {
 	return query
 }
 
-func (s *Service) sumIncomeExpense(userID uint, filter SummaryFilter) (int64, int64, error) {
+func (s *Service) sumIncomeExpense(ctx context.Context, userID uint, filter SummaryFilter) (int64, int64, error) {
 	var rows []struct {
 		Type        string
 		AmountCents int64
 	}
 
-	if err := s.reportQuery(userID, filter).
+	if err := s.reportQuery(ctx, userID, filter).
 		Select("type, COALESCE(SUM(amount_cents), 0) AS amount_cents").
 		Group("type").
 		Scan(&rows).Error; err != nil {
@@ -151,13 +151,13 @@ func (s *Service) sumIncomeExpense(userID uint, filter SummaryFilter) (int64, in
 	return income, expense, nil
 }
 
-func (s *Service) categoryBreakdown(userID uint, filter SummaryFilter) ([]CategoryStat, error) {
+func (s *Service) categoryBreakdown(ctx context.Context, userID uint, filter SummaryFilter) ([]CategoryStat, error) {
 	var rows []struct {
 		CategoryID  uint
 		Category    string
 		AmountCents int64
 	}
-	if err := s.reportQuery(userID, filter).
+	if err := s.reportQuery(ctx, userID, filter).
 		Joins("JOIN categories ON categories.id = transactions.category_id").
 		Where("transactions.type = ?", "expense").
 		Select("transactions.category_id AS category_id, categories.name AS category, COALESCE(SUM(transactions.amount_cents), 0) AS amount_cents").
@@ -179,13 +179,13 @@ func (s *Service) categoryBreakdown(userID uint, filter SummaryFilter) ([]Catego
 	return result, nil
 }
 
-func (s *Service) accountBreakdown(userID uint, filter SummaryFilter) ([]AccountStat, error) {
+func (s *Service) accountBreakdown(ctx context.Context, userID uint, filter SummaryFilter) ([]AccountStat, error) {
 	var rows []struct {
 		AccountID   uint
 		Account     string
 		AmountCents int64
 	}
-	if err := s.reportQuery(userID, filter).
+	if err := s.reportQuery(ctx, userID, filter).
 		Joins("JOIN accounts ON accounts.id = transactions.account_id").
 		Where("transactions.type = ?", "expense").
 		Select("transactions.account_id AS account_id, accounts.name AS account, COALESCE(SUM(transactions.amount_cents), 0) AS amount_cents").
@@ -207,14 +207,14 @@ func (s *Service) accountBreakdown(userID uint, filter SummaryFilter) ([]Account
 	return result, nil
 }
 
-func (s *Service) monthlyTrend(userID uint, filter SummaryFilter) ([]MonthTrend, error) {
+func (s *Service) monthlyTrend(ctx context.Context, userID uint, filter SummaryFilter) ([]MonthTrend, error) {
 	monthExpr := s.monthExpression()
 	var rows []struct {
 		Month       string
 		Type        string
 		AmountCents int64
 	}
-	if err := s.reportQuery(userID, filter).
+	if err := s.reportQuery(ctx, userID, filter).
 		Select(monthExpr + " AS month, type, COALESCE(SUM(amount_cents), 0) AS amount_cents").
 		Group(monthExpr).
 		Group("type").
@@ -253,14 +253,14 @@ func (s *Service) monthlyTrend(userID uint, filter SummaryFilter) ([]MonthTrend,
 	return result, nil
 }
 
-func (s *Service) trend(userID uint, filter SummaryFilter) ([]TrendPoint, error) {
+func (s *Service) trend(ctx context.Context, userID uint, filter SummaryFilter) ([]TrendPoint, error) {
 	periodExpr := s.periodExpression(filter.Trend)
 	var rows []struct {
 		Period      string
 		Type        string
 		AmountCents int64
 	}
-	if err := s.reportQuery(userID, filter).
+	if err := s.reportQuery(ctx, userID, filter).
 		Select(periodExpr + " AS period, type, COALESCE(SUM(amount_cents), 0) AS amount_cents").
 		Group(periodExpr).
 		Group("type").
@@ -299,7 +299,7 @@ func (s *Service) trend(userID uint, filter SummaryFilter) ([]TrendPoint, error)
 	return result, nil
 }
 
-func (s *Service) categoryTrend(userID uint, filter SummaryFilter) ([]CategoryTrendPoint, error) {
+func (s *Service) categoryTrend(ctx context.Context, userID uint, filter SummaryFilter) ([]CategoryTrendPoint, error) {
 	periodExpr := s.periodExpression(filter.Trend)
 	var rows []struct {
 		Period      string
@@ -307,7 +307,7 @@ func (s *Service) categoryTrend(userID uint, filter SummaryFilter) ([]CategoryTr
 		Category    string
 		AmountCents int64
 	}
-	if err := s.reportQuery(userID, filter).
+	if err := s.reportQuery(ctx, userID, filter).
 		Joins("JOIN categories ON categories.id = transactions.category_id").
 		Where("transactions.type = ?", "expense").
 		Select(periodExpr + " AS period, transactions.category_id AS category_id, categories.name AS category, COALESCE(SUM(transactions.amount_cents), 0) AS amount_cents").
@@ -331,7 +331,7 @@ func (s *Service) categoryTrend(userID uint, filter SummaryFilter) ([]CategoryTr
 	return result, nil
 }
 
-func (s *Service) accountBalanceTrend(userID uint, filter SummaryFilter) ([]AccountBalancePoint, error) {
+func (s *Service) accountBalanceTrend(ctx context.Context, userID uint, filter SummaryFilter) ([]AccountBalancePoint, error) {
 	periodExpr := s.periodExpression(filter.Trend)
 	var rows []struct {
 		Period      string
@@ -340,7 +340,7 @@ func (s *Service) accountBalanceTrend(userID uint, filter SummaryFilter) ([]Acco
 		Type        string
 		AmountCents int64
 	}
-	if err := s.reportQuery(userID, filter).
+	if err := s.reportQuery(ctx, userID, filter).
 		Joins("JOIN accounts ON accounts.id = transactions.account_id").
 		Select(periodExpr + " AS period, transactions.account_id AS account_id, accounts.name AS account, transactions.type AS type, COALESCE(SUM(transactions.amount_cents), 0) AS amount_cents").
 		Group(periodExpr).
@@ -399,14 +399,14 @@ func (s *Service) accountBalanceTrend(userID uint, filter SummaryFilter) ([]Acco
 	return result, nil
 }
 
-func (s *Service) budgetExecution(userID uint, filter SummaryFilter) ([]BudgetExecution, error) {
+func (s *Service) budgetExecution(ctx context.Context, userID uint, filter SummaryFilter) ([]BudgetExecution, error) {
 	months := monthsInRange(filter.Start, filter.End)
 	if len(months) == 0 {
 		return []BudgetExecution{}, nil
 	}
 
 	var budgets []models.Budget
-	if err := s.store.DB.Where("user_id = ? AND month IN ?", userID, months).
+	if err := s.db(ctx).Where("user_id = ? AND month IN ?", userID, months).
 		Order("month asc, category_id asc").
 		Find(&budgets).Error; err != nil {
 		return nil, err
@@ -415,11 +415,11 @@ func (s *Service) budgetExecution(userID uint, filter SummaryFilter) ([]BudgetEx
 		return []BudgetExecution{}, nil
 	}
 
-	categoryNames, err := s.categoryNames(userID)
+	categoryNames, err := s.categoryNames(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	expenses, err := s.expenseByMonthCategory(userID, filter, months)
+	expenses, err := s.expenseByMonthCategory(ctx, userID, filter, months)
 	if err != nil {
 		return nil, err
 	}
@@ -451,39 +451,39 @@ func (s *Service) budgetExecution(userID uint, filter SummaryFilter) ([]BudgetEx
 	return result, nil
 }
 
-func (s *Service) refreshSummaryTables(userID uint, filter SummaryFilter) ([]SummaryTableRow, []SummaryTableRow, error) {
-	daily, err := s.summaryTableRows(userID, filter, "day")
+func (s *Service) refreshSummaryTables(ctx context.Context, userID uint, filter SummaryFilter) ([]SummaryTableRow, []SummaryTableRow, error) {
+	daily, err := s.summaryTableRows(ctx, userID, filter, "day")
 	if err != nil {
 		return nil, nil, err
 	}
-	monthly, err := s.summaryTableRows(userID, filter, "month")
+	monthly, err := s.summaryTableRows(ctx, userID, filter, "month")
 	if err != nil {
 		return nil, nil, err
 	}
 
 	snapshotFilter := SummaryFilter{Start: filter.Start, End: filter.End, Trend: filter.Trend}
-	snapshotDaily, err := s.summaryTableRows(userID, snapshotFilter, "day")
+	snapshotDaily, err := s.summaryTableRows(ctx, userID, snapshotFilter, "day")
 	if err != nil {
 		return nil, nil, err
 	}
-	snapshotMonthly, err := s.summaryTableRows(userID, snapshotFilter, "month")
+	snapshotMonthly, err := s.summaryTableRows(ctx, userID, snapshotFilter, "month")
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, row := range snapshotDaily {
-		if err := s.upsertDailySummary(userID, row); err != nil {
+		if err := s.upsertDailySummary(ctx, userID, row); err != nil {
 			return nil, nil, err
 		}
 	}
 	for _, row := range snapshotMonthly {
-		if err := s.upsertMonthlySummary(userID, row); err != nil {
+		if err := s.upsertMonthlySummary(ctx, userID, row); err != nil {
 			return nil, nil, err
 		}
 	}
 	return daily, monthly, nil
 }
 
-func (s *Service) summaryTableRows(userID uint, filter SummaryFilter, granularity string) ([]SummaryTableRow, error) {
+func (s *Service) summaryTableRows(ctx context.Context, userID uint, filter SummaryFilter, granularity string) ([]SummaryTableRow, error) {
 	periodExpr := s.periodExpression(granularity)
 	var rows []struct {
 		Period      string
@@ -491,7 +491,7 @@ func (s *Service) summaryTableRows(userID uint, filter SummaryFilter, granularit
 		AmountCents int64
 		TxCount     int
 	}
-	if err := s.reportQuery(userID, filter).
+	if err := s.reportQuery(ctx, userID, filter).
 		Select(periodExpr + " AS period, type, COALESCE(SUM(amount_cents), 0) AS amount_cents, COUNT(*) AS tx_count").
 		Group(periodExpr).
 		Group("type").
@@ -580,7 +580,25 @@ func (s *Service) weekExpression() string {
 	}
 }
 
-func (s *Service) upsertDailySummary(userID uint, row SummaryTableRow) error {
+func (s *Service) db(ctx context.Context) *gorm.DB {
+	return s.store.DB.WithContext(requestContext(ctx))
+}
+
+func requestContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func cacheWriteContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
+}
+
+func (s *Service) upsertDailySummary(ctx context.Context, userID uint, row SummaryTableRow) error {
 	summary := models.DailySummary{
 		UserID:       userID,
 		Day:          row.Period,
@@ -588,12 +606,12 @@ func (s *Service) upsertDailySummary(userID uint, row SummaryTableRow) error {
 		ExpenseCents: money.ToCents(row.Expense),
 		TxCount:      row.TxCount,
 	}
-	return s.store.DB.Where("user_id = ? AND day = ?", userID, row.Period).
+	return s.db(ctx).Where("user_id = ? AND day = ?", userID, row.Period).
 		Assign(summary).
 		FirstOrCreate(&summary).Error
 }
 
-func (s *Service) upsertMonthlySummary(userID uint, row SummaryTableRow) error {
+func (s *Service) upsertMonthlySummary(ctx context.Context, userID uint, row SummaryTableRow) error {
 	summary := models.MonthlySummary{
 		UserID:       userID,
 		Month:        row.Period,
@@ -601,14 +619,14 @@ func (s *Service) upsertMonthlySummary(userID uint, row SummaryTableRow) error {
 		ExpenseCents: money.ToCents(row.Expense),
 		TxCount:      row.TxCount,
 	}
-	return s.store.DB.Where("user_id = ? AND month = ?", userID, row.Period).
+	return s.db(ctx).Where("user_id = ? AND month = ?", userID, row.Period).
 		Assign(summary).
 		FirstOrCreate(&summary).Error
 }
 
-func (s *Service) categoryNames(userID uint) (map[uint]string, error) {
+func (s *Service) categoryNames(ctx context.Context, userID uint) (map[uint]string, error) {
 	var categories []models.Category
-	if err := s.store.DB.Where("is_system = ? OR user_id = ?", true, userID).Find(&categories).Error; err != nil {
+	if err := s.db(ctx).Where("is_system = ? OR user_id = ?", true, userID).Find(&categories).Error; err != nil {
 		return nil, err
 	}
 	result := make(map[uint]string, len(categories))
@@ -618,17 +636,17 @@ func (s *Service) categoryNames(userID uint) (map[uint]string, error) {
 	return result, nil
 }
 
-func (s *Service) expenseByMonthCategory(userID uint, filter SummaryFilter, months []string) (map[string]map[uint]int64, error) {
+func (s *Service) expenseByMonthCategory(ctx context.Context, userID uint, filter SummaryFilter, months []string) (map[string]map[uint]int64, error) {
 	monthExpr := s.monthExpression()
 	var rows []struct {
 		Month       string
 		CategoryID  uint
 		AmountCents int64
 	}
-	query := s.reportQuery(userID, filter).
+	query := s.reportQuery(ctx, userID, filter).
 		Where("transactions.type = ?", "expense").
 		Where(monthExpr+" IN ?", months)
-	if err := query.Select(monthExpr+" AS month, transactions.category_id AS category_id, COALESCE(SUM(transactions.amount_cents), 0) AS amount_cents").
+	if err := query.Select(monthExpr + " AS month, transactions.category_id AS category_id, COALESCE(SUM(transactions.amount_cents), 0) AS amount_cents").
 		Group(monthExpr).
 		Group("transactions.category_id").
 		Scan(&rows).Error; err != nil {

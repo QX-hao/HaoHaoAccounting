@@ -36,13 +36,9 @@ func (l *loginLimiter) Allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	l.pruneExpired(l.now())
 	attempt, ok := l.attempts[key]
 	if !ok {
-		return true
-	}
-	now := l.now()
-	if now.Sub(attempt.firstFailure) > l.window {
-		delete(l.attempts, key)
 		return true
 	}
 	return attempt.failures < l.maxFailures
@@ -57,6 +53,7 @@ func (l *loginLimiter) RecordFailure(key string) {
 	defer l.mu.Unlock()
 
 	now := l.now()
+	l.pruneExpired(now)
 	attempt, ok := l.attempts[key]
 	if !ok || now.Sub(attempt.firstFailure) > l.window {
 		l.attempts[key] = loginAttempt{failures: 1, firstFailure: now}
@@ -74,6 +71,14 @@ func (l *loginLimiter) RecordSuccess(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.attempts, key)
+}
+
+func (l *loginLimiter) pruneExpired(now time.Time) {
+	for key, attempt := range l.attempts {
+		if now.Sub(attempt.firstFailure) > l.window {
+			delete(l.attempts, key)
+		}
+	}
 }
 
 func loginLimiterKey(ip, username string) string {

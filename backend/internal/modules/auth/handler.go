@@ -3,11 +3,11 @@ package auth
 import (
 	"errors"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
@@ -17,11 +17,19 @@ import (
 
 type Handler struct {
 	store        *store.Store
+	admin        config.AdminConfig
 	loginLimiter *loginLimiter
+	tokenService *middleware.TokenService
 }
 
 func NewHandler(s *store.Store) *Handler {
-	return &Handler{store: s, loginLimiter: newLoginLimiterFromEnv()}
+	cfg := config.Load()
+	tokenService, _ := middleware.NewTokenServiceWithTTL(cfg.JWT.Secret, cfg.JWT.TTL, cfg.JWT.ClockSkew, cfg.JWT.Issuer, cfg.JWT.Audience)
+	return NewHandlerWithConfig(s, cfg.Admin, cfg.LoginRateLimit, tokenService)
+}
+
+func NewHandlerWithConfig(s *store.Store, admin config.AdminConfig, limiter config.LoginRateLimitConfig, tokenService *middleware.TokenService) *Handler {
+	return &Handler{store: s, admin: admin, loginLimiter: newLoginLimiterFromConfig(limiter), tokenService: tokenService}
 }
 
 func (h *Handler) RegisterPublic(group *gin.RouterGroup) {
@@ -36,8 +44,11 @@ func (h *Handler) RegisterPrivate(group *gin.RouterGroup) {
 
 func (h *Handler) login(c *gin.Context) {
 	var req loginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式不正确"})
+	if err := httputil.BindJSONBody(c, &req); err != nil {
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.InvalidRequest(c, "请求体格式不正确")
 		return
 	}
 
@@ -45,17 +56,17 @@ func (h *Handler) login(c *gin.Context) {
 	req.Password = strings.TrimSpace(req.Password)
 
 	if req.Username == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请输入用户名"})
+		httputil.BadRequest(c, "请输入用户名")
 		return
 	}
 	if req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请输入密码"})
+		httputil.BadRequest(c, "请输入密码")
 		return
 	}
 
 	limiterKey := loginLimiterKey(c.ClientIP(), req.Username)
 	if h.loginLimiter != nil && !h.loginLimiter.Allow(limiterKey) {
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "登录失败次数过多，请稍后再试"})
+		httputil.RateLimited(c, "登录失败次数过多，请稍后再试", h.loginRetryAfter())
 		return
 	}
 
@@ -63,56 +74,61 @@ func (h *Handler) login(c *gin.Context) {
 	err := h.store.DB.Where("username = ?", req.Username).First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		h.recordLoginFailure(limiterKey)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+		httputil.Unauthorized(c, "用户名或密码错误")
 		return
 	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InternalError(c, err)
 		return
 	}
 	if !verifyPassword(user.PasswordHash, req.Password) {
 		h.recordLoginFailure(limiterKey)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+		httputil.Unauthorized(c, "用户名或密码错误")
 		return
 	}
 
 	if err := h.store.EnsureDefaultDataForUser(user.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InternalError(c, err)
 		return
 	}
 
 	h.recordLoginSuccess(limiterKey)
-	respondWithToken(c, user)
+	h.respondWithToken(c, user)
 }
 
 func (h *Handler) me(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	var user models.User
 	if err := h.store.DB.First(&user, uid).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		httputil.NotFound(c, "user not found")
 		return
 	}
-	c.JSON(http.StatusOK, user)
+	c.JSON(http.StatusOK, currentUserFromModel(user))
 }
 
 func (h *Handler) refresh(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	var user models.User
 	if err := h.store.DB.First(&user, uid).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		httputil.NotFound(c, "user not found")
 		return
 	}
-	respondWithToken(c, user)
+	h.respondWithToken(c, user)
 }
 
 func (h *Handler) logout(c *gin.Context) {
 	token, ok := middleware.BearerToken(c.GetHeader("Authorization"))
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing Authorization header"})
+		httputil.Unauthorized(c, "missing Authorization header")
 		return
 	}
 	if revoker := tokenRevokerFromContext(c); revoker != nil {
-		if err := revoker.RevokeToken(c.Request.Context(), token); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ttl, err := h.tokenRevocationTTL(token)
+		if err != nil {
+			httputil.Unauthorized(c, "invalid token")
+			return
+		}
+		if err := revoker.RevokeToken(c.Request.Context(), token, ttl); err != nil {
+			httputil.InternalError(c, err)
 			return
 		}
 	}
@@ -120,9 +136,9 @@ func (h *Handler) logout(c *gin.Context) {
 }
 
 func (h *Handler) EnsureBootstrapAdmin() error {
-	username := strings.TrimSpace(os.Getenv("ADMIN_USERNAME"))
-	password := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD"))
-	name := strings.TrimSpace(os.Getenv("ADMIN_NAME"))
+	username := strings.TrimSpace(h.admin.Username)
+	password := strings.TrimSpace(h.admin.Password)
+	name := strings.TrimSpace(h.admin.Name)
 	if username == "" {
 		return errors.New("ADMIN_USERNAME is required")
 	}
@@ -165,16 +181,31 @@ func (h *Handler) EnsureBootstrapAdmin() error {
 	return h.store.EnsureDefaultDataForUser(user.ID)
 }
 
-func respondWithToken(c *gin.Context, user models.User) {
-	token, err := middleware.BuildToken(user.ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+func (h *Handler) respondWithToken(c *gin.Context, user models.User) {
+	if h.tokenService == nil {
+		httputil.InternalError(c, errors.New("token service is not configured"))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"token": token,
-		"user":  user,
+	token, err := h.tokenService.BuildToken(user.ID)
+	if err != nil {
+		httputil.InternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, loginResponse{
+		Token: token,
+		User:  currentUserFromModel(user),
 	})
+}
+
+func (h *Handler) tokenRevocationTTL(token string) (time.Duration, error) {
+	if h.tokenService == nil {
+		return 0, errors.New("token service is not configured")
+	}
+	expiresAt, err := h.tokenService.TokenRevocationExpiresAt(token)
+	if err != nil {
+		return 0, err
+	}
+	return time.Until(expiresAt), nil
 }
 
 func (h *Handler) recordLoginFailure(key string) {
@@ -183,43 +214,24 @@ func (h *Handler) recordLoginFailure(key string) {
 	}
 }
 
+func (h *Handler) loginRetryAfter() time.Duration {
+	if h.loginLimiter == nil {
+		return 0
+	}
+	return h.loginLimiter.window
+}
+
 func (h *Handler) recordLoginSuccess(key string) {
 	if h.loginLimiter != nil {
 		h.loginLimiter.RecordSuccess(key)
 	}
 }
 
-func newLoginLimiterFromEnv() *loginLimiter {
-	maxFailures := intEnv("LOGIN_RATE_LIMIT_MAX_FAILURES", 5)
-	window := durationEnv("LOGIN_RATE_LIMIT_WINDOW", 10*time.Minute)
-	if maxFailures <= 0 || window <= 0 {
+func newLoginLimiterFromConfig(cfg config.LoginRateLimitConfig) *loginLimiter {
+	if cfg.MaxFailures <= 0 || cfg.Window <= 0 {
 		return nil
 	}
-	return newLoginLimiter(maxFailures, window)
-}
-
-func intEnv(key string, fallback int) int {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return fallback
-	}
-	return value
-}
-
-func durationEnv(key string, fallback time.Duration) time.Duration {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback
-	}
-	value, err := time.ParseDuration(raw)
-	if err != nil {
-		return fallback
-	}
-	return value
+	return newLoginLimiter(cfg.MaxFailures, cfg.Window)
 }
 
 func tokenRevokerFromContext(c *gin.Context) *TokenRevoker {

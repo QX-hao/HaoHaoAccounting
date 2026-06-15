@@ -1,13 +1,17 @@
 package reports
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/money"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
+	"gorm.io/gorm"
 )
+
+type reportContextKey struct{}
 
 func TestSummaryAggregatesMoneyFromCents(t *testing.T) {
 	s := testutil.NewStore(t)
@@ -38,7 +42,7 @@ func TestSummaryAggregatesMoneyFromCents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	summary, err := NewService(s, nil).Summary(user.ID, SummaryFilter{Start: now.Add(-time.Hour), End: now.Add(time.Hour)})
+	summary, err := NewService(s, nil).Summary(context.Background(), user.ID, SummaryFilter{Start: now.Add(-time.Hour), End: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
@@ -91,7 +95,7 @@ func TestSummaryFiltersByCategoryAndAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	summary, err := NewService(s, nil).Summary(user.ID, SummaryFilter{
+	summary, err := NewService(s, nil).Summary(context.Background(), user.ID, SummaryFilter{
 		Start:      now.Add(-time.Hour),
 		End:        now.Add(time.Hour),
 		CategoryID: food.ID,
@@ -136,7 +140,7 @@ func TestSummaryIncludesTrendsBudgetsAndSummaryTables(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	summary, err := NewService(s, nil).Summary(user.ID, SummaryFilter{
+	summary, err := NewService(s, nil).Summary(context.Background(), user.ID, SummaryFilter{
 		Start: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 6, 30, 23, 59, 59, 0, time.UTC),
 		Trend: "day",
@@ -185,5 +189,55 @@ func TestSummaryIncludesTrendsBudgetsAndSummaryTables(t *testing.T) {
 	}
 	if monthlyRows != 1 {
 		t.Fatalf("monthly summary table rows = %d", monthlyRows)
+	}
+}
+
+func TestServicePassesContextToGORMQueries(t *testing.T) {
+	s := testutil.NewStore(t)
+	service := NewService(s, nil)
+	ctx := context.WithValue(context.Background(), reportContextKey{}, "request-context")
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	callbackName := "reports:test_context"
+	var got any
+	if err := s.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(db *gorm.DB) {
+		got = db.Statement.Context.Value(reportContextKey{})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = s.DB.Callback().Query().Remove(callbackName)
+	})
+
+	if _, err := service.Summary(ctx, 1, SummaryFilter{Start: now.Add(-time.Hour), End: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if got != "request-context" {
+		t.Fatalf("gorm context value = %#v", got)
+	}
+}
+
+func TestRequestContextFallsBackForNil(t *testing.T) {
+	if requestContext(nil) == nil {
+		t.Fatal("expected fallback context")
+	}
+}
+
+func TestCacheWriteContextDetachesCancellationAndPreservesValues(t *testing.T) {
+	parent, cancel := context.WithCancel(context.WithValue(context.Background(), reportContextKey{}, "request-context"))
+	cancel()
+
+	ctx := cacheWriteContext(parent)
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("cache write context error = %v", err)
+	}
+	if got := ctx.Value(reportContextKey{}); got != "request-context" {
+		t.Fatalf("context value = %#v", got)
+	}
+}
+
+func TestCacheWriteContextFallsBackForNil(t *testing.T) {
+	if cacheWriteContext(nil) == nil {
+		t.Fatal("expected fallback context")
 	}
 }

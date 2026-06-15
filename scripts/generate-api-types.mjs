@@ -15,6 +15,10 @@ const clientOutputPaths = [
 const source = fs.readFileSync(openapiPath, 'utf8');
 const schemasSource = source.slice(source.indexOf('  schemas:'));
 const schemaNames = [...schemasSource.matchAll(/^    ([A-Za-z][A-Za-z0-9]*):$/gm)].map((match) => match[1]);
+const duplicateSchemaNames = schemaNames.filter((name, index) => schemaNames.indexOf(name) !== index);
+if (duplicateSchemaNames.length > 0) {
+  throw new Error(`Duplicate schemas: ${[...new Set(duplicateSchemaNames)].join(', ')}`);
+}
 const schemas = Object.fromEntries(schemaNames.map((name, index) => {
   const marker = `    ${name}:`;
   const start = schemasSource.indexOf(marker);
@@ -22,6 +26,10 @@ const schemas = Object.fromEntries(schemaNames.map((name, index) => {
   const end = nextName ? schemasSource.indexOf(`    ${nextName}:`, start + marker.length) : schemasSource.length;
   return [name, schemasSource.slice(start, end)];
 }));
+
+validateSchemaConstraints(schemas);
+validateParameterConstraints(source);
+validateResponseComponents(source);
 
 const generated = [
   '// Generated from backend/api/openapi.yaml. Do not edit by hand.',
@@ -40,6 +48,136 @@ const client = emitClient(endpoints);
 for (const outputPath of clientOutputPaths) {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, client);
+}
+
+function validateSchemaConstraints(allSchemas) {
+  const checks = [
+    ['LoginRequest', 'minLength: 1'],
+    ['AccountRequest', 'minLength: 1'],
+    ['AccountRequest', 'minimum: 0'],
+    ['BudgetRequest', "pattern: '^\\d{4}-\\d{2}$'"],
+    ['BudgetRequest', 'minimum: 0'],
+    ['CategoryRequest', 'minLength: 1'],
+    ['TransactionRequest', 'exclusiveMinimum: 0'],
+    ['TransactionRequest', 'minimum: 1'],
+    ['TransactionRequest', 'minLength: 1'],
+    ['AIParseRequest', 'minLength: 1'],
+    ['ImportTextRequest', 'maxLength: 5242880'],
+    ['ImportTextRequest', 'occurred_at,type,amount,category,account,note,tags'],
+    ['ImportFileRequest', 'occurred_at,type,amount,category,account,note,tags'],
+  ];
+  for (const [schemaName, requiredText] of checks) {
+    if (!allSchemas[schemaName]?.includes(requiredText)) {
+      throw new Error(`${schemaName} is missing ${requiredText}`);
+    }
+  }
+
+  validateRequestSchemasAreClosed(allSchemas);
+  validatePaginationSchema(allSchemas.Pagination || '');
+}
+
+function validateRequestSchemasAreClosed(allSchemas) {
+  for (const schemaName of Object.keys(allSchemas)) {
+    if (!schemaName.endsWith('Request')) {
+      continue;
+    }
+    if (!allSchemas[schemaName].includes('additionalProperties: false')) {
+      throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validatePaginationSchema(schema) {
+  const page = schemaPropertyBlock(schema, 'page');
+  if (!page.includes('minimum: 1')) {
+    throw new Error('Pagination.page is missing minimum: 1');
+  }
+
+  const pageSize = schemaPropertyBlock(schema, 'pageSize');
+  if (!pageSize.includes('minimum: 1')) {
+    throw new Error('Pagination.pageSize is missing minimum: 1');
+  }
+  if (!pageSize.includes('maximum: 200')) {
+    throw new Error('Pagination.pageSize is missing maximum: 200');
+  }
+
+  const total = schemaPropertyBlock(schema, 'total');
+  if (!total.includes('minimum: 0')) {
+    throw new Error('Pagination.total is missing minimum: 0');
+  }
+}
+
+function schemaPropertyBlock(schema, propertyName) {
+  const pattern = new RegExp(`^        ${propertyName}:\\n(?:          .+\\n)+`, 'm');
+  return schema.match(pattern)?.[0] || '';
+}
+
+function validateParameterConstraints(openapi) {
+  const idParameter = openapi.match(/^    Id:\n(?:      .+\n)+/m)?.[0] || '';
+  if (!idParameter.includes('minimum: 1')) {
+    throw new Error('components.parameters.Id is missing minimum: 1');
+  }
+
+  const requestIDParameter = openapi.match(/^    RequestID:\n(?:      .+\n)+/m)?.[0] || '';
+  validateRequestIDSchema(requestIDParameter, 'components.parameters.RequestID');
+}
+
+function validateResponseComponents(openapi) {
+  const methodNotAllowed = openapi.match(/^    MethodNotAllowed:\n(?:      .+\n)+/m)?.[0] || '';
+  if (!methodNotAllowed.includes('Allow:')) {
+    throw new Error('components.responses.MethodNotAllowed is missing Allow header');
+  }
+
+  const unauthorized = openapi.match(/^    Unauthorized:\n(?:      .+\n)+/m)?.[0] || '';
+  if (!unauthorized.includes('WWW-Authenticate:')) {
+    throw new Error('components.responses.Unauthorized is missing WWW-Authenticate header');
+  }
+  const wwwAuthenticate = componentHeaderBlock(openapi, 'WWWAuthenticate');
+  if (!wwwAuthenticate.includes('invalid_token')) {
+    throw new Error('components.headers.WWWAuthenticate is missing invalid_token guidance');
+  }
+
+  const rateLimited = openapi.match(/^    RateLimited:\n(?:      .+\n)+/m)?.[0] || '';
+  if (!rateLimited.includes('Retry-After:')) {
+    throw new Error('components.responses.RateLimited is missing Retry-After header');
+  }
+  const retryAfter = componentHeaderBlock(openapi, 'RetryAfter');
+  if (!retryAfter.includes('HTTP-date') || !retryAfter.includes('delay-seconds') || !retryAfter.includes('type: string')) {
+    throw new Error('components.headers.RetryAfter must document HTTP-date or delay-seconds');
+  }
+
+  const notAcceptable = openapi.match(/^    NotAcceptable:\n(?:      .+\n)+/m)?.[0] || '';
+  if (!notAcceptable.includes('application/json:')) {
+    throw new Error('components.responses.NotAcceptable is missing application/json error response');
+  }
+  if (!notAcceptable.includes('Vary:')) {
+    throw new Error('components.responses.NotAcceptable is missing Vary header');
+  }
+
+  const vary = componentHeaderBlock(openapi, 'Vary');
+  if (!vary.includes('type: string')) {
+    throw new Error('components.headers.Vary is missing string schema');
+  }
+
+  const contentDisposition = componentHeaderBlock(openapi, 'ContentDisposition');
+  if (!contentDisposition.includes('filename*')) {
+    throw new Error('components.headers.ContentDisposition is missing filename* guidance');
+  }
+
+  const requestID = componentHeaderBlock(openapi, 'RequestID');
+  validateRequestIDSchema(requestID, 'components.headers.RequestID');
+}
+
+function validateRequestIDSchema(block, name) {
+  if (!block.includes('minLength: 1')) {
+    throw new Error(`${name} is missing minLength: 1`);
+  }
+  if (!block.includes('maxLength: 128')) {
+    throw new Error(`${name} is missing maxLength: 128`);
+  }
+  if (!block.includes("pattern: '^[!-~]+$'")) {
+    throw new Error(`${name} is missing visible ASCII pattern`);
+  }
 }
 
 function emitType(name, block) {
@@ -94,7 +232,6 @@ function emitClient(endpoints) {
   lines.push('');
   lines.push('function setQueryParam(search: URLSearchParams, key: string, value: unknown) {');
   lines.push("  if (value === undefined || value === null || value === '') return;");
-  lines.push("  if (typeof value === 'number' && value === 0) return;");
   lines.push('  search.set(key, String(value));');
   lines.push('}');
   lines.push('');
@@ -156,30 +293,264 @@ function emitEndpointMethod(endpoint) {
 function parseEndpoints(openapi) {
   const pathsBlock = openapi.slice(openapi.indexOf('paths:'), openapi.indexOf('components:'));
   const pathMatches = [...pathsBlock.matchAll(/^  (\/[^:]+):$/gm)];
+  const operationIds = new Map();
   const result = [];
   for (const [index, match] of pathMatches.entries()) {
     const apiPath = match[1];
     const start = match.index;
     const end = pathMatches[index + 1]?.index ?? pathsBlock.length;
     const pathBlock = pathsBlock.slice(start, end);
+    const pathParameters = parseOperationParameters(pathLevelBlock(pathBlock));
     const methodMatches = [...pathBlock.matchAll(/^    (get|post|put|delete):$/gm)];
     for (const [methodIndex, methodMatch] of methodMatches.entries()) {
       const method = methodMatch[1];
       const methodStart = methodMatch.index;
       const methodEnd = methodMatches[methodIndex + 1]?.index ?? pathBlock.length;
       const methodBlock = pathBlock.slice(methodStart, methodEnd);
+      const operationId = methodBlock.match(/operationId:\s+([A-Za-z][A-Za-z0-9]*)/)?.[1] || '';
+      const tags = operationTags(methodBlock);
+      const responseStatuses = operationResponseStatuses(methodBlock);
+      const parameters = [...pathParameters, ...parseOperationParameters(methodBlock)];
+      if (!operationId) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} is missing operationId`);
+      }
+      if (operationIds.has(operationId)) {
+        throw new Error(`${operationId} is used by both ${operationIds.get(operationId)} and ${method.toUpperCase()} ${apiPath}`);
+      }
+      operationIds.set(operationId, `${method.toUpperCase()} ${apiPath}`);
+      if (tags.length === 0) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} is missing tags`);
+      }
+      if (![...responseStatuses].some((status) => /^2\d\d$/.test(status))) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} is missing 2xx success response`);
+      }
+      if (!isPublicOperation(methodBlock) && !responseStatuses.has('401')) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} is missing 401 response`);
+      }
+      if (!responseStatuses.has('405')) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} is missing 405 response`);
+      }
+      if (responseStatuses.has('500') && !responseStatuses.has('504')) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} declares 500 response but is missing 504 timeout response`);
+      }
+      if (operationHasSuccessContent(methodBlock, source) && !responseStatuses.has('406')) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} returns a response body but is missing 406 response`);
+      }
+      validateNegotiatedResponseHeaders(method, apiPath, methodBlock, responseStatuses, source);
+      validateAuthOperationContract(method, apiPath, methodBlock, responseStatuses);
+      validatePathParameters(method, apiPath, parameters);
+      validateSuccessResponseHeaders(method, apiPath, methodBlock);
+      validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses);
+      if (operationHasRequestBody(methodBlock)) {
+        if (!responseStatuses.has('400')) {
+          throw new Error(`${method.toUpperCase()} ${apiPath} is missing 400 response`);
+        }
+        if (!responseStatuses.has('413')) {
+          throw new Error(`${method.toUpperCase()} ${apiPath} is missing 413 response`);
+        }
+        if (!responseStatuses.has('415')) {
+          throw new Error(`${method.toUpperCase()} ${apiPath} is missing 415 response`);
+        }
+      }
       result.push({
         path: apiPath,
         method,
-        name: endpointMethodName(method, apiPath),
+        name: operationId,
+        tags,
         requestSchema: requestSchema(methodBlock),
         responseSchema: responseSchema(methodBlock),
         multipart: methodBlock.includes('multipart/form-data'),
-        parameters: parseOperationParameters(methodBlock),
+        parameters,
       });
     }
   }
   return result;
+}
+
+function validateAuthOperationContract(method, apiPath, methodBlock, responseStatuses) {
+  const operation = `${method.toUpperCase()} ${apiPath}`;
+  if (apiPath === '/auth/login' && method === 'post' && !isPublicOperation(methodBlock)) {
+    throw new Error(`${operation} must explicitly declare security: []`);
+  }
+  if (['/auth/refresh', '/auth/logout', '/me'].includes(apiPath) && isPublicOperation(methodBlock)) {
+    throw new Error(`${operation} must require bearer authentication`);
+  }
+  if (apiPath === '/auth/login' && method === 'post' && !responseStatuses.has('429')) {
+    throw new Error('POST /auth/login is missing 429 rate limited response');
+  }
+}
+
+function validatePathParameters(method, apiPath, parameters) {
+  const templateParams = [...apiPath.matchAll(/\{([A-Za-z][A-Za-z0-9]*)\}/g)].map((match) => match[1]);
+  for (const name of templateParams) {
+    if (!parameters.some((param) => param.name === name && param.in === 'path')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} is missing path parameter declaration for ${name}`);
+    }
+  }
+
+  const templateParamSet = new Set(templateParams);
+  for (const param of parameters.filter((item) => item.in === 'path')) {
+    if (!templateParamSet.has(param.name)) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} declares path parameter ${param.name} that is not present in path template`);
+    }
+  }
+}
+
+function validateSuccessResponseHeaders(method, apiPath, methodBlock) {
+  const successResponses = operationResponseBlocks(methodBlock).filter((response) => /^2\d\d$/.test(response.status));
+  for (const response of successResponses) {
+    if (response.block.includes("$ref: '#/components/responses/Ok'")) continue;
+    if (response.block.includes('X-Request-ID:')) continue;
+    throw new Error(`${method.toUpperCase()} ${apiPath} ${response.status} response is missing X-Request-ID header`);
+  }
+}
+
+function validateNegotiatedResponseHeaders(method, apiPath, methodBlock, responseStatuses, openapi) {
+  if (!responseStatuses.has('406')) return;
+
+  const successResponses = operationResponseBlocks(methodBlock).filter((response) => /^2\d\d$/.test(response.status));
+  for (const response of successResponses) {
+    if (responseIncludesHeader(response.block, openapi, 'Vary:')) continue;
+    throw new Error(`${method.toUpperCase()} ${apiPath} ${response.status} negotiated response is missing Vary header`);
+  }
+}
+
+function responseIncludesHeader(responseBlock, openapi, headerText) {
+  if (responseBlock.includes(headerText)) return true;
+  const componentName = responseBlock.match(/\$ref:\s+'#\/components\/responses\/([^']+)'/)?.[1] || '';
+  return componentName ? responseComponentBlock(openapi, componentName).includes(headerText) : false;
+}
+
+function validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses) {
+  const parameters = parseOperationParameters(methodBlock).filter((param) => param.in === 'query');
+  if (parameters.length === 0) return;
+
+  if (apiPath === '/transactions' && method === 'get') {
+    require400Response(method, apiPath, responseStatuses);
+    requireParameterText(method, apiPath, methodBlock, 'page', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'maximum: 200');
+    requireParameterText(method, apiPath, methodBlock, 'start', 'format: date-time');
+    requireParameterText(method, apiPath, methodBlock, 'end', 'format: date-time');
+    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
+  }
+  if (apiPath === '/budgets' && method === 'get') {
+    require400Response(method, apiPath, responseStatuses);
+    requireParameterText(method, apiPath, methodBlock, 'month', "pattern: '^\\d{4}-\\d{2}$'");
+  }
+  if (apiPath === '/categories' && method === 'get') {
+    require400Response(method, apiPath, responseStatuses);
+    requireParameterText(method, apiPath, methodBlock, 'type', "$ref: '#/components/schemas/TransactionType'");
+  }
+  if (apiPath === '/reports/summary' && method === 'get') {
+    require400Response(method, apiPath, responseStatuses);
+    requireParameterText(method, apiPath, methodBlock, 'start', 'format: date-time');
+    requireParameterText(method, apiPath, methodBlock, 'end', 'format: date-time');
+    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'trend', 'enum: [day, week, month]');
+  }
+  if (apiPath === '/io/export' && method === 'get') {
+    require400Response(method, apiPath, responseStatuses);
+    requireParameterText(method, apiPath, methodBlock, 'format', 'enum: [csv, xlsx]');
+    requireParameterText(method, apiPath, methodBlock, 'start', 'format: date-time');
+    requireParameterText(method, apiPath, methodBlock, 'end', 'format: date-time');
+    if (!methodBlock.includes('Content-Disposition:')) {
+      throw new Error('GET /io/export is missing Content-Disposition response header');
+    }
+  }
+}
+
+function require400Response(method, apiPath, responseStatuses) {
+  if (!responseStatuses.has('400')) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} has validated query parameters but is missing 400 response`);
+  }
+}
+
+function requireParameterText(method, apiPath, block, name, requiredText) {
+  const parameterBlock = parameterBlockByName(block, name);
+  if (!parameterBlock.includes(requiredText)) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} parameter ${name} is missing ${requiredText}`);
+  }
+}
+
+function parameterBlockByName(block, name) {
+  const parametersBlock = nestedBlock(block, 'parameters:');
+  const paramBlocks = parametersBlock.split(/\n(?=\s+- name:|\s+- \$ref:)/).map((item) => item.trim()).filter(Boolean);
+  return paramBlocks.find((paramBlock) => paramBlock.includes(`name: ${name}`)) || '';
+}
+
+function operationResponseStatuses(block) {
+  return new Set(operationResponseBlocks(block).map((response) => response.status));
+}
+
+function operationHasSuccessContent(block, openapi) {
+  return operationResponseBlocks(block).some((response) => {
+    if (!/^2\d\d$/.test(response.status)) return false;
+    if (response.block.includes('content:')) return true;
+    const componentName = response.block.match(/\$ref:\s+'#\/components\/responses\/([^']+)'/)?.[1] || '';
+    return componentName ? responseComponentBlock(openapi, componentName).includes('content:') : false;
+  });
+}
+
+function responseComponentBlock(openapi, componentName) {
+  const responsesBlock = nestedBlock(openAPIComponentsBlock(openapi), 'responses:');
+  const marker = `    ${componentName}:`;
+  const start = responsesBlock.indexOf(marker);
+  if (start === -1) return '';
+  const next = responsesBlock.slice(start + marker.length).search(/^    [A-Za-z][A-Za-z0-9]*:/m);
+  return responsesBlock.slice(start, next === -1 ? undefined : start + marker.length + next);
+}
+
+function componentHeaderBlock(openapi, componentName) {
+  const headersBlock = nestedBlock(openAPIComponentsBlock(openapi), 'headers:');
+  const marker = `    ${componentName}:`;
+  const start = headersBlock.indexOf(marker);
+  if (start === -1) return '';
+  const next = headersBlock.slice(start + marker.length).search(/^    [A-Za-z][A-Za-z0-9]*:/m);
+  return headersBlock.slice(start, next === -1 ? undefined : start + marker.length + next);
+}
+
+function openAPIComponentsBlock(openapi) {
+  const start = openapi.indexOf('components:\n');
+  return start === -1 ? '' : openapi.slice(start);
+}
+
+function operationResponseBlocks(block) {
+  const responsesBlock = nestedBlock(block, 'responses:');
+  const matches = [...responsesBlock.matchAll(/^        '?(\d{3}|default)'?:/gm)];
+  return matches.map((match, index) => {
+    const next = matches[index + 1];
+    return {
+      status: match[1],
+      block: responsesBlock.slice(match.index, next?.index),
+    };
+  });
+}
+
+function isPublicOperation(block) {
+  if (/^\s+security:\s*\[\]\s*$/m.test(block)) return true;
+  const securityBlock = nestedBlock(block, 'security:');
+  return securityBlock.split('\n').some((line) => line.trim() === '[]');
+}
+
+function operationTags(block) {
+  const inline = block.match(/tags:\s+\[([^\]]+)\]/)?.[1];
+  if (inline) return inline.split(',').map((value) => value.trim()).filter(Boolean);
+
+  const tagsBlock = nestedBlock(block, 'tags:');
+  if (!tagsBlock) return [];
+  return tagsBlock
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- '))
+    .map((line) => line.slice(2).trim());
+}
+
+function pathLevelBlock(pathBlock) {
+  const firstMethodIndex = pathBlock.search(/^    (get|post|put|delete):/m);
+  return firstMethodIndex === -1 ? pathBlock : pathBlock.slice(0, firstMethodIndex);
 }
 
 function parseOperationParameters(block) {
@@ -205,6 +576,10 @@ function requestSchema(block) {
   const requestBlock = nestedBlock(block, 'requestBody:');
   if (!requestBlock) return '';
   return requestBlock.match(/\$ref:\s+'#\/components\/schemas\/([^']+)'/)?.[1] || '';
+}
+
+function operationHasRequestBody(block) {
+  return nestedBlock(block, 'requestBody:') !== '';
 }
 
 function responseSchema(block) {
@@ -291,6 +666,10 @@ function propertyType(body) {
   if (ref) return ref;
 
   const type = body.match(/^          type:\s+([A-Za-z]+)/m)?.[1];
+  const propertyEnumValues = enumValues(body);
+  if (type === 'string' && propertyEnumValues.length > 0) {
+    return propertyEnumValues.map((value) => JSON.stringify(value)).join(' | ');
+  }
   if (type === 'array') {
     const itemRef = body.match(/^          items:\n\s+\$ref:\s+'#\/components\/schemas\/([^']+)'/m)?.[1];
     if (itemRef) return `${itemRef}[]`;

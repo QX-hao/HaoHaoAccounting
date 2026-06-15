@@ -1,9 +1,11 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
 	"gorm.io/driver/mysql"
@@ -16,8 +18,19 @@ type Store struct {
 }
 
 type Config struct {
-	Driver string
-	DSN    string
+	Driver          string
+	DSN             string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
+}
+
+type PoolConfig struct {
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
 }
 
 func New(cfg Config) (*Store, error) {
@@ -44,6 +57,10 @@ func New(cfg Config) (*Store, error) {
 		return nil, err
 	}
 
+	if err := ApplyPoolConfig(db, cfg.PoolConfig()); err != nil {
+		return nil, err
+	}
+
 	if err := db.AutoMigrate(
 		&models.User{},
 		&models.Account{},
@@ -66,6 +83,46 @@ func New(cfg Config) (*Store, error) {
 	}
 
 	return s, nil
+}
+
+func (cfg Config) PoolConfig() PoolConfig {
+	return PoolConfig{
+		MaxOpenConns:    cfg.MaxOpenConns,
+		MaxIdleConns:    cfg.MaxIdleConns,
+		ConnMaxLifetime: cfg.ConnMaxLifetime,
+		ConnMaxIdleTime: cfg.ConnMaxIdleTime,
+	}
+}
+
+func ApplyPoolConfig(db *gorm.DB, cfg PoolConfig) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	if cfg.MaxOpenConns > 0 {
+		sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	}
+	if cfg.MaxIdleConns > 0 {
+		sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+	}
+	if cfg.ConnMaxLifetime > 0 {
+		sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
+	}
+	if cfg.ConnMaxIdleTime > 0 {
+		sqlDB.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
+	}
+	return nil
+}
+
+func (s *Store) Ping(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return errors.New("database is not configured")
+	}
+	db, err := s.DB.DB()
+	if err != nil {
+		return err
+	}
+	return db.PingContext(ctx)
 }
 
 func (s *Store) migrateFloatAmountsToCents() error {

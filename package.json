@@ -1,5 +1,6 @@
 {
   "scripts": {
-    "generate:api-types": "node scripts/generate-api-types.mjs"
+    "generate:api-types": "node scripts/generate-api-types.mjs",
+    "test:api-generator": "node --test scripts/tests/*.test.mjs"
   }
 }

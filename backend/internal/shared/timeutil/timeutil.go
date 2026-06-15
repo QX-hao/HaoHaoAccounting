@@ -27,12 +27,65 @@ func ResolveRange(startRaw, endRaw string) (time.Time, time.Time) {
 		start = t
 	}
 	if t, err := ParseDateTime(endRaw); strings.TrimSpace(endRaw) != "" && err == nil {
-		end = normalizeRangeEnd(strings.TrimSpace(endRaw), t)
+		end = NormalizeRangeEnd(strings.TrimSpace(endRaw), t)
 	}
 	return start, end
 }
 
-func normalizeRangeEnd(raw string, value time.Time) time.Time {
+func ResolveRangeStrict(startRaw, endRaw string) (time.Time, time.Time, error) {
+	start, end := ResolveRange(startRaw, endRaw)
+	startRaw = strings.TrimSpace(startRaw)
+	endRaw = strings.TrimSpace(endRaw)
+	hasStart := startRaw != ""
+	hasEnd := endRaw != ""
+	if hasStart {
+		parsed, err := ParseDateTime(startRaw)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("invalid start datetime")
+		}
+		start = parsed
+	}
+	if hasEnd {
+		parsed, err := ParseDateTime(endRaw)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("invalid end datetime")
+		}
+		end = NormalizeRangeEnd(endRaw, parsed)
+	}
+	if hasStart && hasEnd && start.After(end) {
+		return time.Time{}, time.Time{}, errors.New("start datetime must be before or equal to end datetime")
+	}
+	return start, end, nil
+}
+
+func ResolveOptionalRangeStrict(startRaw, endRaw string) (time.Time, time.Time, error) {
+	var start time.Time
+	var end time.Time
+	startRaw = strings.TrimSpace(startRaw)
+	endRaw = strings.TrimSpace(endRaw)
+	hasStart := startRaw != ""
+	hasEnd := endRaw != ""
+	if hasStart {
+		parsed, err := ParseDateTime(startRaw)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("invalid start datetime")
+		}
+		start = parsed
+	}
+	if hasEnd {
+		parsed, err := ParseDateTime(endRaw)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("invalid end datetime")
+		}
+		end = NormalizeRangeEnd(endRaw, parsed)
+	}
+	if hasStart && hasEnd && start.After(end) {
+		return time.Time{}, time.Time{}, errors.New("start datetime must be before or equal to end datetime")
+	}
+	return start, end, nil
+}
+
+func NormalizeRangeEnd(raw string, value time.Time) time.Time {
 	if isDateOnly(raw) {
 		return value.AddDate(0, 0, 1).Add(-time.Nanosecond)
 	}

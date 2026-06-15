@@ -22,15 +22,15 @@ func NewService(redisCache *cache.RedisCache) *Service {
 	return &Service{cache: redisCache}
 }
 
-func (s *Service) Parse(userID uint, text string) ParseResponse {
+func (s *Service) Parse(ctx context.Context, userID uint, text string) ParseResponse {
 	cacheKey := cache.UserAIParseKey(userID, text)
 
 	if s.cache != nil && s.cache.Enabled() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		cacheCtx, cancel := context.WithTimeout(requestContext(ctx), time.Second)
 		defer cancel()
 
 		var cached services.AIParseResult
-		ok, err := s.cache.GetJSON(ctx, cacheKey, &cached)
+		ok, err := s.cache.GetJSON(cacheCtx, cacheKey, &cached)
 		if err == nil && ok {
 			return ParseResponse{RequiresConfirmation: true, Cached: true, Result: cached}
 		}
@@ -38,10 +38,24 @@ func (s *Service) Parse(userID uint, text string) ParseResponse {
 
 	parsed := services.ParseNaturalLedgerText(text)
 	if s.cache != nil && s.cache.Enabled() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		cacheCtx, cancel := context.WithTimeout(cacheWriteContext(ctx), time.Second)
 		defer cancel()
-		_ = s.cache.SetJSON(ctx, cacheKey, parsed, 10*time.Minute)
+		_ = s.cache.SetJSON(cacheCtx, cacheKey, parsed, 10*time.Minute)
 	}
 
 	return ParseResponse{RequiresConfirmation: true, Cached: false, Result: parsed}
+}
+
+func requestContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func cacheWriteContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
 }

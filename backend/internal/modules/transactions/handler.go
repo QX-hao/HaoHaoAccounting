@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/queryutil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/timeutil"
@@ -27,38 +28,56 @@ func (h *Handler) Register(group *gin.RouterGroup) {
 
 func (h *Handler) list(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	start, _ := timeutil.ParseDateTime(c.Query("start"))
-	end, _ := timeutil.ParseDateTime(c.Query("end"))
+	var query listQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		httputil.InvalidRequest(c, "invalid query parameters")
+		return
+	}
+	start, end, err := timeutil.ResolveOptionalRangeStrict(query.Start, query.End)
+	if err != nil {
+		httputil.InvalidRequest(c, err.Error())
+		return
+	}
+	page := query.Page
+	if page == nil {
+		defaultPage := 1
+		page = &defaultPage
+	}
+	pageSize := query.PageSize
+	if pageSize == nil {
+		defaultPageSize := 20
+		pageSize = &defaultPageSize
+	}
+	categoryID := uint(0)
+	if query.CategoryID != nil {
+		categoryID = *query.CategoryID
+	}
+	accountID := uint(0)
+	if query.AccountID != nil {
+		accountID = *query.AccountID
+	}
 
-	rows, total, err := h.service.List(uid, ListFilter{
-		Page:       queryutil.ParseInt(c.Query("page"), 1),
-		PageSize:   queryutil.ParseInt(c.Query("pageSize"), 20),
+	rows, total, err := h.service.List(c.Request.Context(), uid, ListFilter{
+		Page:       *page,
+		PageSize:   *pageSize,
 		Start:      start,
 		End:        end,
-		Type:       strings.TrimSpace(c.Query("type")),
-		CategoryID: queryutil.ParseUint(c.Query("categoryId")),
-		AccountID:  queryutil.ParseUint(c.Query("accountId")),
-		Keyword:    strings.TrimSpace(c.Query("q")),
+		Type:       strings.TrimSpace(query.Type),
+		CategoryID: categoryID,
+		AccountID:  accountID,
+		Keyword:    strings.TrimSpace(query.Keyword),
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InternalError(c, err)
 		return
 	}
 
-	page := queryutil.ParseInt(c.Query("page"), 1)
-	pageSize := queryutil.ParseInt(c.Query("pageSize"), 20)
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 200 {
-		pageSize = 20
-	}
-
+	httputil.SetPaginationHeaders(c, total, *page, *pageSize)
 	c.JSON(http.StatusOK, gin.H{
 		"items": rows,
 		"pagination": gin.H{
-			"page":     page,
-			"pageSize": pageSize,
+			"page":     *page,
+			"pageSize": *pageSize,
 			"total":    total,
 		},
 	})
@@ -67,18 +86,21 @@ func (h *Handler) list(c *gin.Context) {
 func (h *Handler) create(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	var req Request
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+	if err := httputil.BindJSONBody(c, &req); err != nil {
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.InvalidRequest(c, "invalid request body")
 		return
 	}
 
-	tx, err := h.service.Create(uid, req)
+	tx, err := h.service.Create(c.Request.Context(), uid, req)
 	if err != nil {
 		if isClientError(err) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httputil.BadRequest(c, err.Error())
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, tx)
@@ -86,25 +108,32 @@ func (h *Handler) create(c *gin.Context) {
 
 func (h *Handler) update(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	id := queryutil.ParseUint(c.Param("id"))
-
-	var req Request
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+	id, ok := queryutil.ParsePositiveUint(c.Param("id"))
+	if !ok {
+		httputil.InvalidRequest(c, "invalid id")
 		return
 	}
 
-	tx, err := h.service.Update(uid, id, req)
+	var req Request
+	if err := httputil.BindJSONBody(c, &req); err != nil {
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.InvalidRequest(c, "invalid request body")
+		return
+	}
+
+	tx, err := h.service.Update(c.Request.Context(), uid, id, req)
 	if err != nil {
 		if err.Error() == "transaction not found" {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			httputil.NotFound(c, err.Error())
 			return
 		}
 		if isClientError(err) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httputil.BadRequest(c, err.Error())
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, tx)
@@ -112,14 +141,18 @@ func (h *Handler) update(c *gin.Context) {
 
 func (h *Handler) delete(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	id := queryutil.ParseUint(c.Param("id"))
+	id, ok := queryutil.ParsePositiveUint(c.Param("id"))
+	if !ok {
+		httputil.InvalidRequest(c, "invalid id")
+		return
+	}
 
-	if err := h.service.Delete(uid, id); err != nil {
+	if err := h.service.Delete(c.Request.Context(), uid, id); err != nil {
 		if err.Error() == "transaction not found" {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			httputil.NotFound(c, err.Error())
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InternalError(c, err)
 		return
 	}
 

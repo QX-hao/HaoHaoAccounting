@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/queryutil"
 	"github.com/gin-gonic/gin"
@@ -26,9 +27,14 @@ func (h *Handler) Register(group *gin.RouterGroup) {
 
 func (h *Handler) list(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	categories, err := h.service.List(uid, strings.TrimSpace(c.Query("type")))
+	var query listQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		httputil.InvalidRequest(c, "invalid query parameters")
+		return
+	}
+	categories, err := h.service.List(c.Request.Context(), uid, strings.TrimSpace(query.Type))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, categories)
@@ -37,18 +43,21 @@ func (h *Handler) list(c *gin.Context) {
 func (h *Handler) create(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	var req categoryRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+	if err := httputil.BindJSONBody(c, &req); err != nil {
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.InvalidRequest(c, "invalid request body")
 		return
 	}
 
-	category, err := h.service.Create(uid, req)
+	category, err := h.service.Create(c.Request.Context(), uid, req)
 	if err != nil {
 		if err.Error() == "type must be income or expense" || err.Error() == "name is required" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httputil.BadRequest(c, err.Error())
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, category)
@@ -56,22 +65,29 @@ func (h *Handler) create(c *gin.Context) {
 
 func (h *Handler) update(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	id := queryutil.ParseUint(c.Param("id"))
+	id, ok := queryutil.ParsePositiveUint(c.Param("id"))
+	if !ok {
+		httputil.InvalidRequest(c, "invalid id")
+		return
+	}
 	var req categoryRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+	if err := httputil.BindJSONBody(c, &req); err != nil {
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.InvalidRequest(c, "invalid request body")
 		return
 	}
 
-	category, err := h.service.Update(uid, id, req)
+	category, err := h.service.Update(c.Request.Context(), uid, id, req)
 	if err != nil {
 		switch err.Error() {
 		case "category not found":
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			httputil.NotFound(c, err.Error())
 		case "system category cannot be modified":
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			httputil.Forbidden(c, err.Error())
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httputil.InternalError(c, err)
 		}
 		return
 	}
@@ -80,18 +96,22 @@ func (h *Handler) update(c *gin.Context) {
 
 func (h *Handler) delete(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	id := queryutil.ParseUint(c.Param("id"))
+	id, ok := queryutil.ParsePositiveUint(c.Param("id"))
+	if !ok {
+		httputil.InvalidRequest(c, "invalid id")
+		return
+	}
 
-	if err := h.service.Delete(uid, id); err != nil {
+	if err := h.service.Delete(c.Request.Context(), uid, id); err != nil {
 		switch err.Error() {
 		case "category not found":
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			httputil.NotFound(c, err.Error())
 		case "system category cannot be deleted":
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			httputil.Forbidden(c, err.Error())
 		case "category in use by transactions":
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httputil.BadRequest(c, err.Error())
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httputil.InternalError(c, err)
 		}
 		return
 	}

@@ -69,3 +69,11 @@ type SummaryFilter struct {
 	AccountID  uint
 	Trend      string
 }
+
+type summaryQuery struct {
+	Start      string `form:"start"`
+	End        string `form:"end"`
+	CategoryID *uint  `form:"categoryId" binding:"omitempty,min=1"`
+	AccountID  *uint  `form:"accountId" binding:"omitempty,min=1"`
+	Trend      string `form:"trend" binding:"omitempty,oneof=day week month"`
+}

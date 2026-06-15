@@ -1,6 +1,7 @@
 package budgets
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -21,8 +22,8 @@ func NewService(s *store.Store, invalidator transactions.CacheInvalidator) *Serv
 	return &Service{store: s, invalidator: invalidator}
 }
 
-func (s *Service) List(userID uint, month string) ([]models.Budget, error) {
-	query := s.store.DB.Where("user_id = ?", userID)
+func (s *Service) List(ctx context.Context, userID uint, month string) ([]models.Budget, error) {
+	query := s.db(ctx).Where("user_id = ?", userID)
 	if cleanMonth := strings.TrimSpace(month); cleanMonth != "" {
 		query = query.Where("month = ?", cleanMonth)
 	}
@@ -32,54 +33,66 @@ func (s *Service) List(userID uint, month string) ([]models.Budget, error) {
 	return budgets, err
 }
 
-func (s *Service) Create(userID uint, req budgetRequest) (models.Budget, error) {
-	budget, err := s.buildBudget(userID, models.Budget{}, req)
+func (s *Service) Create(ctx context.Context, userID uint, req budgetRequest) (models.Budget, error) {
+	budget, err := s.buildBudget(ctx, userID, models.Budget{}, req)
 	if err != nil {
 		return models.Budget{}, err
 	}
-	if err := s.store.DB.Create(&budget).Error; err != nil {
+	if err := s.db(ctx).Create(&budget).Error; err != nil {
 		return models.Budget{}, err
 	}
-	s.invalidateUser(userID)
+	s.invalidateUser(ctx, userID)
 	return budget, nil
 }
 
-func (s *Service) Update(userID, id uint, req budgetRequest) (models.Budget, error) {
+func (s *Service) Update(ctx context.Context, userID, id uint, req budgetRequest) (models.Budget, error) {
 	var budget models.Budget
-	if err := s.store.DB.Where("id = ? AND user_id = ?", id, userID).First(&budget).Error; err != nil {
+	if err := s.db(ctx).Where("id = ? AND user_id = ?", id, userID).First(&budget).Error; err != nil {
 		return models.Budget{}, errors.New("budget not found")
 	}
 
-	next, err := s.buildBudget(userID, budget, req)
+	next, err := s.buildBudget(ctx, userID, budget, req)
 	if err != nil {
 		return models.Budget{}, err
 	}
-	if err := s.store.DB.Save(&next).Error; err != nil {
+	if err := s.db(ctx).Save(&next).Error; err != nil {
 		return models.Budget{}, err
 	}
-	s.invalidateUser(userID)
+	s.invalidateUser(ctx, userID)
 	return next, nil
 }
 
-func (s *Service) Delete(userID, id uint) error {
-	result := s.store.DB.Where("id = ? AND user_id = ?", id, userID).Delete(&models.Budget{})
+func (s *Service) Delete(ctx context.Context, userID, id uint) error {
+	result := s.db(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&models.Budget{})
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
 		return errors.New("budget not found")
 	}
-	s.invalidateUser(userID)
+	s.invalidateUser(ctx, userID)
 	return nil
 }
 
-func (s *Service) invalidateUser(userID uint) {
+func (s *Service) db(ctx context.Context) *gorm.DB {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.store.DB.WithContext(ctx)
+}
+
+func (s *Service) invalidateUser(ctx context.Context, userID uint) {
 	if s.invalidator != nil {
-		s.invalidator.InvalidateUser(userID)
+		if ctx == nil {
+			ctx = context.Background()
+		} else {
+			ctx = context.WithoutCancel(ctx)
+		}
+		s.invalidator.InvalidateUser(ctx, userID)
 	}
 }
 
-func (s *Service) buildBudget(userID uint, existing models.Budget, req budgetRequest) (models.Budget, error) {
+func (s *Service) buildBudget(ctx context.Context, userID uint, existing models.Budget, req budgetRequest) (models.Budget, error) {
 	month := strings.TrimSpace(req.Month)
 	if month == "" {
 		month = existing.Month
@@ -91,7 +104,7 @@ func (s *Service) buildBudget(userID uint, existing models.Budget, req budgetReq
 		return models.Budget{}, errors.New("amount must be >= 0")
 	}
 	if req.CategoryID > 0 {
-		if err := s.ensureExpenseCategory(userID, req.CategoryID); err != nil {
+		if err := s.ensureExpenseCategory(ctx, userID, req.CategoryID); err != nil {
 			return models.Budget{}, err
 		}
 	}
@@ -103,9 +116,9 @@ func (s *Service) buildBudget(userID uint, existing models.Budget, req budgetReq
 	return existing, nil
 }
 
-func (s *Service) ensureExpenseCategory(userID, categoryID uint) error {
+func (s *Service) ensureExpenseCategory(ctx context.Context, userID, categoryID uint) error {
 	var category models.Category
-	if err := s.store.DB.Where("id = ?", categoryID).First(&category).Error; err != nil {
+	if err := s.db(ctx).Where("id = ?", categoryID).First(&category).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("category not found")
 		}

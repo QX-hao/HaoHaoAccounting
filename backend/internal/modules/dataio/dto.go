@@ -73,3 +73,9 @@ type ImportPreviewRow struct {
 	Error           string  `json:"error,omitempty"`
 	DuplicateReason string  `json:"duplicateReason,omitempty"`
 }
+
+type exportQuery struct {
+	Format string `form:"format" binding:"omitempty,oneof=csv xlsx"`
+	Start  string `form:"start"`
+	End    string `form:"end"`
+}

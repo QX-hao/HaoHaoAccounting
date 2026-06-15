@@ -1,49 +1,48 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
+	"net/url"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/app"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/cache"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	if err := loadDotEnv(".env"); err != nil {
+	if err := config.LoadDotEnv(".env"); err != nil {
 		log.Printf("skip .env: %v", err)
 	}
-
-	driver := fallbackEnv("DB_DRIVER", "postgres")
-	dsn := os.Getenv("DB_DSN")
-	if strings.TrimSpace(dsn) == "" {
-		if strings.EqualFold(driver, "mysql") {
-			dsn = "root:root@tcp(127.0.0.1:53306)/haohaoaccounting?charset=utf8mb4&parseTime=True&loc=Local"
-		} else {
-			dsn = "host=127.0.0.1 user=postgres password=haohao123 dbname=haohaoaccounting port=55432 sslmode=disable TimeZone=Asia/Shanghai"
-		}
+	cfg, err := config.LoadStrict()
+	if err != nil {
+		log.Fatalf("invalid config: %v", err)
 	}
+	if err := validateStartupConfig(cfg); err != nil {
+		log.Fatalf("invalid config: %v", err)
+	}
+	applyGinMode(cfg)
 
-	s, err := store.New(store.Config{Driver: driver, DSN: dsn})
+	s, err := store.New(storeConfig(cfg.Database))
 	if err != nil {
 		log.Fatalf("failed to init store: %v", err)
 	}
 
-	redisAddr := fallbackEnv("REDIS_ADDR", "127.0.0.1:56379")
-	redisPassword := fallbackEnv("REDIS_PASSWORD", "haohao123")
-	redisDB := fallbackIntEnv("REDIS_DB", 0)
-
 	var redisCache *cache.RedisCache
 	if c, err := cache.New(cache.Config{
-		Addr:     redisAddr,
-		Password: redisPassword,
-		DB:       redisDB,
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
 	}); err != nil {
 		log.Printf("redis disabled: %v", err)
 	} else {
@@ -51,102 +50,203 @@ func main() {
 	}
 
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     corsAllowOrigins(),
-		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
-		ExposeHeaders:    []string{"Content-Disposition"},
-		AllowCredentials: false,
-		MaxAge:           12 * time.Hour,
-	}))
+	if err := r.SetTrustedProxies(cfg.HTTP.TrustedProxies); err != nil {
+		log.Fatalf("failed to set trusted proxies: %v", err)
+	}
+	r.Use(middleware.RequestID())
+	r.Use(middleware.RequestTimeout(cfg.HTTP.RequestTimeout))
+	r.Use(gin.LoggerWithConfig(newLoggerConfig()), middleware.Recovery())
+	r.Use(middleware.SecurityHeaders(securityHeadersConfig(cfg)))
+	r.Use(cors.New(newCORSConfig(cfg)))
+	r.Use(middleware.BodyLimit(cfg.HTTP.MaxBodyBytes))
+	r.Use(middleware.ContentType(middleware.APIMediaTypeRules()))
+	r.Use(middleware.Accept(middleware.APIAcceptRules()))
 
-	if err := app.RegisterRoutes(r, s, redisCache); err != nil {
+	if err := app.RegisterRoutesWithConfig(r, s, redisCache, cfg); err != nil {
 		log.Fatalf("failed to register routes: %v", err)
 	}
 
-	port := fallbackEnv("PORT", "8080")
 	log.Printf(
 		"server running at :%s with DB_DRIVER=%s redis=%t",
-		port,
-		driver,
+		cfg.Port,
+		cfg.Database.Driver,
 		redisCache != nil && redisCache.Enabled(),
 	)
-	if err := r.Run(":" + port); err != nil {
+	server := newHTTPServer(cfg, r)
+	if err := runHTTPServer(context.Background(), server, cfg.HTTP.ShutdownTimeout); err != nil {
 		log.Fatalf("server exit: %v", err)
 	}
 }
 
-func fallbackEnv(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
+func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           handler,
+		ReadTimeout:       cfg.HTTP.ReadTimeout,
+		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
+		WriteTimeout:      cfg.HTTP.WriteTimeout,
+		IdleTimeout:       cfg.HTTP.IdleTimeout,
+		MaxHeaderBytes:    cfg.HTTP.MaxHeaderBytes,
 	}
-	return fallback
 }
 
-func fallbackIntEnv(key string, fallback int) int {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return fallback
-	}
-	return n
-}
-
-func corsAllowOrigins() []string {
-	origins := splitCSVEnv("CORS_ALLOW_ORIGINS")
-	if len(origins) > 0 {
-		return origins
-	}
-	return []string{"http://localhost:3000", "http://127.0.0.1:3000"}
-}
-
-func splitCSVEnv(key string) []string {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return nil
-	}
-
-	parts := strings.Split(raw, ",")
-	values := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if clean := strings.TrimSpace(part); clean != "" {
-			values = append(values, clean)
-		}
-	}
-	return values
-}
-
-func loadDotEnv(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+func validateStartupConfig(cfg config.Config) error {
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if err := validateCORSConfig(cfg); err != nil {
+		return err
+	}
+	return nil
+}
 
-	for _, line := range strings.Split(string(data), "\n") {
-		clean := strings.TrimSpace(line)
-		if clean == "" || strings.HasPrefix(clean, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(clean, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		if key == "" || os.Getenv(key) != "" {
-			continue
-		}
-		if err := os.Setenv(key, value); err != nil {
+func applyGinMode(cfg config.Config) {
+	gin.SetMode(cfg.HTTP.GinMode)
+}
+
+func storeConfig(cfg config.DatabaseConfig) store.Config {
+	return store.Config{
+		Driver:          cfg.Driver,
+		DSN:             cfg.DSN,
+		MaxOpenConns:    cfg.MaxOpenConns,
+		MaxIdleConns:    cfg.MaxIdleConns,
+		ConnMaxLifetime: cfg.ConnMaxLifetime,
+		ConnMaxIdleTime: cfg.ConnMaxIdleTime,
+	}
+}
+
+func newCORSConfig(cfg config.Config) cors.Config {
+	return cors.Config{
+		AllowOrigins: cfg.HTTP.CORSAllowOrigins,
+		AllowMethods: []string{
+			http.MethodGet,
+			http.MethodPost,
+			http.MethodPut,
+			http.MethodDelete,
+			http.MethodOptions,
+		},
+		AllowHeaders: []string{
+			"Origin",
+			"Content-Type",
+			"Accept",
+			"Authorization",
+			middleware.RequestIDHeader,
+		},
+		ExposeHeaders: []string{
+			"Allow",
+			"Content-Disposition",
+			"Link",
+			"WWW-Authenticate",
+			"Retry-After",
+			"X-Total-Count",
+			middleware.RequestIDHeader,
+		},
+		AllowCredentials: false,
+		MaxAge:           12 * time.Hour,
+	}
+}
+
+func validateCORSConfig(cfg config.Config) error {
+	for _, origin := range cfg.HTTP.CORSAllowOrigins {
+		if err := validateExplicitCORSOrigin(origin); err != nil {
 			return err
 		}
 	}
+
+	corsConfig := newCORSConfig(cfg)
+	if err := corsConfig.Validate(); err != nil {
+		return fmt.Errorf("CORS config: %w", err)
+	}
 	return nil
+}
+
+func validateExplicitCORSOrigin(origin string) error {
+	origin = strings.TrimSpace(origin)
+	if strings.Contains(origin, "*") {
+		return fmt.Errorf("CORS_ALLOW_ORIGINS must use explicit origins; %q contains a wildcard", origin)
+	}
+
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("CORS_ALLOW_ORIGINS contains invalid origin %q", origin)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must use http or https", origin)
+	}
+	if parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must not include user info, path, query, or fragment", origin)
+	}
+	return nil
+}
+
+func securityHeadersConfig(cfg config.Config) middleware.SecurityHeadersConfig {
+	return middleware.SecurityHeadersConfig{
+		HSTSMaxAgeSeconds:     cfg.HTTP.HSTSMaxAgeSeconds,
+		HSTSIncludeSubDomains: cfg.HTTP.HSTSIncludeSubDomains,
+		HSTSPreload:           cfg.HTTP.HSTSPreload,
+	}
+}
+
+func newLoggerConfig() gin.LoggerConfig {
+	return gin.LoggerConfig{
+		Formatter: requestLogFormatter,
+		SkipPaths: []string{
+			"/livez",
+			"/readyz",
+			"/health",
+		},
+	}
+}
+
+func runHTTPServer(parent context.Context, server *http.Server, shutdownTimeout time.Duration) error {
+	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+
+	stop()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	return <-errCh
+}
+
+func requestLogFormatter(param gin.LogFormatterParams) string {
+	if param.Latency > time.Minute {
+		param.Latency = param.Latency.Truncate(time.Second)
+	}
+	requestID := "-"
+	if value, ok := param.Keys[middleware.RequestIDContextKey]; ok {
+		if id, ok := value.(string); ok && id != "" {
+			requestID = id
+		}
+	}
+
+	return fmt.Sprintf(
+		"time=%q status=%d latency=%q client_ip=%q method=%q path=%q request_id=%q bytes=%d error=%q\n",
+		param.TimeStamp.Format(time.RFC3339),
+		param.StatusCode,
+		param.Latency.String(),
+		param.ClientIP,
+		param.Method,
+		param.Path,
+		requestID,
+		param.BodySize,
+		param.ErrorMessage,
+	)
 }

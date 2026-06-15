@@ -44,6 +44,13 @@ func (c *RedisCache) Enabled() bool {
 	return c != nil && c.client != nil
 }
 
+func (c *RedisCache) Ping(ctx context.Context) error {
+	if !c.Enabled() {
+		return nil
+	}
+	return c.client.Ping(ctx).Err()
+}
+
 func (c *RedisCache) GetJSON(ctx context.Context, key string, out any) (bool, error) {
 	if !c.Enabled() {
 		return false, nil

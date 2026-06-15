@@ -1,6 +1,7 @@
 package transactions
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -24,7 +25,7 @@ func NewService(s *store.Store, invalidator CacheInvalidator) *Service {
 	return &Service{store: s, invalidator: invalidator}
 }
 
-func (s *Service) List(userID uint, filter ListFilter) ([]models.Transaction, int64, error) {
+func (s *Service) List(ctx context.Context, userID uint, filter ListFilter) ([]models.Transaction, int64, error) {
 	page := filter.Page
 	pageSize := filter.PageSize
 	if page < 1 {
@@ -34,7 +35,7 @@ func (s *Service) List(userID uint, filter ListFilter) ([]models.Transaction, in
 		pageSize = 20
 	}
 
-	query := s.store.DB.Model(&models.Transaction{}).Where("user_id = ?", userID)
+	query := s.db(ctx).Model(&models.Transaction{}).Where("user_id = ?", userID)
 	if !filter.Start.IsZero() {
 		query = query.Where("occurred_at >= ?", filter.Start)
 	}
@@ -72,9 +73,9 @@ func (s *Service) List(userID uint, filter ListFilter) ([]models.Transaction, in
 	return rows, total, nil
 }
 
-func (s *Service) Create(userID uint, req Request) (models.Transaction, error) {
+func (s *Service) Create(ctx context.Context, userID uint, req Request) (models.Transaction, error) {
 	var tx models.Transaction
-	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
 		next, err := s.createWithDB(dbtx, userID, req)
 		if err != nil {
 			return err
@@ -85,18 +86,18 @@ func (s *Service) Create(userID uint, req Request) (models.Transaction, error) {
 		return models.Transaction{}, err
 	}
 
-	s.store.DB.Preload("Category").Preload("Account").First(&tx, tx.ID)
-	s.invalidator.InvalidateUser(userID)
+	s.db(ctx).Preload("Category").Preload("Account").First(&tx, tx.ID)
+	s.invalidateUser(ctx, userID)
 	return tx, nil
 }
 
-func (s *Service) CreateMany(userID uint, requests []Request) ([]models.Transaction, error) {
+func (s *Service) CreateMany(ctx context.Context, userID uint, requests []Request) ([]models.Transaction, error) {
 	if len(requests) == 0 {
 		return nil, nil
 	}
 
 	created := make([]models.Transaction, 0, len(requests))
-	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
 		next, err := s.CreateManyWithDB(dbtx, userID, requests)
 		if err != nil {
 			return err
@@ -112,9 +113,9 @@ func (s *Service) CreateMany(userID uint, requests []Request) ([]models.Transact
 		ids = append(ids, tx.ID)
 	}
 	if len(ids) > 0 {
-		s.store.DB.Preload("Category").Preload("Account").Find(&created, ids)
+		s.db(ctx).Preload("Category").Preload("Account").Find(&created, ids)
 	}
-	s.invalidator.InvalidateUser(userID)
+	s.invalidateUser(ctx, userID)
 	return created, nil
 }
 
@@ -162,16 +163,16 @@ func (s *Service) createWithDB(dbtx *gorm.DB, userID uint, req Request) (models.
 	return tx, nil
 }
 
-func (s *Service) Update(userID, id uint, req Request) (models.Transaction, error) {
+func (s *Service) Update(ctx context.Context, userID, id uint, req Request) (models.Transaction, error) {
 	var existing models.Transaction
-	if err := s.store.DB.Where("id = ? AND user_id = ?", id, userID).First(&existing).Error; err != nil {
+	if err := s.db(ctx).Where("id = ? AND user_id = ?", id, userID).First(&existing).Error; err != nil {
 		return models.Transaction{}, errors.New("transaction not found")
 	}
 
 	if err := validateRequest(req); err != nil {
 		return models.Transaction{}, err
 	}
-	if err := s.ensureCategoryAndAccount(userID, req.Type, req.CategoryID, req.AccountID); err != nil {
+	if err := s.ensureCategoryAndAccount(ctx, userID, req.Type, req.CategoryID, req.AccountID); err != nil {
 		return models.Transaction{}, err
 	}
 	if req.OccurredAt.IsZero() {
@@ -189,7 +190,7 @@ func (s *Service) Update(userID, id uint, req Request) (models.Transaction, erro
 	updated.Source = stringutil.FallbackName(req.Source, existing.Source)
 
 	// Balance must be reconciled around the old and new transaction values.
-	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
 		if err := revertAccountDelta(dbtx, existing.AccountID, existing.Type, existing.AmountCents); err != nil {
 			return err
 		}
@@ -201,18 +202,18 @@ func (s *Service) Update(userID, id uint, req Request) (models.Transaction, erro
 		return models.Transaction{}, err
 	}
 
-	s.store.DB.Preload("Category").Preload("Account").First(&updated, updated.ID)
-	s.invalidator.InvalidateUser(userID)
+	s.db(ctx).Preload("Category").Preload("Account").First(&updated, updated.ID)
+	s.invalidateUser(ctx, userID)
 	return updated, nil
 }
 
-func (s *Service) Delete(userID, id uint) error {
+func (s *Service) Delete(ctx context.Context, userID, id uint) error {
 	var tx models.Transaction
-	if err := s.store.DB.Where("id = ? AND user_id = ?", id, userID).First(&tx).Error; err != nil {
+	if err := s.db(ctx).Where("id = ? AND user_id = ?", id, userID).First(&tx).Error; err != nil {
 		return errors.New("transaction not found")
 	}
 
-	if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
 		if err := revertAccountDelta(dbtx, tx.AccountID, tx.Type, tx.AmountCents); err != nil {
 			return err
 		}
@@ -221,12 +222,28 @@ func (s *Service) Delete(userID, id uint) error {
 		return err
 	}
 
-	s.invalidator.InvalidateUser(userID)
+	s.invalidateUser(ctx, userID)
 	return nil
 }
 
-func (s *Service) ensureCategoryAndAccount(userID uint, txType string, categoryID, accountID uint) error {
-	return s.ensureCategoryAndAccountWithDB(s.store.DB, userID, txType, categoryID, accountID)
+func (s *Service) ensureCategoryAndAccount(ctx context.Context, userID uint, txType string, categoryID, accountID uint) error {
+	return s.ensureCategoryAndAccountWithDB(s.db(ctx), userID, txType, categoryID, accountID)
+}
+
+func (s *Service) db(ctx context.Context) *gorm.DB {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.store.DB.WithContext(ctx)
+}
+
+func (s *Service) invalidateUser(ctx context.Context, userID uint) {
+	if ctx == nil {
+		ctx = context.Background()
+	} else {
+		ctx = context.WithoutCancel(ctx)
+	}
+	s.invalidator.InvalidateUser(ctx, userID)
 }
 
 func (s *Service) ensureCategoryAndAccountWithDB(db *gorm.DB, userID uint, txType string, categoryID, accountID uint) error {

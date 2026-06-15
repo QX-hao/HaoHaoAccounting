@@ -1,5 +1,5 @@
 import { api } from '../../shared/api';
-import { API_BASE, getToken, request } from '../../shared/api/client';
+import { downloadText, request } from '../../shared/api/client';
 import type { ImportJob, ImportPreview, ImportResult } from '../../shared/types/accounting';
 
 export type ImportFileAsset = {
@@ -24,16 +24,8 @@ export function startImportFileJob(asset: ImportFileAsset) {
   return api.dataio.postIoImportJobs(importFileFormData(asset));
 }
 
-export async function exportCSVText() {
-  const token = await getToken();
-  const resp = await fetch(`${API_BASE}/io/export?format=csv`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  const text = await resp.text();
-  if (!resp.ok) {
-    throw new Error(text || '导出失败');
-  }
-  return text;
+export function exportCSVText() {
+  return downloadText('/io/export?format=csv', 'text/csv');
 }
 
 function importFileFormData(asset: ImportFileAsset) {

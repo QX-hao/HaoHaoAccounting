@@ -4,7 +4,14 @@ import { api } from '@/shared/api';
 export type ExportFormat = 'csv' | 'xlsx';
 
 export function exportTransactions(format: ExportFormat) {
-  return download(`/io/export?format=${format}`);
+  return download(`/io/export?format=${format}`, exportAccept(format));
+}
+
+function exportAccept(format: ExportFormat) {
+  if (format === 'xlsx') {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  }
+  return 'text/csv';
 }
 
 export function importTransactions(formData: FormData) {

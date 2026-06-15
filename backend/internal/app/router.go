@@ -1,9 +1,15 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/cache"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/accounts"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/ai"
@@ -17,19 +23,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type pinger interface {
+	Ping(context.Context) error
+}
+
 // RegisterRoutes is the only place that knows the public HTTP route tree.
 // Modules own their handlers and business behavior; this layer only composes them.
 func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisCache) error {
-	engine.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":       "ok",
-			"redisEnabled": redisCache != nil && redisCache.Enabled(),
-		})
-	})
+	return RegisterRoutesWithConfig(engine, s, redisCache, config.Load())
+}
+
+func RegisterRoutesWithConfig(engine *gin.Engine, s *store.Store, redisCache *cache.RedisCache, cfg config.Config) error {
+	registerFallbackRoutes(engine)
+	registerHealthRoutes(engine, s, redisCache)
 
 	api := engine.Group("/api/v1")
+	api.Use(middleware.NoStore())
 
-	authHandler := auth.NewHandler(s)
+	if err := cfg.JWT.Validate(); err != nil {
+		return err
+	}
+	tokenService, err := middleware.NewTokenServiceWithTTL(cfg.JWT.Secret, cfg.JWT.TTL, cfg.JWT.ClockSkew, cfg.JWT.Issuer, cfg.JWT.Audience)
+	if err != nil {
+		return err
+	}
+
+	authHandler := auth.NewHandlerWithConfig(s, cfg.Admin, cfg.LoginRateLimit, tokenService)
 	if err := authHandler.EnsureBootstrapAdmin(); err != nil {
 		return err
 	}
@@ -41,7 +60,7 @@ func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisC
 		c.Set("token_revoker", tokenRevoker)
 		c.Next()
 	})
-	authGroup.Use(middleware.RequireAuthWithRevocation(tokenRevoker))
+	authGroup.Use(middleware.RequireAuthWithRevocation(tokenRevoker, tokenService))
 
 	cacheInvalidator := transactions.NewCacheInvalidator(redisCache)
 	transactionService := transactions.NewService(s, cacheInvalidator)
@@ -56,4 +75,86 @@ func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisC
 	reports.NewHandler(reports.NewService(s, redisCache)).Register(authGroup)
 	dataio.NewHandler(dataio.NewService(s, transactionService, cacheInvalidator)).Register(authGroup)
 	return nil
+}
+
+func registerFallbackRoutes(engine *gin.Engine) {
+	engine.HandleMethodNotAllowed = true
+	engine.NoRoute(func(c *gin.Context) {
+		noStoreAPIError(c)
+		httputil.NotFound(c, "route not found")
+	})
+	engine.NoMethod(func(c *gin.Context) {
+		noStoreAPIError(c)
+		httputil.MethodNotAllowed(c, "method not allowed")
+	})
+}
+
+func noStoreAPIError(c *gin.Context) {
+	if strings.HasPrefix(c.Request.URL.Path, "/api/v1/") || c.Request.URL.Path == "/api/v1" {
+		middleware.SetNoStore(c.Writer.Header())
+	}
+}
+
+func registerHealthRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisCache) {
+	engine.GET("/livez", livez)
+	engine.GET("/readyz", readyz(s, redisCache))
+	engine.GET("/health", readyz(s, redisCache))
+}
+
+func livez(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func readyz(s *store.Store, redisCache *cache.RedisCache) gin.HandlerFunc {
+	var redis pinger
+	if redisCache != nil && redisCache.Enabled() {
+		redis = redisCache
+	}
+	return readyzWithDependencies(s, redis)
+}
+
+func readyzWithDependencies(database pinger, redis pinger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		checks := gin.H{}
+		status := http.StatusOK
+
+		if database == nil {
+			status = http.StatusServiceUnavailable
+			checks["database"] = dependencyStatus("error", errors.New("database is not configured"))
+		} else if err := database.Ping(ctx); err != nil {
+			status = http.StatusServiceUnavailable
+			checks["database"] = dependencyStatus("error", err)
+		} else {
+			checks["database"] = dependencyStatus("ok", nil)
+		}
+
+		if redis == nil {
+			checks["redis"] = gin.H{"status": "disabled"}
+		} else if err := redis.Ping(ctx); err != nil {
+			status = http.StatusServiceUnavailable
+			checks["redis"] = dependencyStatus("error", err)
+		} else {
+			checks["redis"] = dependencyStatus("ok", nil)
+		}
+
+		overall := "ok"
+		if status != http.StatusOK {
+			overall = "unavailable"
+		}
+		c.JSON(status, gin.H{
+			"status": overall,
+			"checks": checks,
+		})
+	}
+}
+
+func dependencyStatus(status string, err error) gin.H {
+	result := gin.H{"status": status}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+	return result
 }

@@ -1,6 +1,7 @@
 package dataio
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -28,24 +29,24 @@ func NewService(s *store.Store, transactionService *transactions.Service, invali
 	return &Service{store: s, transactionService: transactionService, invalidator: invalidator}
 }
 
-func (s *Service) ExportRows(userID uint, start, end time.Time) ([]models.Transaction, error) {
+func (s *Service) ExportRows(ctx context.Context, userID uint, start, end time.Time) ([]models.Transaction, error) {
 	var rows []models.Transaction
-	err := s.store.DB.Where("user_id = ? AND occurred_at >= ? AND occurred_at <= ?", userID, start, end).
+	err := s.db(ctx).Where("user_id = ? AND occurred_at >= ? AND occurred_at <= ?", userID, start, end).
 		Preload("Category").Preload("Account").
 		Order("occurred_at asc").
 		Find(&rows).Error
 	return rows, err
 }
 
-func (s *Service) Preview(userID uint, file *multipart.FileHeader) (ImportPreview, error) {
+func (s *Service) Preview(ctx context.Context, userID uint, file *multipart.FileHeader) (ImportPreview, error) {
 	sourceRows, err := readImportRows(file)
 	if err != nil {
 		return ImportPreview{}, err
 	}
-	return s.PreviewRows(userID, file.Filename, file.Size, sourceRows), nil
+	return s.PreviewRows(ctx, userID, file.Filename, file.Size, sourceRows), nil
 }
 
-func (s *Service) PreviewText(userID uint, req ImportTextRequest) (ImportPreview, error) {
+func (s *Service) PreviewText(ctx context.Context, userID uint, req ImportTextRequest) (ImportPreview, error) {
 	sourceRows, err := readImportRowsFromCSVContent(req.Content)
 	if err != nil {
 		return ImportPreview{}, err
@@ -54,10 +55,10 @@ func (s *Service) PreviewText(userID uint, req ImportTextRequest) (ImportPreview
 	if filename == "" {
 		filename = "mobile-import.csv"
 	}
-	return s.PreviewRows(userID, filename, int64(len([]byte(req.Content))), sourceRows), nil
+	return s.PreviewRows(ctx, userID, filename, int64(len([]byte(req.Content))), sourceRows), nil
 }
 
-func (s *Service) PreviewRows(userID uint, filename string, size int64, sourceRows [][]string) ImportPreview {
+func (s *Service) PreviewRows(ctx context.Context, userID uint, filename string, size int64, sourceRows [][]string) ImportPreview {
 	preview := ImportPreview{
 		Filename:     filename,
 		Size:         size,
@@ -77,7 +78,7 @@ func (s *Service) PreviewRows(userID uint, filename string, size int64, sourceRo
 			key := importDuplicateKey(record)
 			if firstLine, ok := seen[key]; ok {
 				duplicateReason = fmt.Sprintf("与导入文件第 %d 行重复", firstLine+2)
-			} else if s.hasExistingDuplicate(userID, record) {
+			} else if s.hasExistingDuplicate(ctx, userID, record) {
 				duplicateReason = "账本中已存在相同记录"
 			} else {
 				seen[key] = i
@@ -94,19 +95,19 @@ func (s *Service) PreviewRows(userID uint, filename string, size int64, sourceRo
 	return preview
 }
 
-func (s *Service) Import(userID uint, file *multipart.FileHeader) (ImportResult, error) {
-	return s.ImportWithOptions(userID, file, defaultImportOptions())
+func (s *Service) Import(ctx context.Context, userID uint, file *multipart.FileHeader) (ImportResult, error) {
+	return s.ImportWithOptions(ctx, userID, file, defaultImportOptions())
 }
 
-func (s *Service) ImportWithOptions(userID uint, file *multipart.FileHeader, options ImportOptions) (ImportResult, error) {
+func (s *Service) ImportWithOptions(ctx context.Context, userID uint, file *multipart.FileHeader, options ImportOptions) (ImportResult, error) {
 	sourceRows, err := readImportRows(file)
 	if err != nil {
 		return ImportResult{}, err
 	}
-	return s.ImportRowsWithOptions(userID, sourceRows, options), nil
+	return s.ImportRowsWithOptions(ctx, userID, sourceRows, options), nil
 }
 
-func (s *Service) StartImportJob(userID uint, file *multipart.FileHeader, options ImportOptions) (ImportJobResponse, error) {
+func (s *Service) StartImportJob(ctx context.Context, userID uint, file *multipart.FileHeader, options ImportOptions) (ImportJobResponse, error) {
 	sourceRows, err := readImportRows(file)
 	if err != nil {
 		return ImportJobResponse{}, err
@@ -120,17 +121,18 @@ func (s *Service) StartImportJob(userID uint, file *multipart.FileHeader, option
 	if job.Filename == "" {
 		job.Filename = "import.csv"
 	}
-	if err := s.store.DB.Create(&job).Error; err != nil {
+	if err := s.db(ctx).Create(&job).Error; err != nil {
 		return ImportJobResponse{}, err
 	}
 
-	go s.runImportJob(job.ID, userID, sourceRows, options)
+	jobCtx := detachedContext(ctx)
+	go s.runImportJob(jobCtx, job.ID, userID, sourceRows, options)
 	return importJobResponse(job), nil
 }
 
-func (s *Service) ListImportJobs(userID uint) ([]ImportJobResponse, error) {
+func (s *Service) ListImportJobs(ctx context.Context, userID uint) ([]ImportJobResponse, error) {
 	var jobs []models.ImportJob
-	if err := s.store.DB.Where("user_id = ?", userID).Order("created_at desc").Limit(20).Find(&jobs).Error; err != nil {
+	if err := s.db(ctx).Where("user_id = ?", userID).Order("created_at desc").Limit(20).Find(&jobs).Error; err != nil {
 		return nil, err
 	}
 	result := make([]ImportJobResponse, 0, len(jobs))
@@ -140,23 +142,23 @@ func (s *Service) ListImportJobs(userID uint) ([]ImportJobResponse, error) {
 	return result, nil
 }
 
-func (s *Service) ImportJob(userID, id uint) (ImportJobResponse, error) {
+func (s *Service) ImportJob(ctx context.Context, userID, id uint) (ImportJobResponse, error) {
 	var job models.ImportJob
-	if err := s.store.DB.Where("id = ? AND user_id = ?", id, userID).First(&job).Error; err != nil {
+	if err := s.db(ctx).Where("id = ? AND user_id = ?", id, userID).First(&job).Error; err != nil {
 		return ImportJobResponse{}, err
 	}
 	return importJobResponse(job), nil
 }
 
-func (s *Service) runImportJob(jobID, userID uint, sourceRows [][]string, options ImportOptions) {
-	s.updateImportJob(jobID, models.ImportJob{Status: "running"})
-	result := s.ImportRowsWithOptions(userID, sourceRows, options)
+func (s *Service) runImportJob(ctx context.Context, jobID, userID uint, sourceRows [][]string, options ImportOptions) {
+	s.updateImportJob(ctx, jobID, models.ImportJob{Status: "running"})
+	result := s.ImportRowsWithOptions(ctx, userID, sourceRows, options)
 	status := "completed"
 	if result.Failed > 0 {
 		status = "failed"
 	}
 	errorsJSON, _ := json.Marshal(result.Errors)
-	s.updateImportJob(jobID, models.ImportJob{
+	s.updateImportJob(ctx, jobID, models.ImportJob{
 		Status:  status,
 		Total:   result.Total,
 		Success: result.Success,
@@ -166,7 +168,7 @@ func (s *Service) runImportJob(jobID, userID uint, sourceRows [][]string, option
 	})
 }
 
-func (s *Service) updateImportJob(jobID uint, changes models.ImportJob) {
+func (s *Service) updateImportJob(ctx context.Context, jobID uint, changes models.ImportJob) {
 	values := map[string]any{}
 	if changes.Status != "" {
 		values["status"] = changes.Status
@@ -180,22 +182,22 @@ func (s *Service) updateImportJob(jobID uint, changes models.ImportJob) {
 	if changes.Errors != "" {
 		values["errors"] = changes.Errors
 	}
-	_ = s.store.DB.Model(&models.ImportJob{}).Where("id = ?", jobID).Updates(values).Error
+	_ = s.db(ctx).Model(&models.ImportJob{}).Where("id = ?", jobID).Updates(values).Error
 }
 
-func (s *Service) ImportText(userID uint, req ImportTextRequest) (ImportResult, error) {
+func (s *Service) ImportText(ctx context.Context, userID uint, req ImportTextRequest) (ImportResult, error) {
 	sourceRows, err := readImportRowsFromCSVContent(req.Content)
 	if err != nil {
 		return ImportResult{}, err
 	}
-	return s.ImportRowsWithOptions(userID, sourceRows, importOptionsFromRequest(req)), nil
+	return s.ImportRowsWithOptions(ctx, userID, sourceRows, importOptionsFromRequest(req)), nil
 }
 
-func (s *Service) ImportRows(userID uint, sourceRows [][]string) ImportResult {
-	return s.ImportRowsWithOptions(userID, sourceRows, defaultImportOptions())
+func (s *Service) ImportRows(ctx context.Context, userID uint, sourceRows [][]string) ImportResult {
+	return s.ImportRowsWithOptions(ctx, userID, sourceRows, defaultImportOptions())
 }
 
-func (s *Service) ImportRowsWithOptions(userID uint, sourceRows [][]string, options ImportOptions) ImportResult {
+func (s *Service) ImportRowsWithOptions(ctx context.Context, userID uint, sourceRows [][]string, options ImportOptions) ImportResult {
 	result := ImportResult{Total: len(sourceRows), Errors: make([]string, 0)}
 	records := make([]importRecord, 0, len(sourceRows))
 	seen := map[duplicateKey]int{}
@@ -217,7 +219,7 @@ func (s *Service) ImportRowsWithOptions(userID uint, sourceRows [][]string, opti
 				result.Errors = append(result.Errors, fmt.Sprintf("line %d: duplicate of line %d skipped", i+2, firstLine+2))
 				continue
 			}
-			if s.hasExistingDuplicate(userID, record) {
+			if s.hasExistingDuplicate(ctx, userID, record) {
 				result.Skipped++
 				result.Errors = append(result.Errors, fmt.Sprintf("line %d: duplicate transaction skipped", i+2))
 				continue
@@ -228,7 +230,7 @@ func (s *Service) ImportRowsWithOptions(userID uint, sourceRows [][]string, opti
 	}
 
 	if len(records) > 0 {
-		if err := s.store.DB.Transaction(func(dbtx *gorm.DB) error {
+		if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
 			requests := make([]transactions.Request, 0, len(records))
 			for _, record := range records {
 				category, err := s.store.FindOrCreateCategoryWithDB(dbtx, userID, record.Type, record.Category)
@@ -296,6 +298,20 @@ func importOptionsFromRequest(req ImportTextRequest) ImportOptions {
 	return options
 }
 
+func (s *Service) db(ctx context.Context) *gorm.DB {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.store.DB.WithContext(ctx)
+}
+
+func detachedContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
+}
+
 type duplicateKey struct {
 	OccurredAt  int64
 	Type        string
@@ -318,8 +334,8 @@ func importDuplicateKey(record importRecord) duplicateKey {
 	}
 }
 
-func (s *Service) hasExistingDuplicate(userID uint, record importRecord) bool {
-	category, err := s.store.FindCategoryByName(userID, record.Type, record.Category)
+func (s *Service) hasExistingDuplicate(ctx context.Context, userID uint, record importRecord) bool {
+	category, err := s.store.FindCategoryByNameWithDB(s.db(ctx), userID, record.Type, record.Category)
 	if err != nil {
 		return false
 	}
@@ -328,12 +344,12 @@ func (s *Service) hasExistingDuplicate(userID uint, record importRecord) bool {
 		accountName = "现金"
 	}
 	var account models.Account
-	if err := s.store.DB.Where("user_id = ? AND name = ?", userID, accountName).First(&account).Error; err != nil {
+	if err := s.db(ctx).Where("user_id = ? AND name = ?", userID, accountName).First(&account).Error; err != nil {
 		return false
 	}
 
 	var count int64
-	err = s.store.DB.Model(&models.Transaction{}).
+	err = s.db(ctx).Model(&models.Transaction{}).
 		Where(
 			"user_id = ? AND occurred_at = ? AND type = ? AND amount_cents = ? AND category_id = ? AND account_id = ? AND note = ? AND tags = ?",
 			userID,

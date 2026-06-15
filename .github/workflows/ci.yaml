@@ -5,19 +5,45 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  deployment-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config
+        env:
+          NEXT_PUBLIC_API_BASE: https://api.example.com/api/v1
+          POSTGRES_PASSWORD: postgres-secret
+          REDIS_PASSWORD: redis-secret
+          JWT_SECRET: jwt-secret-with-at-least-32-characters
+          ADMIN_USERNAME: admin
+          ADMIN_PASSWORD: admin-secret
+          CORS_ALLOW_ORIGINS: https://app.example.com
+          MYSQL_ROOT_PASSWORD: mysql-secret
+
   api-contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm run generate:api-types
+      - run: npm run test:api-generator
       - run: git diff --exit-code -- web/shared/types/api.ts mobile/src/shared/types/api.ts web/shared/api/generated-client.ts mobile/src/shared/api/generated-client.ts
 
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: backend
@@ -27,10 +53,13 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
       - run: go test ./...
 
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
@@ -43,13 +72,16 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: npm run typecheck
       - run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE: http://127.0.0.1:8080/api/v1
+      - run: npm run typecheck
       - run: npx playwright install --with-deps chrome
       - run: npm run test:e2e
 
   mobile:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: mobile

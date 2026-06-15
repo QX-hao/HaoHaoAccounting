@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -10,40 +9,73 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func main() {
-	if err := loadDotEnv(".env"); err != nil {
+	if err := config.LoadDotEnv(".env"); err != nil {
 		log.Printf("skip .env: %v", err)
 	}
 
-	driver := normalizeDriver(fallbackEnv("DB_DRIVER", "postgres"))
-	dsn := strings.TrimSpace(os.Getenv("DB_DSN"))
-	if dsn == "" {
-		log.Fatal("DB_DSN is required for dbmigrate")
+	cfg, err := config.LoadStrict()
+	if err != nil {
+		log.Fatalf("invalid config: %v", err)
 	}
 
-	db, err := openDB(driver, dsn)
+	dbCfg, err := migrationDatabaseConfig(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	db, err := openDB(dbCfg)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
-	if err := runMigrations(db, driver); err != nil {
+	if err := runMigrations(db, dbCfg.Driver); err != nil {
 		log.Fatalf("migrate database: %v", err)
 	}
 }
 
-func openDB(driver, dsn string) (*gorm.DB, error) {
-	switch normalizeDriver(driver) {
-	case "postgres":
-		return gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	case "mysql":
-		return gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	default:
-		return nil, fmt.Errorf("unsupported DB_DRIVER: %s", driver)
+func migrationDatabaseConfig(cfg config.Config) (config.DatabaseConfig, error) {
+	dsn := config.ExplicitDatabaseDSN()
+	if dsn == "" {
+		return config.DatabaseConfig{}, fmt.Errorf("DB_DSN is required for dbmigrate")
 	}
+	dbCfg := cfg.Database
+	dbCfg.Driver = normalizeDriver(dbCfg.Driver)
+	dbCfg.DSN = dsn
+	return dbCfg, nil
+}
+
+func openDB(cfg config.DatabaseConfig) (*gorm.DB, error) {
+	var (
+		db  *gorm.DB
+		err error
+	)
+	switch normalizeDriver(cfg.Driver) {
+	case "postgres":
+		db, err = gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{})
+	case "mysql":
+		db, err = gorm.Open(mysql.Open(cfg.DSN), &gorm.Config{})
+	default:
+		return nil, fmt.Errorf("unsupported DB_DRIVER: %s", cfg.Driver)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := store.ApplyPoolConfig(db, store.PoolConfig{
+		MaxOpenConns:    cfg.MaxOpenConns,
+		MaxIdleConns:    cfg.MaxIdleConns,
+		ConnMaxLifetime: cfg.ConnMaxLifetime,
+		ConnMaxIdleTime: cfg.ConnMaxIdleTime,
+	}); err != nil {
+		return nil, err
+	}
+	return db, nil
 }
 
 func runMigrations(db *gorm.DB, driver string) error {
@@ -174,42 +206,4 @@ func normalizeDriver(driver string) string {
 		return "postgres"
 	}
 	return driver
-}
-
-func fallbackEnv(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func loadDotEnv(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-
-	for _, line := range strings.Split(string(data), "\n") {
-		clean := strings.TrimSpace(line)
-		if clean == "" || strings.HasPrefix(clean, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(clean, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		if key == "" || os.Getenv(key) != "" {
-			continue
-		}
-		if err := os.Setenv(key, value); err != nil {
-			return err
-		}
-	}
-	return nil
 }

@@ -4,7 +4,7 @@
 
 ## Responsibilities
 
-- Expose `/health`.
+- Expose `/livez`, `/readyz`, and compatible `/health` probes.
 - Register public auth routes under `/api/v1`.
 - Register authenticated business routes under `/api/v1` with `middleware.RequireAuth`.
 - Create module handlers from shared `store.Store` and optional Redis cache.

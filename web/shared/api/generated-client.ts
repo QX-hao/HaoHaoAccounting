@@ -277,6 +277,5 @@ export function createApiClient(runtime: ApiRuntime) {
 
 function setQueryParam(search: URLSearchParams, key: string, value: unknown) {
   if (value === undefined || value === null || value === '') return;
-  if (typeof value === 'number' && value === 0) return;
   search.set(key, String(value));
 }

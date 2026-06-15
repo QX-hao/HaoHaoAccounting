@@ -1,11 +1,15 @@
 package budgets
 
 import (
+	"context"
 	"testing"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
+	"gorm.io/gorm"
 )
+
+type budgetContextKey struct{}
 
 func TestBudgetCreateUpdateDelete(t *testing.T) {
 	s := testutil.NewStore(t)
@@ -19,7 +23,8 @@ func TestBudgetCreateUpdateDelete(t *testing.T) {
 	}
 
 	service := NewService(s, nil)
-	budget, err := service.Create(user.ID, budgetRequest{Month: "2026-06", CategoryID: category.ID, Amount: 1200})
+	ctx := context.Background()
+	budget, err := service.Create(ctx, user.ID, budgetRequest{Month: "2026-06", CategoryID: category.ID, Amount: 1200})
 	if err != nil {
 		t.Fatalf("create budget: %v", err)
 	}
@@ -27,7 +32,7 @@ func TestBudgetCreateUpdateDelete(t *testing.T) {
 		t.Fatalf("amount cents = %d", budget.AmountCents)
 	}
 
-	updated, err := service.Update(user.ID, budget.ID, budgetRequest{Month: "2026-06", CategoryID: 0, Amount: 2000})
+	updated, err := service.Update(ctx, user.ID, budget.ID, budgetRequest{Month: "2026-06", CategoryID: 0, Amount: 2000})
 	if err != nil {
 		t.Fatalf("update budget: %v", err)
 	}
@@ -35,7 +40,7 @@ func TestBudgetCreateUpdateDelete(t *testing.T) {
 		t.Fatalf("updated budget = %#v", updated)
 	}
 
-	list, err := service.List(user.ID, "2026-06")
+	list, err := service.List(ctx, user.ID, "2026-06")
 	if err != nil {
 		t.Fatalf("list budgets: %v", err)
 	}
@@ -43,10 +48,10 @@ func TestBudgetCreateUpdateDelete(t *testing.T) {
 		t.Fatalf("budget list length = %d", len(list))
 	}
 
-	if err := service.Delete(user.ID, budget.ID); err != nil {
+	if err := service.Delete(ctx, user.ID, budget.ID); err != nil {
 		t.Fatalf("delete budget: %v", err)
 	}
-	list, err = service.List(user.ID, "2026-06")
+	list, err = service.List(ctx, user.ID, "2026-06")
 	if err != nil {
 		t.Fatalf("list budgets after delete: %v", err)
 	}
@@ -66,8 +71,32 @@ func TestBudgetRejectsIncomeCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := NewService(s, nil).Create(user.ID, budgetRequest{Month: "2026-06", CategoryID: category.ID, Amount: 1000})
+	_, err := NewService(s, nil).Create(context.Background(), user.ID, budgetRequest{Month: "2026-06", CategoryID: category.ID, Amount: 1000})
 	if err == nil || err.Error() != "budget category must be expense" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestBudgetServicePassesContextToGORMQueries(t *testing.T) {
+	s := testutil.NewStore(t)
+	service := NewService(s, nil)
+	ctx := context.WithValue(context.Background(), budgetContextKey{}, "request-context")
+
+	callbackName := "budgets:test_context"
+	var got any
+	if err := s.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(db *gorm.DB) {
+		got = db.Statement.Context.Value(budgetContextKey{})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = s.DB.Callback().Query().Remove(callbackName)
+	})
+
+	if _, err := service.List(ctx, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got != "request-context" {
+		t.Fatalf("gorm context value = %#v", got)
 	}
 }

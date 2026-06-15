@@ -1,6 +1,7 @@
 package transactions
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"gorm.io/gorm"
 )
+
+type transactionContextKey struct{}
 
 func TestServiceMaintainsAccountBalanceAcrossCreateUpdateDelete(t *testing.T) {
 	s := testutil.NewStore(t)
@@ -26,7 +29,8 @@ func TestServiceMaintainsAccountBalanceAcrossCreateUpdateDelete(t *testing.T) {
 	}
 
 	service := NewService(s, nil)
-	tx, err := service.Create(user.ID, Request{
+	ctx := context.Background()
+	tx, err := service.Create(ctx, user.ID, Request{
 		Type:       "expense",
 		Amount:     12.34,
 		CategoryID: category.ID,
@@ -39,7 +43,7 @@ func TestServiceMaintainsAccountBalanceAcrossCreateUpdateDelete(t *testing.T) {
 	}
 	assertAccountBalance(t, s.DB, account.ID, 8766)
 
-	if _, err := service.Update(user.ID, tx.ID, Request{
+	if _, err := service.Update(ctx, user.ID, tx.ID, Request{
 		Type:       "expense",
 		Amount:     2.34,
 		CategoryID: category.ID,
@@ -51,10 +55,34 @@ func TestServiceMaintainsAccountBalanceAcrossCreateUpdateDelete(t *testing.T) {
 	}
 	assertAccountBalance(t, s.DB, account.ID, 9766)
 
-	if err := service.Delete(user.ID, tx.ID); err != nil {
+	if err := service.Delete(ctx, user.ID, tx.ID); err != nil {
 		t.Fatalf("delete tx: %v", err)
 	}
 	assertAccountBalance(t, s.DB, account.ID, 10000)
+}
+
+func TestServicePassesContextToGORMQueries(t *testing.T) {
+	s := testutil.NewStore(t)
+	service := NewService(s, nil)
+	ctx := context.WithValue(context.Background(), transactionContextKey{}, "request-context")
+
+	callbackName := "transactions:test_context"
+	var got any
+	if err := s.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(db *gorm.DB) {
+		got = db.Statement.Context.Value(transactionContextKey{})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = s.DB.Callback().Query().Remove(callbackName)
+	})
+
+	if _, _, err := service.List(ctx, 1, ListFilter{}); err != nil {
+		t.Fatal(err)
+	}
+	if got != "request-context" {
+		t.Fatalf("gorm context value = %#v", got)
+	}
 }
 
 func assertAccountBalance(t *testing.T, db *gorm.DB, accountID uint, want int64) {

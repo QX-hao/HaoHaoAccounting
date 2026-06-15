@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/queryutil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/timeutil"
 	"github.com/gin-gonic/gin"
 )
@@ -32,37 +34,54 @@ func (h *Handler) Register(group *gin.RouterGroup) {
 
 func (h *Handler) exportData(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	format := strings.ToLower(strings.TrimSpace(c.DefaultQuery("format", "csv")))
-	start, end := timeutil.ResolveRange(c.Query("start"), c.Query("end"))
-
-	rows, err := h.service.ExportRows(uid, start, end)
+	var query exportQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		httputil.InvalidRequest(c, "invalid query parameters")
+		return
+	}
+	format := strings.TrimSpace(query.Format)
+	if format == "" {
+		format = "csv"
+	}
+	start, end, err := timeutil.ResolveRangeStrict(query.Start, query.End)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InvalidRequest(c, err.Error())
+		return
+	}
+
+	rows, err := h.service.ExportRows(c.Request.Context(), uid, start, end)
+	if err != nil {
+		httputil.InternalError(c, err)
 		return
 	}
 
 	if format == "xlsx" {
 		if err := writeXLSX(c, rows); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httputil.InternalError(c, err)
 		}
 		return
 	}
-	writeCSV(c, rows)
+	if err := writeCSV(c, rows); err != nil {
+		httputil.InternalError(c, err)
+	}
 }
 
 func (h *Handler) importData(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.BadRequest(c, "file is required")
 		return
 	}
 
-	result, err := h.service.ImportWithOptions(uid, file, ImportOptions{
+	result, err := h.service.ImportWithOptions(c.Request.Context(), uid, file, ImportOptions{
 		SkipDuplicates: parseBoolDefault(c.PostForm("skipDuplicates"), true),
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httputil.BadRequest(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -72,13 +91,16 @@ func (h *Handler) previewImport(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.BadRequest(c, "file is required")
 		return
 	}
 
-	result, err := h.service.Preview(uid, file)
+	result, err := h.service.Preview(c.Request.Context(), uid, file)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httputil.BadRequest(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -88,15 +110,18 @@ func (h *Handler) createImportJob(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.BadRequest(c, "file is required")
 		return
 	}
 
-	job, err := h.service.StartImportJob(uid, file, ImportOptions{
+	job, err := h.service.StartImportJob(c.Request.Context(), uid, file, ImportOptions{
 		SkipDuplicates: parseBoolDefault(c.PostForm("skipDuplicates"), true),
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httputil.BadRequest(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusAccepted, job)
@@ -104,9 +129,9 @@ func (h *Handler) createImportJob(c *gin.Context) {
 
 func (h *Handler) listImportJobs(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	jobs, err := h.service.ListImportJobs(uid)
+	jobs, err := h.service.ListImportJobs(c.Request.Context(), uid)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httputil.InternalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, jobs)
@@ -114,10 +139,14 @@ func (h *Handler) listImportJobs(c *gin.Context) {
 
 func (h *Handler) getImportJob(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	id := uint(parseInt(c.Param("id")))
-	job, err := h.service.ImportJob(uid, id)
+	id, ok := queryutil.ParsePositiveUint(c.Param("id"))
+	if !ok {
+		httputil.InvalidRequest(c, "invalid id")
+		return
+	}
+	job, err := h.service.ImportJob(c.Request.Context(), uid, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "import job not found"})
+		httputil.NotFound(c, "import job not found")
 		return
 	}
 	c.JSON(http.StatusOK, job)
@@ -126,18 +155,21 @@ func (h *Handler) getImportJob(c *gin.Context) {
 func (h *Handler) importText(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	var req ImportTextRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+	if err := httputil.BindJSONBody(c, &req); err != nil {
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.InvalidRequest(c, "invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Content) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "content is required"})
+		httputil.BadRequest(c, "content is required")
 		return
 	}
 
-	result, err := h.service.ImportText(uid, req)
+	result, err := h.service.ImportText(c.Request.Context(), uid, req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httputil.BadRequest(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -146,18 +178,21 @@ func (h *Handler) importText(c *gin.Context) {
 func (h *Handler) previewImportText(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	var req ImportTextRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+	if err := httputil.BindJSONBody(c, &req); err != nil {
+		if middleware.HandleBodyReadError(c, err) {
+			return
+		}
+		httputil.InvalidRequest(c, "invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Content) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "content is required"})
+		httputil.BadRequest(c, "content is required")
 		return
 	}
 
-	result, err := h.service.PreviewText(uid, req)
+	result, err := h.service.PreviewText(c.Request.Context(), uid, req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httputil.BadRequest(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -175,14 +210,6 @@ func parseBoolDefault(value string, fallback bool) bool {
 	parsed, err := strconv.ParseBool(clean)
 	if err != nil {
 		return fallback
-	}
-	return parsed
-}
-
-func parseInt(value string) int {
-	parsed, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil {
-		return 0
 	}
 	return parsed
 }

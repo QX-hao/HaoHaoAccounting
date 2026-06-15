@@ -50,3 +50,38 @@ func TestReadCSVDataRowsRejectsTooManyRows(t *testing.T) {
 		t.Fatal("expected too many rows error")
 	}
 }
+
+func TestReadCSVDataRowsRejectsInvalidHeader(t *testing.T) {
+	_, err := readCSVDataRows(strings.NewReader("when,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,1,餐饮,现金,午饭,\n"))
+	if err == nil || !strings.Contains(err.Error(), "invalid header") {
+		t.Fatalf("readCSVDataRows error = %v, want invalid header", err)
+	}
+}
+
+func TestReadCSVDataRowsAllowsAdditionalColumns(t *testing.T) {
+	rows, err := readCSVDataRows(strings.NewReader(" occurred_at ,TYPE,amount,category,account,note,tags,source\n2026-06-01T12:30:00+08:00,expense,1,餐饮,现金,午饭,,import\n"))
+	if err != nil {
+		t.Fatalf("readCSVDataRows error = %v", err)
+	}
+	if len(rows) != 1 || len(rows[0]) != 8 {
+		t.Fatalf("rows = %#v", rows)
+	}
+}
+
+func TestReadCSVDataRowsAllowsMissingOptionalTailColumns(t *testing.T) {
+	rows, err := readCSVDataRows(strings.NewReader("occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,1,餐饮,现金\n"))
+	if err != nil {
+		t.Fatalf("readCSVDataRows error = %v", err)
+	}
+	if len(rows) != 1 || len(rows[0]) != 5 {
+		t.Fatalf("rows = %#v", rows)
+	}
+
+	record, err := parseImportRecord(rows[0])
+	if err != nil {
+		t.Fatalf("parseImportRecord error = %v", err)
+	}
+	if record.Note != "" || record.Tags != "" {
+		t.Fatalf("record = %#v, want empty optional tail fields", record)
+	}
+}

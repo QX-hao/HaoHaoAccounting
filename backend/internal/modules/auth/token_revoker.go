@@ -9,8 +9,14 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/cache"
 )
 
+type tokenRevocationStore interface {
+	Enabled() bool
+	Exists(ctx context.Context, key string) (bool, error)
+	SetString(ctx context.Context, key, value string, ttl time.Duration) error
+}
+
 type TokenRevoker struct {
-	cache *cache.RedisCache
+	cache tokenRevocationStore
 }
 
 func NewTokenRevoker(redisCache *cache.RedisCache) *TokenRevoker {
@@ -24,11 +30,14 @@ func (r *TokenRevoker) IsTokenRevoked(ctx context.Context, token string) (bool, 
 	return r.cache.Exists(ctx, cache.RevokedTokenKey(tokenHash(token)))
 }
 
-func (r *TokenRevoker) RevokeToken(ctx context.Context, token string) error {
+func (r *TokenRevoker) RevokeToken(ctx context.Context, token string, ttl time.Duration) error {
 	if r == nil || r.cache == nil || !r.cache.Enabled() {
 		return nil
 	}
-	return r.cache.SetString(ctx, cache.RevokedTokenKey(tokenHash(token)), "1", 8*24*time.Hour)
+	if ttl <= 0 {
+		return nil
+	}
+	return r.cache.SetString(ctx, cache.RevokedTokenKey(tokenHash(token)), "1", ttl)
 }
 
 func tokenHash(token string) string {

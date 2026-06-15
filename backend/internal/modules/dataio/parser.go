@@ -16,6 +16,8 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
+var requiredImportHeaders = []string{"occurred_at", "type", "amount", "category", "account", "note", "tags"}
+
 func readImportRows(file *multipart.FileHeader) ([][]string, error) {
 	if file.Size > MaxImportFileBytes {
 		return nil, fmt.Errorf("file too large: max %d MB", MaxImportFileBytes/1024/1024)
@@ -67,6 +69,7 @@ func readImportRows(file *multipart.FileHeader) ([][]string, error) {
 
 func readCSVDataRows(r io.Reader) ([][]string, error) {
 	reader := csv.NewReader(r)
+	reader.FieldsPerRecord = -1
 	rows := make([][]string, 0)
 	line := 0
 	for {
@@ -79,6 +82,9 @@ func readCSVDataRows(r io.Reader) ([][]string, error) {
 		}
 		line++
 		if line == 1 {
+			if err := validateImportHeader(row); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		rows = append(rows, row)
@@ -105,6 +111,9 @@ func readXLSXDataRows(xlsx *excelize.File, sheet string) ([][]string, error) {
 		}
 		line++
 		if line == 1 {
+			if err := validateImportHeader(row); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		rows = append(rows, row)
@@ -130,6 +139,18 @@ func readImportRowsFromCSVContent(content string) ([][]string, error) {
 		return nil, errors.New("empty csv")
 	}
 	return rows, nil
+}
+
+func validateImportHeader(row []string) error {
+	if len(row) < len(requiredImportHeaders) {
+		return fmt.Errorf("invalid header: expected %s", strings.Join(requiredImportHeaders, ","))
+	}
+	for i, want := range requiredImportHeaders {
+		if strings.TrimSpace(strings.ToLower(row[i])) != want {
+			return fmt.Errorf("invalid header: expected %s", strings.Join(requiredImportHeaders, ","))
+		}
+	}
+	return nil
 }
 
 func parseImportRecord(row []string) (importRecord, error) {

@@ -2,14 +2,19 @@ package dataio
 
 import (
 	"bytes"
+	"context"
 	"mime/multipart"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/transactions"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
+	"gorm.io/gorm"
 )
+
+type dataioContextKey struct{}
 
 func TestImportPreviewReportsValidAndInvalidRows(t *testing.T) {
 	s := testutil.NewStore(t)
@@ -19,7 +24,7 @@ func TestImportPreviewReportsValidAndInvalidRows(t *testing.T) {
 	}
 
 	file := writeImportFile(t, "preview.csv", "occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\nwrong,expense,1,餐饮,现金,坏行,\n")
-	preview, err := NewService(s, transactions.NewService(s, nil), nil).Preview(user.ID, file)
+	preview, err := NewService(s, transactions.NewService(s, nil), nil).Preview(context.Background(), user.ID, file)
 	if err != nil {
 		t.Fatalf("preview import: %v", err)
 	}
@@ -39,7 +44,7 @@ func TestImportPreviewMarksDuplicateRows(t *testing.T) {
 	}
 
 	file := writeImportFile(t, "preview.csv", "occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n")
-	preview, err := NewService(s, transactions.NewService(s, nil), nil).Preview(user.ID, file)
+	preview, err := NewService(s, transactions.NewService(s, nil), nil).Preview(context.Background(), user.ID, file)
 	if err != nil {
 		t.Fatalf("preview import: %v", err)
 	}
@@ -56,7 +61,7 @@ func TestImportCreatesRowsInBatchAndUpdatesBalance(t *testing.T) {
 	}
 
 	file := writeImportFile(t, "import.csv", "occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n2026-06-01T13:00:00+08:00,income,100,工资,现金,工资,\n")
-	result, err := NewService(s, transactions.NewService(s, nil), nil).Import(user.ID, file)
+	result, err := NewService(s, transactions.NewService(s, nil), nil).Import(context.Background(), user.ID, file)
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -81,7 +86,7 @@ func TestImportSkipsDuplicateRows(t *testing.T) {
 	}
 
 	file := writeImportFile(t, "import.csv", "occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n")
-	result, err := NewService(s, transactions.NewService(s, nil), nil).Import(user.ID, file)
+	result, err := NewService(s, transactions.NewService(s, nil), nil).Import(context.Background(), user.ID, file)
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -106,12 +111,23 @@ func TestImportCanAllowDuplicateRows(t *testing.T) {
 	}
 
 	file := writeImportFile(t, "import.csv", "occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n")
-	result, err := NewService(s, transactions.NewService(s, nil), nil).ImportWithOptions(user.ID, file, ImportOptions{SkipDuplicates: false})
+	result, err := NewService(s, transactions.NewService(s, nil), nil).ImportWithOptions(context.Background(), user.ID, file, ImportOptions{SkipDuplicates: false})
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
 	if result.Success != 2 || result.Skipped != 0 || result.Failed != 0 {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestImportTextRejectsInvalidHeader(t *testing.T) {
+	s := testutil.NewStore(t)
+
+	_, err := NewService(s, transactions.NewService(s, nil), nil).ImportText(context.Background(), 1, ImportTextRequest{
+		Content: "when,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,1,餐饮,现金,午饭,\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid header") {
+		t.Fatalf("ImportText error = %v, want invalid header", err)
 	}
 }
 
@@ -124,7 +140,8 @@ func TestStartImportJobPersistsProgressAndHistory(t *testing.T) {
 
 	service := NewService(s, transactions.NewService(s, nil), nil)
 	file := writeImportFile(t, "job.csv", "occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n")
-	job, err := service.StartImportJob(user.ID, file, ImportOptions{SkipDuplicates: true})
+	ctx := context.Background()
+	job, err := service.StartImportJob(ctx, user.ID, file, ImportOptions{SkipDuplicates: true})
 	if err != nil {
 		t.Fatalf("start import job: %v", err)
 	}
@@ -135,7 +152,7 @@ func TestStartImportJobPersistsProgressAndHistory(t *testing.T) {
 	var completed ImportJobResponse
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		completed, err = service.ImportJob(user.ID, job.ID)
+		completed, err = service.ImportJob(ctx, user.ID, job.ID)
 		if err != nil {
 			t.Fatalf("load import job: %v", err)
 		}
@@ -148,12 +165,51 @@ func TestStartImportJobPersistsProgressAndHistory(t *testing.T) {
 		t.Fatalf("unexpected completed job: %#v", completed)
 	}
 
-	jobs, err := service.ListImportJobs(user.ID)
+	jobs, err := service.ListImportJobs(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("list import jobs: %v", err)
 	}
 	if len(jobs) != 1 || jobs[0].ID != job.ID {
 		t.Fatalf("unexpected job history: %#v", jobs)
+	}
+}
+
+func TestServicePassesContextToGORMQueries(t *testing.T) {
+	s := testutil.NewStore(t)
+	service := NewService(s, transactions.NewService(s, nil), nil)
+	ctx := context.WithValue(context.Background(), dataioContextKey{}, "request-context")
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+
+	callbackName := "dataio:test_context"
+	var got any
+	if err := s.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(db *gorm.DB) {
+		got = db.Statement.Context.Value(dataioContextKey{})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = s.DB.Callback().Query().Remove(callbackName)
+	})
+
+	if _, err := service.ExportRows(ctx, 1, start, end); err != nil {
+		t.Fatal(err)
+	}
+	if got != "request-context" {
+		t.Fatalf("gorm context value = %#v", got)
+	}
+}
+
+func TestDetachedContextKeepsValuesWithoutCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), dataioContextKey{}, "request-context"))
+	cancel()
+
+	detached := detachedContext(ctx)
+	if got := detached.Value(dataioContextKey{}); got != "request-context" {
+		t.Fatalf("detached context value = %#v", got)
+	}
+	if err := detached.Err(); err != nil {
+		t.Fatalf("detached context error = %v", err)
 	}
 }
 

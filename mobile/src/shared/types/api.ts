@@ -90,7 +90,7 @@ export type TransactionRequest = {
 
 export type TransactionListResponse = {
   items: Transaction[];
-  pagination?: Pagination;
+  pagination: Pagination;
 };
 
 export type Pagination = {
@@ -253,7 +253,7 @@ export type ImportResult = {
 export type ImportJob = {
   id: number;
   filename: string;
-  status: string;
+  status: "queued" | "running" | "completed" | "failed";
   total: number;
   success: number;
   failed: number;
@@ -265,6 +265,8 @@ export type ImportJob = {
 
 export type ErrorResponse = {
   error: string;
+  code: "bad_request" | "invalid_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "rate_limited" | "payload_too_large" | "unsupported_media_type" | "not_acceptable" | "request_timeout" | "client_closed_request" | "internal_error";
+  requestId?: string;
 };
 
 export type OkResponse = {
