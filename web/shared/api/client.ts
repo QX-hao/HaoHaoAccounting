@@ -108,7 +108,7 @@ export async function logout(): Promise<void> {
   const token = getToken();
   if (!token) return;
 
-  await fetch(`${API_BASE}/auth/logout`, {
+  await fetchAPI('/auth/logout', {
     method: 'POST',
     headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
   }).catch(() => undefined);

@@ -86,6 +86,13 @@ test('API clients parse non-JSON error bodies through the shared error parser', 
 	assert.match(mobileApiClient, expected);
 });
 
+test('API clients route logout through shared network error handling', () => {
+	assert.match(webApiClient, /await fetchAPI\('\/auth\/logout', \{/);
+	assert.match(mobileApiClient, /await fetchAPI\('\/auth\/logout', \{/);
+	assert.doesNotMatch(webApiClient, /fetch\(`\$\{API_BASE\}\/auth\/logout/);
+	assert.doesNotMatch(mobileApiClient, /fetch\(`\$\{API_BASE\}\/auth\/logout/);
+});
+
 test('API clients support Retry-After delay seconds and HTTP-date values', () => {
 	const expected = /const retryAt = Date\.parse\(value\);[\s\S]+return Math\.max\(0, Math\.ceil\(\(retryAt - Date\.now\(\)\) \/ 1000\)\);/;
 	assert.match(webApiClient, expected);
