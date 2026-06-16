@@ -656,11 +656,13 @@ paths:
             maximum: 200
         - name: start
           in: query
+          description: Inclusive start datetime. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
         - name: end
           in: query
+          description: Inclusive end datetime. Date-only values cover the entire day. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
@@ -880,11 +882,13 @@ paths:
       parameters:
         - name: start
           in: query
+          description: Inclusive start datetime. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
         - name: end
           in: query
+          description: Inclusive end datetime. Date-only values cover the entire day. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
@@ -1224,11 +1228,13 @@ paths:
             enum: [csv, xlsx]
         - name: start
           in: query
+          description: Inclusive start datetime. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
         - name: end
           in: query
+          description: Inclusive end datetime. Date-only values cover the entire day. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time

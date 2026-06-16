@@ -490,8 +490,8 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
     requireParameterText(method, apiPath, methodBlock, 'page', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'pageSize', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'pageSize', 'maximum: 200');
-    requireParameterText(method, apiPath, methodBlock, 'start', 'format: date-time');
-    requireParameterText(method, apiPath, methodBlock, 'end', 'format: date-time');
+    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
+    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
     requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
   }
@@ -505,8 +505,8 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
   }
   if (apiPath === '/reports/summary' && method === 'get') {
     require400Response(method, apiPath, responseStatuses);
-    requireParameterText(method, apiPath, methodBlock, 'start', 'format: date-time');
-    requireParameterText(method, apiPath, methodBlock, 'end', 'format: date-time');
+    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
+    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
     requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'trend', 'enum: [day, week, month]');
@@ -514,8 +514,8 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
   if (apiPath === '/io/export' && method === 'get') {
     require400Response(method, apiPath, responseStatuses);
     requireParameterText(method, apiPath, methodBlock, 'format', 'enum: [csv, xlsx]');
-    requireParameterText(method, apiPath, methodBlock, 'start', 'format: date-time');
-    requireParameterText(method, apiPath, methodBlock, 'end', 'format: date-time');
+    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
+    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
     if (!methodBlock.includes('Content-Disposition:')) {
       throw new Error('GET /io/export is missing Content-Disposition response header');
     }
@@ -532,6 +532,16 @@ function requireParameterText(method, apiPath, block, name, requiredText) {
   const parameterBlock = parameterBlockByName(block, name);
   if (!parameterBlock.includes(requiredText)) {
     throw new Error(`${method.toUpperCase()} ${apiPath} parameter ${name} is missing ${requiredText}`);
+  }
+}
+
+function requireDateTimeQueryParameter(method, apiPath, block, name) {
+  requireParameterText(method, apiPath, block, name, 'format: date-time');
+  for (const acceptedFormat of ['RFC3339', 'YYYY-MM-DD', 'YYYY-MM-DD HH:mm:ss', 'YYYY/MM/DD']) {
+    requireParameterText(method, apiPath, block, name, acceptedFormat);
+  }
+  if (name === 'end') {
+    requireParameterText(method, apiPath, block, name, 'Date-only values cover the entire day');
   }
 }
 

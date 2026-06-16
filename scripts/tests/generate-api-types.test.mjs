@@ -163,6 +163,14 @@ test('generator requires Vary headers for negotiated responses', () => {
 	assert.match(generator, /negotiated response is missing Vary header/);
 });
 
+test('generator requires documented accepted datetime query formats', () => {
+	assert.match(generator, /requireDateTimeQueryParameter/);
+	assert.match(generator, /YYYY-MM-DD HH:mm:ss/);
+	assert.match(generator, /Date-only values cover the entire day/);
+	assert.match(openapi, /name: start[\s\S]+Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY\/MM\/DD/);
+	assert.match(openapi, /name: end[\s\S]+Date-only values cover the entire day/);
+});
+
 test('generator requires documented download filename headers', () => {
 	assert.match(generator, /GET \/io\/export is missing Content-Disposition response header/);
 	assert.match(generator, /components\.headers\.ContentDisposition is missing filename\* guidance/);
