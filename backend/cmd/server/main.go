@@ -265,9 +265,16 @@ func requestLogFormatter(param gin.LogFormatterParams) string {
 		param.Latency.String(),
 		param.ClientIP,
 		param.Method,
-		param.Path,
+		logPath(param.Path),
 		requestID,
 		param.BodySize,
 		param.ErrorMessage,
 	)
+}
+
+func logPath(path string) string {
+	if beforeQuery, _, ok := strings.Cut(path, "?"); ok {
+		return beforeQuery
+	}
+	return path
 }

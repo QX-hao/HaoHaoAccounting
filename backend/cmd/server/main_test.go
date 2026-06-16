@@ -39,6 +39,24 @@ func TestRequestLogFormatterIncludesRequestID(t *testing.T) {
 	}
 }
 
+func TestRequestLogFormatterDropsQueryString(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/reports/summary?start=2026-06-01&token=secret",
+	})
+
+	if !strings.Contains(line, `path="/api/v1/reports/summary"`) {
+		t.Fatalf("log line does not include sanitized path: %s", line)
+	}
+	if strings.Contains(line, "token=secret") || strings.Contains(line, "?start=") {
+		t.Fatalf("log line leaked query string: %s", line)
+	}
+}
+
 func TestNewHTTPServerAppliesRuntimeConfig(t *testing.T) {
 	cfg := config.Config{
 		Port: "19090",
@@ -239,6 +257,34 @@ func TestLoggerConfigSkipsHealthProbePaths(t *testing.T) {
 	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil))
 	if got := logOutput.String(); !strings.Contains(got, `path="/api/v1/accounts"`) {
 		t.Fatalf("api log = %q", got)
+	}
+}
+
+func TestLoggerConfigDoesNotLogQueryString(t *testing.T) {
+	previousMode := gin.Mode()
+	previousWriter := gin.DefaultWriter
+	t.Cleanup(func() {
+		gin.SetMode(previousMode)
+		gin.DefaultWriter = previousWriter
+	})
+	gin.SetMode(gin.TestMode)
+
+	var logOutput bytes.Buffer
+	gin.DefaultWriter = &logOutput
+	router := gin.New()
+	router.Use(gin.LoggerWithConfig(newLoggerConfig()))
+	router.GET("/api/v1/reports/summary", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/reports/summary?start=2026-06-01&token=secret", nil))
+
+	got := logOutput.String()
+	if !strings.Contains(got, `path="/api/v1/reports/summary"`) {
+		t.Fatalf("api log = %q", got)
+	}
+	if strings.Contains(got, "token=secret") || strings.Contains(got, "?start=") {
+		t.Fatalf("api log leaked query string: %q", got)
 	}
 }
 
