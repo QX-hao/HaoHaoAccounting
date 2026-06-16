@@ -2,7 +2,7 @@ import { api } from '@/shared/api';
 import type { Category, TransactionType } from '@/lib/types';
 
 export function listCategories() {
-  return api.categories.getCategories({});
+  return api.categories.getCategories();
 }
 
 export function createCategory(payload: { name: string; type: TransactionType }) {

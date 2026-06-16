@@ -95,10 +95,10 @@ export function createApiClient(runtime: ApiRuntime) {
     budgets: {
       getBudgets: (params: {
   month?: string;
-}) => {
+} = {}) => {
         let path = "/budgets";
         const search = new URLSearchParams();
-        setQueryParam(search, 'month', params.month);
+        setQueryParam(search, 'month', params?.month);
         const query = search.toString();
         if (query) path += `?${query}`;
         return runtime.request<Budget[]>(path);
@@ -125,10 +125,10 @@ export function createApiClient(runtime: ApiRuntime) {
     categories: {
       getCategories: (params: {
   type?: TransactionType;
-}) => {
+} = {}) => {
         let path = "/categories";
         const search = new URLSearchParams();
-        setQueryParam(search, 'type', params.type);
+        setQueryParam(search, 'type', params?.type);
         const query = search.toString();
         if (query) path += `?${query}`;
         return runtime.request<Category[]>(path);
@@ -162,17 +162,17 @@ export function createApiClient(runtime: ApiRuntime) {
   categoryId?: number;
   accountId?: number;
   q?: string;
-}) => {
+} = {}) => {
         let path = "/transactions";
         const search = new URLSearchParams();
-        setQueryParam(search, 'page', params.page);
-        setQueryParam(search, 'pageSize', params.pageSize);
-        setQueryParam(search, 'start', params.start);
-        setQueryParam(search, 'end', params.end);
-        setQueryParam(search, 'type', params.type);
-        setQueryParam(search, 'categoryId', params.categoryId);
-        setQueryParam(search, 'accountId', params.accountId);
-        setQueryParam(search, 'q', params.q);
+        setQueryParam(search, 'page', params?.page);
+        setQueryParam(search, 'pageSize', params?.pageSize);
+        setQueryParam(search, 'start', params?.start);
+        setQueryParam(search, 'end', params?.end);
+        setQueryParam(search, 'type', params?.type);
+        setQueryParam(search, 'categoryId', params?.categoryId);
+        setQueryParam(search, 'accountId', params?.accountId);
+        setQueryParam(search, 'q', params?.q);
         const query = search.toString();
         if (query) path += `?${query}`;
         return runtime.request<TransactionListResponse>(path);
@@ -209,14 +209,14 @@ export function createApiClient(runtime: ApiRuntime) {
   categoryId?: number;
   accountId?: number;
   trend?: "day" | "week" | "month";
-}) => {
+} = {}) => {
         let path = "/reports/summary";
         const search = new URLSearchParams();
-        setQueryParam(search, 'start', params.start);
-        setQueryParam(search, 'end', params.end);
-        setQueryParam(search, 'categoryId', params.categoryId);
-        setQueryParam(search, 'accountId', params.accountId);
-        setQueryParam(search, 'trend', params.trend);
+        setQueryParam(search, 'start', params?.start);
+        setQueryParam(search, 'end', params?.end);
+        setQueryParam(search, 'categoryId', params?.categoryId);
+        setQueryParam(search, 'accountId', params?.accountId);
+        setQueryParam(search, 'trend', params?.trend);
         const query = search.toString();
         if (query) path += `?${query}`;
         return runtime.request<Summary>(path);
@@ -261,12 +261,12 @@ export function createApiClient(runtime: ApiRuntime) {
   format?: "csv" | "xlsx";
   start?: string;
   end?: string;
-}) => {
+} = {}) => {
         let path = "/io/export";
         const search = new URLSearchParams();
-        setQueryParam(search, 'format', params.format);
-        setQueryParam(search, 'start', params.start);
-        setQueryParam(search, 'end', params.end);
+        setQueryParam(search, 'format', params?.format);
+        setQueryParam(search, 'start', params?.start);
+        setQueryParam(search, 'end', params?.end);
         const query = search.toString();
         if (query) path += `?${query}`;
         return runtime.request<unknown>(path);

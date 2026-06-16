@@ -28,7 +28,7 @@ export function listAccounts() {
 }
 
 export function listCategories() {
-  return api.categories.getCategories({}) as Promise<Category[]>;
+  return api.categories.getCategories() as Promise<Category[]>;
 }
 
 export function listTransactions(filters: TransactionFilters = { page: 1, pageSize: 20 }) {

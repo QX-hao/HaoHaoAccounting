@@ -1,7 +1,7 @@
 import { api } from '@/shared/api';
 
 export function getOverviewSummary() {
-  return api.reports.getReportsSummary({});
+  return api.reports.getReportsSummary();
 }
 
 export function listRecentTransactions() {

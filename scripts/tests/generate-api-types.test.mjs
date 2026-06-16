@@ -16,6 +16,13 @@ test('generated clients preserve explicit numeric zero query params', () => {
 	assert.doesNotMatch(generatedClient, /typeof value === 'number' && value === 0/);
 });
 
+test('generated clients allow omitting fully optional query params', () => {
+	assert.match(generator, /function methodArgs\(args, optionalParams\)/);
+	assert.match(generatedClient, /getCategories: \(params: \{\n\s+type\?: TransactionType;\n\} = \{\}\) => \{/);
+	assert.match(generatedClient, /setQueryParam\(search, 'type', params\?\.type\);/);
+	assert.doesNotMatch(generatedClient, /deleteAccountsById: \(params: \{\n\s+id: number \| string;\n\s+\} = \{\}\) => \{/);
+});
+
 test('generated types preserve property enum values', () => {
 	assert.match(generator, /propertyEnumValues/);
 });

@@ -2,10 +2,10 @@ import { api } from '../../shared/api';
 
 export async function loadDashboardData() {
   const [summary, transactions, accounts, categories] = await Promise.all([
-    api.reports.getReportsSummary({}),
+    api.reports.getReportsSummary(),
     api.transactions.getTransactions({ page: 1, pageSize: 20 }),
     api.accounts.getAccounts(),
-    api.categories.getCategories({}),
+    api.categories.getCategories(),
   ]);
 
   return {

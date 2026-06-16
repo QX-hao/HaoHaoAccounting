@@ -254,8 +254,9 @@ function emitEndpointMethod(endpoint) {
   const responseType = endpoint.responseSchema || 'unknown';
   const methodName = endpoint.name;
   const lines = [];
+  const optionalParams = needsParams && pathParams.length === 0 && queryParams.every((param) => !param.required);
 
-  lines.push(`${methodName}: (${args.join(', ')}) => {`);
+  lines.push(`${methodName}: (${methodArgs(args, optionalParams)}) => {`);
   if (needsParams) {
     lines.push(`  let path = ${JSON.stringify(endpoint.path)};`);
     for (const name of pathParams) {
@@ -267,7 +268,7 @@ function emitEndpointMethod(endpoint) {
   if (queryParams.length > 0) {
     lines.push('  const search = new URLSearchParams();');
     for (const param of queryParams) {
-      lines.push(`  setQueryParam(search, '${param.name}', params.${param.name});`);
+      lines.push(`  setQueryParam(search, '${param.name}', params?.${param.name});`);
     }
     lines.push("  const query = search.toString();");
     lines.push("  if (query) path += `?${query}`;");
@@ -288,6 +289,14 @@ function emitEndpointMethod(endpoint) {
   }
   lines.push('},');
   return lines;
+}
+
+function methodArgs(args, optionalParams) {
+  if (!optionalParams) {
+    return args.join(', ');
+  }
+  const [paramsArg, ...rest] = args;
+  return [`${paramsArg} = {}`, ...rest].join(', ');
 }
 
 function parseEndpoints(openapi) {
@@ -568,6 +577,7 @@ function parseOperationParameters(block) {
       type: paramBlock.match(/type:\s+([A-Za-z]+)/)?.[1] || 'string',
       enumValues: enumValues(paramBlock),
       ref: paramBlock.match(/\$ref:\s+'#\/components\/schemas\/([^']+)'/)?.[1] || '',
+      required: paramBlock.includes('required: true'),
     };
   }).filter((param) => param.name);
 }
