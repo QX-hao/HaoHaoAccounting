@@ -136,6 +136,12 @@ test('generator requires closed shared response schemas', () => {
 	assert.match(openapi, /OkResponse:\n\s+type: object\n\s+additionalProperties: false/);
 });
 
+test('generator requires closed paginated response schemas', () => {
+	assert.match(generator, /validatePaginatedResponseSchemasAreClosed/);
+	assert.match(openapi, /TransactionListResponse:\n\s+type: object\n\s+additionalProperties: false/);
+	assert.match(openapi, /Pagination:\n\s+type: object\n\s+additionalProperties: false/);
+});
+
 test('generator requires request money fields to document cent precision', () => {
 	assert.match(generator, /\['AccountRequest', 'multipleOf: 0\.01'\]/);
 	assert.match(generator, /\['BudgetRequest', 'multipleOf: 0\.01'\]/);

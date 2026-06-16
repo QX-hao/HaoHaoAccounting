@@ -77,6 +77,7 @@ function validateSchemaConstraints(allSchemas) {
 
   validateRequestSchemasAreClosed(allSchemas);
   validateSharedResponseSchemasAreClosed(allSchemas);
+  validatePaginatedResponseSchemasAreClosed(allSchemas);
   validatePaginationSchema(allSchemas.Pagination || '');
 }
 
@@ -93,6 +94,14 @@ function validateRequestSchemasAreClosed(allSchemas) {
 
 function validateSharedResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of ['ErrorResponse', 'OkResponse']) {
+    if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
+      throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validatePaginatedResponseSchemasAreClosed(allSchemas) {
+  for (const schemaName of ['TransactionListResponse', 'Pagination']) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
     }

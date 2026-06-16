@@ -1738,6 +1738,7 @@ components:
           type: string
     TransactionListResponse:
       type: object
+      additionalProperties: false
       required: [items, pagination]
       properties:
         items:
@@ -1748,6 +1749,7 @@ components:
           $ref: '#/components/schemas/Pagination'
     Pagination:
       type: object
+      additionalProperties: false
       required: [page, pageSize, total]
       properties:
         page:
