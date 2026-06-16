@@ -20,4 +20,7 @@ func TestParseNaturalLedgerText(t *testing.T) {
 	if result.Confidence <= 0.8 {
 		t.Fatalf("confidence = %v", result.Confidence)
 	}
+	if result.Confidence < 0 || result.Confidence > 1 {
+		t.Fatalf("confidence out of range = %v", result.Confidence)
+	}
 }

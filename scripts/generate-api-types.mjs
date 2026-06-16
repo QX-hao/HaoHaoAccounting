@@ -132,6 +132,12 @@ function validateAIResponseSchema(schema) {
   if (!confidence.includes('type: number')) {
     throw new Error('AIParseResult.confidence is missing number schema');
   }
+  if (!confidence.includes('minimum: 0')) {
+    throw new Error('AIParseResult.confidence is missing minimum: 0');
+  }
+  if (!confidence.includes('maximum: 1')) {
+    throw new Error('AIParseResult.confidence is missing maximum: 1');
+  }
 }
 
 function validatePaginationSchema(schema) {

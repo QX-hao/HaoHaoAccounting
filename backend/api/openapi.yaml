@@ -1790,6 +1790,8 @@ components:
           format: date-time
         confidence:
           type: number
+          minimum: 0
+          maximum: 1
     AIParseResponse:
       type: object
       additionalProperties: false

@@ -158,7 +158,7 @@ test('generator requires closed AI response schemas', () => {
 
 test('generator requires AI parse confidence in the response schema', () => {
 	assert.match(generator, /validateAIResponseSchema/);
-	assert.match(openapi, /confidence:\n\s+type: number/);
+	assert.match(openapi, /confidence:\n\s+type: number\n\s+minimum: 0\n\s+maximum: 1/);
 	assert.match(generatedTypes, /confidence: number;/);
 });
 
