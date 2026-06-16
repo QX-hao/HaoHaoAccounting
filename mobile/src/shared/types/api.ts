@@ -195,15 +195,15 @@ export type Summary = {
   balance: number;
   byCategory: CategoryStat[];
   byAccount: AccountStat[];
-  monthlyTrend?: MonthTrend[];
-  trendGranularity?: string;
-  trend?: TrendPoint[];
-  categoryTrend?: CategoryTrendPoint[];
-  accountBalanceTrend?: AccountBalancePoint[];
-  budgetExecution?: BudgetExecution[];
-  dailySummaries?: SummaryTableRow[];
-  monthlySummaries?: SummaryTableRow[];
-  periodCompare?: PeriodCompare;
+  monthlyTrend: MonthTrend[];
+  trendGranularity: string;
+  trend: TrendPoint[];
+  categoryTrend: CategoryTrendPoint[];
+  accountBalanceTrend: AccountBalancePoint[];
+  budgetExecution: BudgetExecution[];
+  dailySummaries: SummaryTableRow[];
+  monthlySummaries: SummaryTableRow[];
+  periodCompare: PeriodCompare;
 };
 
 export type ImportFileRequest = {

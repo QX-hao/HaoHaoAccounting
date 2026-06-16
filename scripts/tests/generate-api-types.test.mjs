@@ -176,6 +176,22 @@ test('generator requires summary response date range fields', () => {
 	assert.match(generatedTypes, /end: string;/);
 });
 
+test('generator requires stable summary response fields to be required', () => {
+	for (const fieldName of [
+		'monthlyTrend',
+		'trendGranularity',
+		'trend',
+		'categoryTrend',
+		'accountBalanceTrend',
+		'budgetExecution',
+		'dailySummaries',
+		'monthlySummaries',
+		'periodCompare',
+	]) {
+		assert.doesNotMatch(generatedTypes, new RegExp(`${fieldName}\\?:`));
+	}
+});
+
 test('generator requires closed import response schemas', () => {
 	assert.match(generator, /validateImportResponseSchemasAreClosed/);
 	for (const schemaName of ['ImportPreviewRow', 'ImportPreview', 'ImportResult', 'ImportJob']) {

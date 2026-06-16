@@ -143,7 +143,33 @@ function validateReportResponseSchemasAreClosed(allSchemas) {
   }
 }
 
+function schemaRequiredProperties(schema) {
+  return new Set(parseRequired(schema));
+}
+
 function validateSummaryResponseSchema(schema) {
+  for (const propertyName of [
+    'start',
+    'end',
+    'income',
+    'expense',
+    'balance',
+    'byCategory',
+    'byAccount',
+    'monthlyTrend',
+    'trendGranularity',
+    'trend',
+    'categoryTrend',
+    'accountBalanceTrend',
+    'budgetExecution',
+    'dailySummaries',
+    'monthlySummaries',
+    'periodCompare',
+  ]) {
+    if (!schemaRequiredProperties(schema).has(propertyName)) {
+      throw new Error(`Summary.${propertyName} is missing required`);
+    }
+  }
   for (const propertyName of ['start', 'end']) {
     const property = schemaPropertyBlock(schema, propertyName);
     if (!property.includes('type: string')) {

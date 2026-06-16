@@ -1938,7 +1938,7 @@ components:
     Summary:
       type: object
       additionalProperties: false
-      required: [start, end, income, expense, balance, byCategory, byAccount]
+      required: [start, end, income, expense, balance, byCategory, byAccount, monthlyTrend, trendGranularity, trend, categoryTrend, accountBalanceTrend, budgetExecution, dailySummaries, monthlySummaries, periodCompare]
       properties:
         start:
           type: string
