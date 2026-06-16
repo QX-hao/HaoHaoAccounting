@@ -547,14 +547,24 @@ func TestConfigEnvironmentKeysStayDocumented(t *testing.T) {
 	if missing := missingKeys(sourceKeys, exampleKeys); len(missing) > 0 {
 		t.Fatalf("backend/.env.example is missing config keys: %v", missing)
 	}
+	if unexpected := unexpectedKeys(sourceKeys, exampleKeys); len(unexpected) > 0 {
+		t.Fatalf("backend/.env.example documents unknown config keys: %v", unexpected)
+	}
 }
 
 func TestComposeBackendEnvironmentCoversConfigKeys(t *testing.T) {
 	sourceKeys := configSourceEnvKeys(t)
-	composeKeys := composeBackendEnvironmentKeys(t)
 
-	if missing := missingKeys(sourceKeys, composeKeys); len(missing) > 0 {
-		t.Fatalf("docker-compose.yaml backend environment is missing config keys: %v", missing)
+	for _, service := range []string{"backend", "dbmigrate"} {
+		t.Run(service, func(t *testing.T) {
+			composeKeys := composeServiceEnvironmentKeys(t, service)
+			if missing := missingKeys(sourceKeys, composeKeys); len(missing) > 0 {
+				t.Fatalf("docker-compose.yaml %s environment is missing config keys: %v", service, missing)
+			}
+			if unexpected := unexpectedKeys(sourceKeys, composeKeys); len(unexpected) > 0 {
+				t.Fatalf("docker-compose.yaml %s environment has unknown config keys: %v", service, unexpected)
+			}
+		})
 	}
 }
 
@@ -741,14 +751,14 @@ func envExampleKeys(t *testing.T) []string {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		if key != "" {
+		if isEnvKey(key) {
 			keys[key] = true
 		}
 	}
 	return sortedKeys(keys)
 }
 
-func composeBackendEnvironmentKeys(t *testing.T) []string {
+func composeServiceEnvironmentKeys(t *testing.T, service string) []string {
 	t.Helper()
 
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yaml"))
@@ -758,13 +768,14 @@ func composeBackendEnvironmentKeys(t *testing.T) []string {
 
 	keys := map[string]bool{}
 	inBackend, inEnvironment := false, false
+	serviceMarker := "  " + service + ":"
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "  backend:") {
+		if line == serviceMarker {
 			inBackend = true
 			inEnvironment = false
 			continue
 		}
-		if inBackend && strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && !strings.HasPrefix(line, "  backend:") {
+		if inBackend && strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && line != serviceMarker {
 			break
 		}
 		if !inBackend {
@@ -782,7 +793,7 @@ func composeBackendEnvironmentKeys(t *testing.T) []string {
 		}
 		clean := strings.TrimSpace(line)
 		key, _, ok := strings.Cut(clean, ":")
-		if ok && key != "" {
+		if ok && isEnvKey(key) {
 			keys[key] = true
 		}
 	}
@@ -822,6 +833,40 @@ func missingKeys(want []string, got []string) []string {
 		}
 	}
 	return missing
+}
+
+func unexpectedKeys(want []string, got []string) []string {
+	allowed := map[string]bool{}
+	for _, key := range want {
+		allowed[key] = true
+	}
+
+	var unexpected []string
+	for _, key := range got {
+		if !allowed[key] {
+			unexpected = append(unexpected, key)
+		}
+	}
+	return unexpected
+}
+
+func isEnvKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i, r := range key {
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if i > 0 && r >= '0' && r <= '9' {
+			continue
+		}
+		if i > 0 && r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func sortedKeys(values map[string]bool) []string {
