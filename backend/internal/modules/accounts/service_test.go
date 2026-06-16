@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
@@ -54,6 +55,21 @@ func TestServicePassesContextToGORMQueries(t *testing.T) {
 	}
 	if got != "request-context" {
 		t.Fatalf("gorm context value = %#v", got)
+	}
+}
+
+func TestServiceRejectsInvalidBalanceAmounts(t *testing.T) {
+	s := testutil.NewStore(t)
+	service := NewService(s, nil)
+
+	for _, balance := range []float64{-1, 1.234} {
+		_, err := service.Create(context.Background(), 1, accountRequest{Name: "Cash", Type: "cash", Balance: balance})
+		if err == nil {
+			t.Fatalf("Create balance %v err = nil", balance)
+		}
+		if !strings.Contains(err.Error(), "at most two decimal places") {
+			t.Fatalf("Create balance %v err = %q", balance, err.Error())
+		}
 	}
 }
 

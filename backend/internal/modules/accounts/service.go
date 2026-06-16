@@ -29,11 +29,15 @@ func (s *Service) List(ctx context.Context, userID uint) ([]models.Account, erro
 }
 
 func (s *Service) Create(ctx context.Context, userID uint, req accountRequest) (models.Account, error) {
+	balanceCents, err := money.ToCentsExact(req.Balance)
+	if err != nil {
+		return models.Account{}, err
+	}
 	account := models.Account{
 		UserID:       userID,
 		Name:         strings.TrimSpace(req.Name),
 		Type:         stringutil.FallbackName(req.Type, "custom"),
-		BalanceCents: money.ToCents(req.Balance),
+		BalanceCents: balanceCents,
 	}
 	if account.Name == "" {
 		return models.Account{}, errors.New("name is required")
@@ -57,7 +61,11 @@ func (s *Service) Update(ctx context.Context, userID, id uint, req accountReques
 	if strings.TrimSpace(req.Type) != "" {
 		account.Type = strings.TrimSpace(req.Type)
 	}
-	account.BalanceCents = money.ToCents(req.Balance)
+	balanceCents, err := money.ToCentsExact(req.Balance)
+	if err != nil {
+		return models.Account{}, err
+	}
+	account.BalanceCents = balanceCents
 
 	if err := s.db(ctx).Save(&account).Error; err != nil {
 		return models.Account{}, err

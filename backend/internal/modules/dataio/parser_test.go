@@ -36,6 +36,13 @@ func TestParseImportRecordRejectsInvalidAmount(t *testing.T) {
 	}
 }
 
+func TestParseImportRecordRejectsAmountWithMoreThanTwoFractionDigits(t *testing.T) {
+	_, err := parseImportRecord([]string{"2026-06-01T12:30:00+08:00", "expense", "1.234", "餐饮", "现金"})
+	if err == nil {
+		t.Fatal("expected invalid amount precision error")
+	}
+}
+
 func TestReadCSVDataRowsRejectsTooManyRows(t *testing.T) {
 	var buf strings.Builder
 	writer := csv.NewWriter(&buf)

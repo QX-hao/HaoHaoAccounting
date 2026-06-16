@@ -163,6 +163,7 @@ func isClientError(err error) bool {
 	switch err.Error() {
 	case "type must be income or expense",
 		"amount must be > 0",
+		"amount must be a non-negative number with at most two decimal places",
 		"categoryId is required",
 		"accountId is required",
 		"note is required",

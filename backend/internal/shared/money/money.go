@@ -11,6 +11,16 @@ func ToCents(amount float64) int64 {
 	return int64(math.Round(amount * 100))
 }
 
+func ToCentsExact(amount float64) (int64, error) {
+	if !math.IsInf(amount, 0) && !math.IsNaN(amount) && amount >= 0 {
+		cents := ToCents(amount)
+		if math.Abs(amount*100-float64(cents)) < 1e-9 {
+			return cents, nil
+		}
+	}
+	return 0, fmt.Errorf("amount must be a non-negative number with at most two decimal places")
+}
+
 func FromCents(cents int64) float64 {
 	return float64(cents) / 100
 }
@@ -28,5 +38,5 @@ func ParseCents(value string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return ToCents(amount), nil
+	return ToCentsExact(amount)
 }

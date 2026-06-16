@@ -1624,6 +1624,7 @@ components:
         balance:
           type: number
           minimum: 0
+          multipleOf: 0.01
     Budget:
       type: object
       required: [id, userId, month, categoryId, amount]
@@ -1652,6 +1653,7 @@ components:
         amount:
           type: number
           minimum: 0
+          multipleOf: 0.01
     Category:
       type: object
       required: [id, name, type, isSystem]
@@ -1715,6 +1717,7 @@ components:
         amount:
           type: number
           exclusiveMinimum: 0
+          multipleOf: 0.01
         categoryId:
           type: integer
           minimum: 1

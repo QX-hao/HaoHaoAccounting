@@ -135,6 +135,13 @@ func (s *Service) createWithDB(dbtx *gorm.DB, userID uint, req Request) (models.
 	if err := validateRequest(req); err != nil {
 		return models.Transaction{}, err
 	}
+	amountCents, err := money.ToCentsExact(req.Amount)
+	if err != nil {
+		return models.Transaction{}, err
+	}
+	if amountCents <= 0 {
+		return models.Transaction{}, errors.New("amount must be > 0")
+	}
 	if err := s.ensureCategoryAndAccountWithDB(dbtx, userID, req.Type, req.CategoryID, req.AccountID); err != nil {
 		return models.Transaction{}, err
 	}
@@ -145,7 +152,7 @@ func (s *Service) createWithDB(dbtx *gorm.DB, userID uint, req Request) (models.
 	tx := models.Transaction{
 		UserID:      userID,
 		Type:        req.Type,
-		AmountCents: money.ToCents(req.Amount),
+		AmountCents: amountCents,
 		CategoryID:  req.CategoryID,
 		AccountID:   req.AccountID,
 		Note:        strings.TrimSpace(req.Note),
@@ -172,6 +179,13 @@ func (s *Service) Update(ctx context.Context, userID, id uint, req Request) (mod
 	if err := validateRequest(req); err != nil {
 		return models.Transaction{}, err
 	}
+	amountCents, err := money.ToCentsExact(req.Amount)
+	if err != nil {
+		return models.Transaction{}, err
+	}
+	if amountCents <= 0 {
+		return models.Transaction{}, errors.New("amount must be > 0")
+	}
 	if err := s.ensureCategoryAndAccount(ctx, userID, req.Type, req.CategoryID, req.AccountID); err != nil {
 		return models.Transaction{}, err
 	}
@@ -181,7 +195,7 @@ func (s *Service) Update(ctx context.Context, userID, id uint, req Request) (mod
 
 	updated := existing
 	updated.Type = req.Type
-	updated.AmountCents = money.ToCents(req.Amount)
+	updated.AmountCents = amountCents
 	updated.CategoryID = req.CategoryID
 	updated.AccountID = req.AccountID
 	updated.Note = strings.TrimSpace(req.Note)

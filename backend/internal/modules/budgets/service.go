@@ -103,6 +103,10 @@ func (s *Service) buildBudget(ctx context.Context, userID uint, existing models.
 	if req.Amount < 0 {
 		return models.Budget{}, errors.New("amount must be >= 0")
 	}
+	amountCents, err := money.ToCentsExact(req.Amount)
+	if err != nil {
+		return models.Budget{}, err
+	}
 	if req.CategoryID > 0 {
 		if err := s.ensureExpenseCategory(ctx, userID, req.CategoryID); err != nil {
 			return models.Budget{}, err
@@ -112,7 +116,7 @@ func (s *Service) buildBudget(ctx context.Context, userID uint, existing models.
 	existing.UserID = userID
 	existing.Month = month
 	existing.CategoryID = req.CategoryID
-	existing.AmountCents = money.ToCents(req.Amount)
+	existing.AmountCents = amountCents
 	return existing, nil
 }
 

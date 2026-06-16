@@ -8,9 +8,9 @@ import (
 	"io"
 	"mime/multipart"
 	"path/filepath"
-	"strconv"
 	"strings"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/money"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/stringutil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/timeutil"
 	"github.com/xuri/excelize/v2"
@@ -169,15 +169,15 @@ func parseImportRecord(row []string) (importRecord, error) {
 	if typeVal != "income" && typeVal != "expense" {
 		return importRecord{}, fmt.Errorf("invalid type")
 	}
-	amount, err := strconv.ParseFloat(get(2), 64)
-	if err != nil || amount <= 0 {
+	amountCents, err := money.ParseCents(get(2))
+	if err != nil || amountCents <= 0 {
 		return importRecord{}, fmt.Errorf("invalid amount")
 	}
 
 	return importRecord{
 		OccurredAt: occurredAt,
 		Type:       typeVal,
-		Amount:     amount,
+		Amount:     money.FromCents(amountCents),
 		Category:   stringutil.FallbackName(get(3), "餐饮"),
 		Account:    stringutil.FallbackName(get(4), "现金"),
 		Note:       get(5),

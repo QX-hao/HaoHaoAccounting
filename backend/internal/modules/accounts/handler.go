@@ -47,7 +47,7 @@ func (h *Handler) create(c *gin.Context) {
 
 	account, err := h.service.Create(c.Request.Context(), uid, req)
 	if err != nil {
-		if err.Error() == "name is required" {
+		if err.Error() == "name is required" || err.Error() == "amount must be a non-negative number with at most two decimal places" {
 			httputil.BadRequest(c, err.Error())
 			return
 		}
@@ -77,6 +77,10 @@ func (h *Handler) update(c *gin.Context) {
 	if err != nil {
 		if err.Error() == "account not found" {
 			httputil.NotFound(c, err.Error())
+			return
+		}
+		if err.Error() == "amount must be a non-negative number with at most two decimal places" {
+			httputil.BadRequest(c, err.Error())
 			return
 		}
 		httputil.InternalError(c, err)

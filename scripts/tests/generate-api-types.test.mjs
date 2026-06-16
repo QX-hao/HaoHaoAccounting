@@ -130,6 +130,14 @@ test('generator requires closed request schemas', () => {
 	assert.match(generator, /is missing additionalProperties: false/);
 });
 
+test('generator requires request money fields to document cent precision', () => {
+	assert.match(generator, /\['AccountRequest', 'multipleOf: 0\.01'\]/);
+	assert.match(generator, /\['BudgetRequest', 'multipleOf: 0\.01'\]/);
+	assert.match(generator, /\['TransactionRequest', 'multipleOf: 0\.01'\]/);
+	assert.match(openapi, /balance:\n\s+type: number\n\s+minimum: 0\n\s+multipleOf: 0\.01/);
+	assert.match(openapi, /amount:\n\s+type: number\n\s+exclusiveMinimum: 0\n\s+multipleOf: 0\.01/);
+});
+
 test('generator requires method-not-allowed responses for operations', () => {
 	assert.match(generator, /missing 405 response/);
 });

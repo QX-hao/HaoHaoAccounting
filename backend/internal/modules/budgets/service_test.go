@@ -77,6 +77,18 @@ func TestBudgetRejectsIncomeCategory(t *testing.T) {
 	}
 }
 
+func TestBudgetRejectsAmountsWithMoreThanTwoFractionDigits(t *testing.T) {
+	s := testutil.NewStore(t)
+
+	_, err := NewService(s, nil).Create(context.Background(), 1, budgetRequest{Month: "2026-06", Amount: 1.234})
+	if err == nil {
+		t.Fatal("expected invalid amount precision error")
+	}
+	if err.Error() != "amount must be a non-negative number with at most two decimal places" {
+		t.Fatalf("err = %q", err.Error())
+	}
+}
+
 func TestBudgetServicePassesContextToGORMQueries(t *testing.T) {
 	s := testutil.NewStore(t)
 	service := NewService(s, nil)
