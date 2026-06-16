@@ -389,6 +389,7 @@ function parseEndpoints(openapi) {
       validateAuthOperationContract(method, apiPath, methodBlock, responseStatuses);
       validatePathParameters(method, apiPath, parameters);
       validateSuccessResponseHeaders(method, apiPath, methodBlock);
+      validateSuccessResponseCacheHeaders(method, apiPath, methodBlock, source);
       validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses);
       if (operationHasRequestBody(methodBlock)) {
         if (!responseStatuses.has('400')) {
@@ -451,6 +452,16 @@ function validateSuccessResponseHeaders(method, apiPath, methodBlock) {
     if (response.block.includes("$ref: '#/components/responses/Ok'")) continue;
     if (response.block.includes('X-Request-ID:')) continue;
     throw new Error(`${method.toUpperCase()} ${apiPath} ${response.status} response is missing X-Request-ID header`);
+  }
+}
+
+function validateSuccessResponseCacheHeaders(method, apiPath, methodBlock, openapi) {
+  const successResponses = operationResponseBlocks(methodBlock).filter((response) => /^2\d\d$/.test(response.status));
+  for (const response of successResponses) {
+    for (const header of ['Cache-Control:', 'Pragma:', 'Expires:']) {
+      if (responseIncludesHeader(response.block, openapi, header)) continue;
+      throw new Error(`${method.toUpperCase()} ${apiPath} ${response.status} response is missing ${header} no-store header`);
+    }
   }
 }
 

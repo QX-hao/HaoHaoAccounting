@@ -51,9 +51,12 @@ test('OpenAPI response components document no-store API cache headers', () => {
 	assert.match(generator, /validateNoStoreHeaders/);
 	assert.match(generator, /components\.headers\.\$\{componentName\} is missing \$\{expectedValue\}/);
 	assert.match(generator, /components\.responses\.\$\{responseName\} is missing \$\{headerName\} no-store header/);
+	assert.match(generator, /validateSuccessResponseCacheHeaders/);
+	assert.match(generator, /response is missing \$\{header\} no-store header/);
 	assert.match(openapi, /CacheControl:[\s\S]+enum: \[no-store\]/);
 	assert.match(openapi, /Pragma:[\s\S]+enum: \[no-cache\]/);
 	assert.match(openapi, /Expires:[\s\S]+enum: \['0'\]/);
+	assert.match(openapi, /'200':\n\s+description: Login success\n\s+headers:\n\s+Cache-Control:/);
 });
 
 test('API clients only default JSON Content-Type when a non-FormData body is present', () => {

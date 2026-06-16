@@ -41,6 +41,12 @@ paths:
         '200':
           description: Login success
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -77,6 +83,12 @@ paths:
         '200':
           description: Refreshed token
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -126,6 +138,12 @@ paths:
         '200':
           description: Current user
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -156,6 +174,12 @@ paths:
         '200':
           description: Account list
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -189,6 +213,12 @@ paths:
         '201':
           description: Created account
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -231,6 +261,12 @@ paths:
         '200':
           description: Updated account
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -293,6 +329,12 @@ paths:
         '200':
           description: Budget list
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -328,6 +370,12 @@ paths:
         '201':
           description: Created budget
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -372,6 +420,12 @@ paths:
         '200':
           description: Updated budget
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -435,6 +489,12 @@ paths:
         '200':
           description: Category list
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -470,6 +530,12 @@ paths:
         '201':
           description: Created category
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -512,6 +578,12 @@ paths:
         '200':
           description: Updated category
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -614,6 +686,12 @@ paths:
         '200':
           description: Transaction list
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -651,6 +729,12 @@ paths:
         '201':
           description: Created transaction
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -693,6 +777,12 @@ paths:
         '200':
           description: Updated transaction
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -755,6 +845,12 @@ paths:
         '200':
           description: Parsed ledger text
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -811,6 +907,12 @@ paths:
         '200':
           description: Report summary
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -847,6 +949,12 @@ paths:
         '200':
           description: Import preview
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -883,6 +991,12 @@ paths:
         '200':
           description: Import result
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -913,6 +1027,12 @@ paths:
         '200':
           description: Import job history
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -946,6 +1066,12 @@ paths:
         '202':
           description: Queued import job
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -978,6 +1104,12 @@ paths:
         '200':
           description: Import job status
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -1010,6 +1142,12 @@ paths:
         '200':
           description: Text import preview
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -1046,6 +1184,12 @@ paths:
         '200':
           description: Text import result
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -1092,6 +1236,12 @@ paths:
         '200':
           description: Exported ledger file
           headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
