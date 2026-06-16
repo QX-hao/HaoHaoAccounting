@@ -64,6 +64,16 @@ test('stateful compose services keep privilege escalation disabled without read-
 	}
 });
 
+test('stateful compose healthchecks avoid password command arguments', () => {
+	const redis = composeServiceBlock('redis');
+	assert.match(redis, /REDISCLI_AUTH=\\?"\$\${REDIS_PASSWORD}\\?" redis-cli ping/);
+	assert.doesNotMatch(redis, /redis-cli\s+-a/);
+
+	const mysql = composeServiceBlock('mysql');
+	assert.match(mysql, /MYSQL_PWD=\\?"\$\${MYSQL_ROOT_PASSWORD}\\?" mysqladmin ping/);
+	assert.doesNotMatch(mysql, /mysqladmin[^\n]+-p/);
+});
+
 function dockerignorePatterns(path) {
 	return new Set(
 		readFileSync(new URL(path, import.meta.url), 'utf8')
