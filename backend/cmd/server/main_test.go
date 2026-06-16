@@ -318,6 +318,67 @@ func TestEarlyRejectedRequestsKeepGlobalHeaders(t *testing.T) {
 	}
 }
 
+func TestCORSPreflightKeepsGlobalMiddlewareHeaders(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	cfg := config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+			MaxBodyBytes:     6 * 1024 * 1024,
+		},
+	}
+	router := gin.New()
+	applyGlobalMiddleware(router, cfg)
+	router.POST("/api/v1/auth/login", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/auth/login", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "Authorization, X-Request-ID, Content-Type")
+	req.Header.Set(middleware.RequestIDHeader, "request-preflight")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body = %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+	if got := resp.Header().Get("Access-Control-Max-Age"); got != "43200" {
+		t.Fatalf("Access-Control-Max-Age = %q", got)
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Methods"); !headerHasToken(got, http.MethodPost) {
+		t.Fatalf("Access-Control-Allow-Methods = %q, missing %s", got, http.MethodPost)
+	}
+	allowHeaders := resp.Header().Get("Access-Control-Allow-Headers")
+	for _, header := range []string{"Authorization", middleware.RequestIDHeader, "Content-Type"} {
+		if !headerHasToken(allowHeaders, header) {
+			t.Fatalf("Access-Control-Allow-Headers = %q, missing %s", allowHeaders, header)
+		}
+	}
+	if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-preflight" {
+		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
+	}
+}
+
+func headerHasToken(value, token string) bool {
+	for _, part := range strings.Split(value, ",") {
+		if strings.EqualFold(strings.TrimSpace(part), token) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestFallbackResponsesKeepGlobalMiddlewareHeaders(t *testing.T) {
 	previousMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
