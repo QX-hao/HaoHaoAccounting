@@ -79,6 +79,7 @@ function validateSchemaConstraints(allSchemas) {
   validateSharedResponseSchemasAreClosed(allSchemas);
   validateCoreResponseSchemasAreClosed(allSchemas);
   validateCurrentUserResponseSchema(allSchemas.CurrentUser || '');
+  validateCoreResourceTimestampSchemas(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
   validateReportResponseSchemasAreClosed(allSchemas);
   validateSummaryResponseSchema(allSchemas.Summary || '');
@@ -119,6 +120,24 @@ function validateCurrentUserResponseSchema(schema) {
   for (const propertyName of ['id', 'name', 'username', 'phone', 'email', 'wechatId']) {
     if (!schemaRequiredProperties(schema).has(propertyName)) {
       throw new Error(`CurrentUser.${propertyName} is missing required`);
+    }
+  }
+}
+
+function validateCoreResourceTimestampSchemas(allSchemas) {
+  for (const schemaName of ['Account', 'Budget', 'Category', 'Transaction']) {
+    const schema = allSchemas[schemaName] || '';
+    for (const propertyName of ['createdAt', 'updatedAt']) {
+      if (!schemaRequiredProperties(schema).has(propertyName)) {
+        throw new Error(`${schemaName}.${propertyName} is missing required`);
+      }
+      const property = schemaPropertyBlock(schema, propertyName);
+      if (!property.includes('type: string')) {
+        throw new Error(`${schemaName}.${propertyName} is missing string schema`);
+      }
+      if (!property.includes('format: date-time')) {
+        throw new Error(`${schemaName}.${propertyName} is missing date-time format`);
+      }
     }
   }
 }

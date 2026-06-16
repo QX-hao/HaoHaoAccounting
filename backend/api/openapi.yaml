@@ -1601,7 +1601,7 @@ components:
     Account:
       type: object
       additionalProperties: false
-      required: [id, userId, name, type, balance]
+      required: [id, userId, name, type, balance, createdAt, updatedAt]
       properties:
         id:
           type: integer
@@ -1613,6 +1613,12 @@ components:
           type: string
         balance:
           type: number
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     AccountRequest:
       type: object
       additionalProperties: false
@@ -1631,7 +1637,7 @@ components:
     Budget:
       type: object
       additionalProperties: false
-      required: [id, userId, month, categoryId, amount]
+      required: [id, userId, month, categoryId, amount, createdAt, updatedAt]
       properties:
         id:
           type: integer
@@ -1643,6 +1649,12 @@ components:
           type: integer
         amount:
           type: number
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     BudgetRequest:
       type: object
       additionalProperties: false
@@ -1661,7 +1673,7 @@ components:
     Category:
       type: object
       additionalProperties: false
-      required: [id, name, type, isSystem]
+      required: [id, name, type, isSystem, createdAt, updatedAt]
       properties:
         id:
           type: integer
@@ -1673,6 +1685,12 @@ components:
           $ref: '#/components/schemas/TransactionType'
         isSystem:
           type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     CategoryRequest:
       type: object
       additionalProperties: false
@@ -1686,7 +1704,7 @@ components:
     Transaction:
       type: object
       additionalProperties: false
-      required: [id, userId, type, amount, categoryId, accountId, note, tags, source, occurredAt, category, account]
+      required: [id, userId, type, amount, categoryId, accountId, note, tags, source, occurredAt, category, account, createdAt, updatedAt]
       properties:
         id:
           type: integer
@@ -1713,6 +1731,12 @@ components:
           $ref: '#/components/schemas/Category'
         account:
           $ref: '#/components/schemas/Account'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     TransactionRequest:
       type: object
       additionalProperties: false

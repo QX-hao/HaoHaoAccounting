@@ -27,6 +27,8 @@ export type Account = {
   name: string;
   type: string;
   balance: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AccountRequest = {
@@ -41,6 +43,8 @@ export type Budget = {
   month: string;
   categoryId: number;
   amount: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type BudgetRequest = {
@@ -55,6 +59,8 @@ export type Category = {
   name: string;
   type: TransactionType;
   isSystem: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CategoryRequest = {
@@ -75,6 +81,8 @@ export type Transaction = {
   occurredAt: string;
   category: Category;
   account: Account;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type TransactionRequest = {

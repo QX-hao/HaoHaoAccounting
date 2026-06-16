@@ -11,6 +11,17 @@ const webDataioApi = readFileSync(new URL('../../web/features/dataio/api.ts', im
 const mobileApiClient = readFileSync(new URL('../../mobile/src/shared/api/client.ts', import.meta.url), 'utf8');
 const mobileDataioApi = readFileSync(new URL('../../mobile/src/features/dataio/api.ts', import.meta.url), 'utf8');
 
+function openapiSchema(schemaName) {
+	const schemasStart = openapi.indexOf('  schemas:');
+	const schemas = openapi.slice(schemasStart);
+	const marker = `    ${schemaName}:\n`;
+	const start = schemas.indexOf(marker);
+	assert.notEqual(start, -1, `${schemaName} schema not found`);
+	const rest = schemas.slice(start + marker.length);
+	const next = rest.search(/^    [A-Za-z][A-Za-z0-9]*:\n/m);
+	return marker + rest.slice(0, next === -1 ? rest.length : next);
+}
+
 test('generated clients preserve explicit numeric zero query params', () => {
 	assert.match(generator, /if \(value === undefined \|\| value === null \|\| value === ''\) return;/);
 	assert.doesNotMatch(generator, /typeof value === 'number' && value === 0/);
@@ -148,6 +159,18 @@ test('generator requires stable current user response fields to be required', ()
 	for (const fieldName of ['username', 'phone', 'email', 'wechatId']) {
 		assert.doesNotMatch(generatedTypes, new RegExp(`${fieldName}\\?:`));
 	}
+});
+
+test('generator requires core resource timestamps in response schemas', () => {
+	assert.match(generator, /validateCoreResourceTimestampSchemas/);
+	for (const schemaName of ['Account', 'Budget', 'Category', 'Transaction']) {
+		const schema = openapiSchema(schemaName);
+		assert.match(schema, /required: \[[^\]]*createdAt[^\]]*updatedAt[^\]]*\]/);
+		assert.match(schema, /createdAt:\n\s+type: string\n\s+format: date-time/);
+		assert.match(schema, /updatedAt:\n\s+type: string\n\s+format: date-time/);
+	}
+	assert.match(generatedTypes, /createdAt: string;/);
+	assert.match(generatedTypes, /updatedAt: string;/);
 });
 
 test('generator requires closed paginated response schemas', () => {
