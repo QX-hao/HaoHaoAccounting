@@ -106,6 +106,31 @@ func TestLoginRateLimiterClearsAfterSuccessfulLogin(t *testing.T) {
 	}
 }
 
+func TestLoginPreservesPasswordWhitespace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	s := testutil.NewStore(t)
+	hash, err := hashPassword(" secret-password ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "admin", PasswordHash: hash, Name: "管理员"}
+	if err := s.DB.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	router := gin.New()
+	handler := &Handler{store: s, loginLimiter: newLoginLimiter(3, time.Minute), tokenService: testTokenService(t)}
+	handler.RegisterPublic(router.Group("/api/v1"))
+
+	if resp := postLogin(t, router, `{"username":"admin","password":"secret-password"}`); resp.Code != http.StatusUnauthorized {
+		t.Fatalf("trimmed password status = %d, want 401", resp.Code)
+	}
+	if resp := postLogin(t, router, `{"username":" admin ","password":" secret-password "}`); resp.Code != http.StatusOK {
+		t.Fatalf("exact password status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestLoginRateLimiterPrunesExpiredAttempts(t *testing.T) {
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 	limiter := newLoginLimiter(2, time.Minute)

@@ -53,7 +53,6 @@ func (h *Handler) login(c *gin.Context) {
 	}
 
 	req.Username = strings.TrimSpace(req.Username)
-	req.Password = strings.TrimSpace(req.Password)
 
 	if req.Username == "" {
 		httputil.BadRequest(c, "请输入用户名")
