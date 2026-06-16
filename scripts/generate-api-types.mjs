@@ -77,6 +77,7 @@ function validateSchemaConstraints(allSchemas) {
 
   validateRequestSchemasAreClosed(allSchemas);
   validateSharedResponseSchemasAreClosed(allSchemas);
+  validateCoreResponseSchemasAreClosed(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
   validateImportResponseSchemasAreClosed(allSchemas);
   validateAIResponseSchemasAreClosed(allSchemas);
@@ -97,6 +98,14 @@ function validateRequestSchemasAreClosed(allSchemas) {
 
 function validateSharedResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of ['ErrorResponse', 'OkResponse']) {
+    if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
+      throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateCoreResponseSchemasAreClosed(allSchemas) {
+  for (const schemaName of ['CurrentUser', 'LoginResponse', 'Account', 'Budget', 'Category', 'Transaction']) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
     }

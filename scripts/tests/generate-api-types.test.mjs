@@ -136,6 +136,13 @@ test('generator requires closed shared response schemas', () => {
 	assert.match(openapi, /OkResponse:\n\s+type: object\n\s+additionalProperties: false/);
 });
 
+test('generator requires closed core response schemas', () => {
+	assert.match(generator, /validateCoreResponseSchemasAreClosed/);
+	for (const schemaName of ['CurrentUser', 'LoginResponse', 'Account', 'Budget', 'Category', 'Transaction']) {
+		assert.match(openapi, new RegExp(`${schemaName}:\\n\\s+type: object\\n\\s+additionalProperties: false`));
+	}
+});
+
 test('generator requires closed paginated response schemas', () => {
 	assert.match(generator, /validatePaginatedResponseSchemasAreClosed/);
 	assert.match(openapi, /TransactionListResponse:\n\s+type: object\n\s+additionalProperties: false/);

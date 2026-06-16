@@ -1563,6 +1563,7 @@ components:
       enum: [income, expense]
     CurrentUser:
       type: object
+      additionalProperties: false
       required: [id, name]
       properties:
         id:
@@ -1590,6 +1591,7 @@ components:
           minLength: 1
     LoginResponse:
       type: object
+      additionalProperties: false
       required: [token, user]
       properties:
         token:
@@ -1598,6 +1600,7 @@ components:
           $ref: '#/components/schemas/CurrentUser'
     Account:
       type: object
+      additionalProperties: false
       required: [id, userId, name, type, balance]
       properties:
         id:
@@ -1627,6 +1630,7 @@ components:
           multipleOf: 0.01
     Budget:
       type: object
+      additionalProperties: false
       required: [id, userId, month, categoryId, amount]
       properties:
         id:
@@ -1656,6 +1660,7 @@ components:
           multipleOf: 0.01
     Category:
       type: object
+      additionalProperties: false
       required: [id, name, type, isSystem]
       properties:
         id:
@@ -1680,6 +1685,7 @@ components:
           $ref: '#/components/schemas/TransactionType'
     Transaction:
       type: object
+      additionalProperties: false
       required: [id, userId, type, amount, categoryId, accountId, note, tags, source, occurredAt, category, account]
       properties:
         id:
