@@ -76,6 +76,7 @@ function validateSchemaConstraints(allSchemas) {
   }
 
   validateRequestSchemasAreClosed(allSchemas);
+  validateSharedResponseSchemasAreClosed(allSchemas);
   validatePaginationSchema(allSchemas.Pagination || '');
 }
 
@@ -85,6 +86,14 @@ function validateRequestSchemasAreClosed(allSchemas) {
       continue;
     }
     if (!allSchemas[schemaName].includes('additionalProperties: false')) {
+      throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateSharedResponseSchemasAreClosed(allSchemas) {
+  for (const schemaName of ['ErrorResponse', 'OkResponse']) {
+    if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
     }
   }

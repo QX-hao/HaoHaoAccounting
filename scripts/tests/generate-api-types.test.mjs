@@ -130,6 +130,12 @@ test('generator requires closed request schemas', () => {
 	assert.match(generator, /is missing additionalProperties: false/);
 });
 
+test('generator requires closed shared response schemas', () => {
+	assert.match(generator, /validateSharedResponseSchemasAreClosed/);
+	assert.match(openapi, /ErrorResponse:\n\s+type: object\n\s+additionalProperties: false/);
+	assert.match(openapi, /OkResponse:\n\s+type: object\n\s+additionalProperties: false/);
+});
+
 test('generator requires request money fields to document cent precision', () => {
 	assert.match(generator, /\['AccountRequest', 'multipleOf: 0\.01'\]/);
 	assert.match(generator, /\['BudgetRequest', 'multipleOf: 0\.01'\]/);

@@ -2088,6 +2088,7 @@ components:
           format: date-time
     ErrorResponse:
       type: object
+      additionalProperties: false
       required: [error, code]
       properties:
         error:
@@ -2099,6 +2100,7 @@ components:
           type: string
     OkResponse:
       type: object
+      additionalProperties: false
       required: [ok]
       properties:
         ok:
