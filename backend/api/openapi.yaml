@@ -1991,6 +1991,7 @@ components:
           type: boolean
     ImportPreviewRow:
       type: object
+      additionalProperties: false
       required: [line, occurredAt, type, amount, category, account, note, tags, valid, duplicate]
       properties:
         line:
@@ -2019,6 +2020,7 @@ components:
           type: string
     ImportPreview:
       type: object
+      additionalProperties: false
       required: [filename, size, totalRows, validRows, failedRows, duplicateRows, maxRows, maxFileBytes, truncated, rows]
       properties:
         filename:
@@ -2045,6 +2047,7 @@ components:
             $ref: '#/components/schemas/ImportPreviewRow'
     ImportResult:
       type: object
+      additionalProperties: false
       required: [total, success, failed, skipped, errors]
       properties:
         total:
@@ -2061,6 +2064,7 @@ components:
             type: string
     ImportJob:
       type: object
+      additionalProperties: false
       required: [id, filename, status, total, success, failed, skipped, errors, createdAt, updatedAt]
       properties:
         id:

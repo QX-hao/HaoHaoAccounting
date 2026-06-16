@@ -78,6 +78,7 @@ function validateSchemaConstraints(allSchemas) {
   validateRequestSchemasAreClosed(allSchemas);
   validateSharedResponseSchemasAreClosed(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
+  validateImportResponseSchemasAreClosed(allSchemas);
   validatePaginationSchema(allSchemas.Pagination || '');
 }
 
@@ -102,6 +103,14 @@ function validateSharedResponseSchemasAreClosed(allSchemas) {
 
 function validatePaginatedResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of ['TransactionListResponse', 'Pagination']) {
+    if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
+      throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateImportResponseSchemasAreClosed(allSchemas) {
+  for (const schemaName of ['ImportPreviewRow', 'ImportPreview', 'ImportResult', 'ImportJob']) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
     }
