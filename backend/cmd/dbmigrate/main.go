@@ -35,6 +35,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
+	defer func() {
+		if err := closeDB(db); err != nil {
+			log.Printf("close database: %v", err)
+		}
+	}()
 	if err := runMigrations(db, dbCfg.Driver); err != nil {
 		log.Fatalf("migrate database: %v", err)
 	}
@@ -76,6 +81,17 @@ func openDB(cfg config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+func closeDB(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }
 
 func runMigrations(db *gorm.DB, driver string) error {

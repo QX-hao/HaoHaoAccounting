@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestSplitSQLStatementsSkipsBlankAndCommentLines(t *testing.T) {
@@ -70,6 +72,28 @@ func TestMigrationDatabaseConfigNormalizesDriver(t *testing.T) {
 		cfg.ConnMaxLifetime != time.Minute ||
 		cfg.ConnMaxIdleTime != 30*time.Second {
 		t.Fatalf("Database pool config = %#v", cfg)
+	}
+}
+
+func TestCloseDBClosesDatabaseAndAllowsNil(t *testing.T) {
+	if err := closeDB(nil); err != nil {
+		t.Fatalf("close nil db: %v", err)
+	}
+
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("db.DB: %v", err)
+	}
+
+	if err := closeDB(db); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	if err := sqlDB.Ping(); err == nil {
+		t.Fatal("expected closed database ping error")
 	}
 }
 
