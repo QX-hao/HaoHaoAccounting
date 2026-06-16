@@ -149,6 +149,19 @@ test('generator requires closed import response schemas', () => {
 	}
 });
 
+test('generator requires closed AI response schemas', () => {
+	assert.match(generator, /validateAIResponseSchemasAreClosed/);
+	for (const schemaName of ['AIParseResult', 'AIParseResponse']) {
+		assert.match(openapi, new RegExp(`${schemaName}:\\n\\s+type: object\\n\\s+additionalProperties: false`));
+	}
+});
+
+test('generator requires AI parse confidence in the response schema', () => {
+	assert.match(generator, /validateAIResponseSchema/);
+	assert.match(openapi, /confidence:\n\s+type: number/);
+	assert.match(generatedTypes, /confidence: number;/);
+});
+
 test('generator requires request money fields to document cent precision', () => {
 	assert.match(generator, /\['AccountRequest', 'multipleOf: 0\.01'\]/);
 	assert.match(generator, /\['BudgetRequest', 'multipleOf: 0\.01'\]/);

@@ -110,6 +110,7 @@ export type AIParseResult = {
   account: string;
   note: string;
   occurredAt: string;
+  confidence: number;
 };
 
 export type AIParseResponse = {

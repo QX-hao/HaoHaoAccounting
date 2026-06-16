@@ -1772,7 +1772,8 @@ components:
           minLength: 1
     AIParseResult:
       type: object
-      required: [type, amount, category, account, note, occurredAt]
+      additionalProperties: false
+      required: [type, amount, category, account, note, occurredAt, confidence]
       properties:
         type:
           $ref: '#/components/schemas/TransactionType'
@@ -1787,8 +1788,11 @@ components:
         occurredAt:
           type: string
           format: date-time
+        confidence:
+          type: number
     AIParseResponse:
       type: object
+      additionalProperties: false
       required: [requiresConfirmation, cached, result]
       properties:
         requiresConfirmation:

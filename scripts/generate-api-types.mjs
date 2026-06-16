@@ -79,6 +79,8 @@ function validateSchemaConstraints(allSchemas) {
   validateSharedResponseSchemasAreClosed(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
   validateImportResponseSchemasAreClosed(allSchemas);
+  validateAIResponseSchemasAreClosed(allSchemas);
+  validateAIResponseSchema(allSchemas.AIParseResult || '');
   validatePaginationSchema(allSchemas.Pagination || '');
 }
 
@@ -114,6 +116,21 @@ function validateImportResponseSchemasAreClosed(allSchemas) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
     }
+  }
+}
+
+function validateAIResponseSchemasAreClosed(allSchemas) {
+  for (const schemaName of ['AIParseResult', 'AIParseResponse']) {
+    if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
+      throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateAIResponseSchema(schema) {
+  const confidence = schemaPropertyBlock(schema, 'confidence');
+  if (!confidence.includes('type: number')) {
+    throw new Error('AIParseResult.confidence is missing number schema');
   }
 }
 
