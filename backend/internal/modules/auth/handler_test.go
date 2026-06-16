@@ -150,6 +150,26 @@ func TestLoginRateLimiterPrunesExpiredAttempts(t *testing.T) {
 	}
 }
 
+func TestLoginRateLimiterExpiresAttemptsAtWindowBoundary(t *testing.T) {
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	limiter := newLoginLimiter(2, time.Minute)
+	limiter.now = func() time.Time { return now }
+
+	limiter.RecordFailure("192.0.2.1|admin")
+	limiter.RecordFailure("192.0.2.1|admin")
+	if limiter.Allow("192.0.2.1|admin") {
+		t.Fatal("expected attempts to be blocked before window boundary")
+	}
+
+	now = now.Add(time.Minute)
+	if !limiter.Allow("192.0.2.1|admin") {
+		t.Fatal("expected attempts to expire at window boundary")
+	}
+	if len(limiter.attempts) != 0 {
+		t.Fatalf("attempts = %d, want expired attempts pruned", len(limiter.attempts))
+	}
+}
+
 func TestLoginRateLimiterKeepsFreshAttemptsWhenPruning(t *testing.T) {
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 	limiter := newLoginLimiter(2, time.Minute)

@@ -55,7 +55,7 @@ func (l *loginLimiter) RecordFailure(key string) {
 	now := l.now()
 	l.pruneExpired(now)
 	attempt, ok := l.attempts[key]
-	if !ok || now.Sub(attempt.firstFailure) > l.window {
+	if !ok || now.Sub(attempt.firstFailure) >= l.window {
 		l.attempts[key] = loginAttempt{failures: 1, firstFailure: now}
 		return
 	}
@@ -75,7 +75,7 @@ func (l *loginLimiter) RecordSuccess(key string) {
 
 func (l *loginLimiter) pruneExpired(now time.Time) {
 	for key, attempt := range l.attempts {
-		if now.Sub(attempt.firstFailure) > l.window {
+		if now.Sub(attempt.firstFailure) >= l.window {
 			delete(l.attempts, key)
 		}
 	}
