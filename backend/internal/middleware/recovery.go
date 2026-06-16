@@ -3,6 +3,7 @@ package middleware
 import (
 	"fmt"
 	"io"
+	"net/http"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,7 @@ func recoveryWithWriter(out io.Writer) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		httputil.InternalError(c, fmt.Errorf("panic recovered: %v", recovered))
+		httputil.Error(c, http.StatusInternalServerError, httputil.CodeInternal, "internal server error")
 		c.Abort()
 	})
 }

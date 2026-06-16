@@ -66,6 +66,34 @@ func TestRecoveryReturnsStructuredInternalError(t *testing.T) {
 	}
 }
 
+func TestRecoveryDoesNotLeakPanicDetailsOutsideRelease(t *testing.T) {
+	gin.SetMode(gin.DebugMode)
+	t.Cleanup(func() { gin.SetMode(gin.TestMode) })
+
+	router := gin.New()
+	router.Use(RequestID(), recoveryWithWriter(nil))
+	router.GET("/panic", func(*gin.Context) {
+		panic("debug panic details")
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/panic", nil))
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	var body httputil.ErrorResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Error != "internal server error" {
+		t.Fatalf("error = %q", body.Error)
+	}
+	if strings.Contains(resp.Body.String(), "debug panic details") {
+		t.Fatalf("response leaked panic details: %s", resp.Body.String())
+	}
+}
+
 func TestRecoveryDoesNotWriteErrorAfterResponseStarted(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 	t.Cleanup(func() { gin.SetMode(gin.TestMode) })
