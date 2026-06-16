@@ -1,11 +1,13 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/gin-gonic/gin"
 )
 
@@ -44,6 +46,35 @@ func TestRequestTimeoutAddsDeadlineAndPreservesRequestID(t *testing.T) {
 	}
 	if got := resp.Header().Get(RequestIDHeader); got != "request-123" {
 		t.Fatalf("request id header = %q", got)
+	}
+}
+
+func TestRequestTimeoutWritesGatewayTimeoutWhenHandlerLeavesResponseEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(RequestID(), RequestTimeout(10*time.Millisecond))
+	router.GET("/slow", func(c *gin.Context) {
+		<-c.Request.Context().Done()
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/slow", nil)
+	req.Header.Set(RequestIDHeader, "request-timeout")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get(RequestIDHeader); got != "request-timeout" {
+		t.Fatalf("request id header = %q", got)
+	}
+	var body httputil.ErrorResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Code != httputil.CodeRequestTimeout || body.RequestID != "request-timeout" {
+		t.Fatalf("body = %#v", body)
 	}
 }
 
