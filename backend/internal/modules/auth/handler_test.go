@@ -244,6 +244,46 @@ func TestMeReturnsCurrentUserContract(t *testing.T) {
 	}
 }
 
+func TestRefreshRevokesCurrentTokenWhenRevokerIsConfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	s := testutil.NewStore(t)
+	user := models.User{Username: "admin", PasswordHash: "hash", Name: "管理员"}
+	if err := s.DB.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	tokenService := testTokenService(t)
+	token, err := tokenService.BuildToken(user.ID)
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+	revocationStore := &recordingRevocationStore{enabled: true}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("user_id", user.ID)
+		c.Set("token_revoker", &TokenRevoker{cache: revocationStore})
+		c.Next()
+	})
+	handler := &Handler{store: s, tokenService: tokenService}
+	handler.RegisterPrivate(router.Group("/api/v1"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+	}
+	if revocationStore.calls != 1 {
+		t.Fatalf("revocation calls = %d, want 1", revocationStore.calls)
+	}
+	if revocationStore.key == "" || revocationStore.value != "1" || revocationStore.ttl <= 0 {
+		t.Fatalf("revocation store = %#v", revocationStore)
+	}
+}
+
 func TestLoginReturnsPayloadTooLargeWhenBodyLimitIsExceeded(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -284,6 +324,27 @@ func TestTokenRevocationTTLIncludesClockSkew(t *testing.T) {
 	}
 	if ttl < 30*time.Minute || ttl > 31*time.Minute {
 		t.Fatalf("ttl = %s, want close to token lifetime plus clock skew", ttl)
+	}
+}
+
+func TestLogoutReturnsUnauthorizedWhenRevocationTTLCannotBeComputed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("token_revoker", &TokenRevoker{cache: &recordingRevocationStore{enabled: true}})
+		c.Next()
+	})
+	handler := &Handler{store: testutil.NewStore(t), tokenService: testTokenService(t)}
+	handler.RegisterPrivate(router.Group("/api/v1"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	req.Header.Set("Authorization", "Bearer not-a-valid-jwt")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body = %s", resp.Code, resp.Body.String())
 	}
 }
 

@@ -111,6 +111,17 @@ func (h *Handler) refresh(c *gin.Context) {
 		httputil.NotFound(c, "user not found")
 		return
 	}
+	if token, ok := middleware.BearerToken(c.GetHeader("Authorization")); ok {
+		invalidToken, err := h.revokeTokenFromContext(c, token)
+		if invalidToken {
+			httputil.Unauthorized(c, "invalid token")
+			return
+		}
+		if err != nil {
+			httputil.InternalError(c, err)
+			return
+		}
+	}
 	h.respondWithToken(c, user)
 }
 
@@ -120,16 +131,14 @@ func (h *Handler) logout(c *gin.Context) {
 		httputil.Unauthorized(c, "missing Authorization header")
 		return
 	}
-	if revoker := tokenRevokerFromContext(c); revoker != nil {
-		ttl, err := h.tokenRevocationTTL(token)
-		if err != nil {
-			httputil.Unauthorized(c, "invalid token")
-			return
-		}
-		if err := revoker.RevokeToken(c.Request.Context(), token, ttl); err != nil {
-			httputil.InternalError(c, err)
-			return
-		}
+	invalidToken, err := h.revokeTokenFromContext(c, token)
+	if invalidToken {
+		httputil.Unauthorized(c, "invalid token")
+		return
+	}
+	if err != nil {
+		httputil.InternalError(c, err)
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -205,6 +214,21 @@ func (h *Handler) tokenRevocationTTL(token string) (time.Duration, error) {
 		return 0, err
 	}
 	return time.Until(expiresAt), nil
+}
+
+func (h *Handler) revokeTokenFromContext(c *gin.Context, token string) (bool, error) {
+	revoker := tokenRevokerFromContext(c)
+	if revoker == nil {
+		return false, nil
+	}
+	ttl, err := h.tokenRevocationTTL(token)
+	if err != nil {
+		return true, nil
+	}
+	if err := revoker.RevokeToken(c.Request.Context(), token, ttl); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func (h *Handler) recordLoginFailure(key string) {
