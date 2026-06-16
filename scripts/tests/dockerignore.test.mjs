@@ -8,6 +8,7 @@ const dockerignores = [
 	['web', '../../web/.dockerignore'],
 	['mobile', '../../mobile/.dockerignore'],
 ].map(([name, path]) => [name, dockerignorePatterns(path)]);
+const compose = readFileSync(new URL('../../docker-compose.yaml', import.meta.url), 'utf8');
 
 test('docker build contexts exclude local secrets and dependency caches', () => {
 	for (const [name, patterns] of dockerignores) {
@@ -54,6 +55,15 @@ test('backend runtime image includes the migration command and SQL migrations', 
 	assert.match(dockerfile, /COPY --from=builder \/src\/migrations \/app\/migrations/);
 });
 
+test('stateful compose services keep privilege escalation disabled without read-only roots', () => {
+	assert.match(compose, /x-stateful-security: &stateful-security[\s\S]+no-new-privileges:true[\s\S]+cap_drop:\n\s+- ALL/);
+	for (const service of ['postgres', 'redis', 'mysql']) {
+		const block = composeServiceBlock(service);
+		assert.match(block, /<<: \*stateful-security/);
+		assert.doesNotMatch(block, /read_only:\s+true/);
+	}
+});
+
 function dockerignorePatterns(path) {
 	return new Set(
 		readFileSync(new URL(path, import.meta.url), 'utf8')
@@ -76,4 +86,10 @@ function runtimeStageHasNonRootUser(dockerfile) {
 		.split(/\r?\n/)
 		.map((line) => line.trim())
 		.some((line) => /^USER\s+/i.test(line) && !/^USER\s+(?:0|root)(?=$|\s)/i.test(line));
+}
+
+function composeServiceBlock(service) {
+	const match = compose.match(new RegExp(`^  ${service}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|^volumes:)`, 'm'));
+	assert.ok(match, `missing compose service ${service}`);
+	return match[0];
 }
