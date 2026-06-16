@@ -570,11 +570,18 @@ function parseEndpoints(openapi) {
 
 function validateAuthOperationContract(method, apiPath, methodBlock, responseStatuses) {
   const operation = `${method.toUpperCase()} ${apiPath}`;
-  if (apiPath === '/auth/login' && method === 'post' && !isPublicOperation(methodBlock)) {
-    throw new Error(`${operation} must explicitly declare security: []`);
-  }
-  if (['/auth/refresh', '/auth/logout', '/me'].includes(apiPath) && isPublicOperation(methodBlock)) {
-    throw new Error(`${operation} must require bearer authentication`);
+  const publicOperations = new Set(['POST /auth/login']);
+  if (publicOperations.has(operation)) {
+    if (!isPublicOperation(methodBlock)) {
+      throw new Error(`${operation} must explicitly declare security: []`);
+    }
+  } else {
+    if (isPublicOperation(methodBlock)) {
+      throw new Error(`${operation} must require bearer authentication`);
+    }
+    if (!responseStatuses.has('401')) {
+      throw new Error(`${operation} must document 401 for bearer authentication`);
+    }
   }
   if (apiPath === '/auth/login' && method === 'post' && !responseStatuses.has('429')) {
     throw new Error('POST /auth/login is missing 429 rate limited response');

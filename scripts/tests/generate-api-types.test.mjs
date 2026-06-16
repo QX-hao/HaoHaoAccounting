@@ -324,4 +324,6 @@ test('generator requires login rate limit response', () => {
 test('generator requires explicit auth security contract', () => {
 	assert.match(generator, /must explicitly declare security: \[\]/);
 	assert.match(generator, /must require bearer authentication/);
+	assert.match(generator, /must document 401 for bearer authentication/);
+	assert.match(generator, /const publicOperations = new Set\(\['POST \/auth\/login'\]\)/);
 });
