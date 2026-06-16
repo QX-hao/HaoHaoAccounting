@@ -36,10 +36,14 @@ test('generated error codes stay available to API clients', () => {
 	assert.match(webApiClient, /Retry-After/);
 	assert.match(webApiClient, /authenticateChallenge/);
 	assert.match(webApiClient, /WWW-Authenticate/);
+	assert.match(webApiClient, /network_error/);
+	assert.match(webApiClient, /function networkError\(err: unknown\)/);
 	assert.match(mobileApiClient, /ErrorResponse\['code'\]/);
 	assert.match(mobileApiClient, /Retry-After/);
 	assert.match(mobileApiClient, /authenticateChallenge/);
 	assert.match(mobileApiClient, /WWW-Authenticate/);
+	assert.match(mobileApiClient, /network_error/);
+	assert.match(mobileApiClient, /function networkError\(err: unknown\)/);
 });
 
 test('API clients send explicit Accept headers for negotiated responses', () => {

@@ -2,7 +2,7 @@ import { API_BASE } from '@/lib/config';
 import type { ErrorResponse } from '@/shared/types/api';
 import { clearToken, getToken } from '@/shared/auth/token';
 
-type ApiErrorCode = ErrorResponse['code'] | '';
+type ApiErrorCode = ErrorResponse['code'] | 'network_error' | '';
 type ApiErrorBody = Partial<ErrorResponse>;
 
 export class ApiError extends Error {
@@ -42,7 +42,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await fetchAPI(path, {
     ...init,
     headers,
   });
@@ -64,7 +64,7 @@ export async function upload<T>(path: string, formData: FormData): Promise<T> {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await fetchAPI(path, {
     method: 'POST',
     headers,
     body: formData,
@@ -90,7 +90,7 @@ export async function download(path: string, accept = '*/*'): Promise<DownloadRe
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const resp = await fetchAPI(path, {
     headers,
   });
   if (!resp.ok) {
@@ -129,6 +129,19 @@ async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
   }
   const text = await resp.text().catch(() => '');
   return text ? { error: text } : {};
+}
+
+async function fetchAPI(path: string, init: RequestInit = {}) {
+  try {
+    return await fetch(`${API_BASE}${path}`, init);
+  } catch (err) {
+    throw networkError(err);
+  }
+}
+
+function networkError(err: unknown) {
+  const message = err instanceof Error && err.message ? err.message : 'Network request failed';
+  return new ApiError(message, 0, 'network_error');
 }
 
 function apiError(resp: Response, data: ApiErrorBody): ApiError {
