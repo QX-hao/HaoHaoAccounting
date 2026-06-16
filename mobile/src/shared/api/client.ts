@@ -13,14 +13,23 @@ export class ApiError extends Error {
   code: ApiErrorCode;
   requestId: string;
   retryAfterSeconds: number | null;
+  authenticateChallenge: string;
 
-  constructor(message: string, status: number, code: ApiErrorCode = '', requestId = '', retryAfterSeconds: number | null = null) {
+  constructor(
+    message: string,
+    status: number,
+    code: ApiErrorCode = '',
+    requestId = '',
+    retryAfterSeconds: number | null = null,
+    authenticateChallenge = '',
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.requestId = requestId;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.authenticateChallenge = authenticateChallenge;
   }
 }
 
@@ -114,7 +123,14 @@ async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
 
 function apiError(resp: Response, data: ApiErrorBody): ApiError {
   const requestId = data.requestId || resp.headers.get('X-Request-ID') || '';
-  return new ApiError(data.error || '请求失败', resp.status, data.code || '', requestId, retryAfterSeconds(resp));
+  return new ApiError(
+    data.error || '请求失败',
+    resp.status,
+    data.code || '',
+    requestId,
+    retryAfterSeconds(resp),
+    resp.headers.get('WWW-Authenticate') || '',
+  );
 }
 
 function retryAfterSeconds(resp: Response): number | null {

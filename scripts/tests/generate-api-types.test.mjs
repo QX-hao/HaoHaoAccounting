@@ -34,8 +34,12 @@ test('generated error codes stay available to API clients', () => {
 	assert.match(generatedTypes, /not_acceptable/);
 	assert.match(webApiClient, /ErrorResponse\['code'\]/);
 	assert.match(webApiClient, /Retry-After/);
+	assert.match(webApiClient, /authenticateChallenge/);
+	assert.match(webApiClient, /WWW-Authenticate/);
 	assert.match(mobileApiClient, /ErrorResponse\['code'\]/);
 	assert.match(mobileApiClient, /Retry-After/);
+	assert.match(mobileApiClient, /authenticateChallenge/);
+	assert.match(mobileApiClient, /WWW-Authenticate/);
 });
 
 test('API clients send explicit Accept headers for negotiated responses', () => {
