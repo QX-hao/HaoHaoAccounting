@@ -132,6 +132,9 @@ func TestRecoveryDoesNotWriteErrorForBrokenPipe(t *testing.T) {
 			t.Fatalf("panic log = %q, missing %s", logOutput, want)
 		}
 	}
+	if strings.Contains(logOutput, `stack="`) {
+		t.Fatalf("broken pipe panic log should not include stack: %q", logOutput)
+	}
 }
 
 func TestRecoveryDoesNotWriteErrorAfterResponseStarted(t *testing.T) {
