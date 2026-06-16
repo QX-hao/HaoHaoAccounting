@@ -160,8 +160,17 @@ function filenameFromDisposition(disposition: string | null) {
   if (!disposition) return '';
   const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
   if (utf8Match?.[1]) {
-    return decodeURIComponent(utf8Match[1]);
+    const filename = safeDecodeURIComponent(utf8Match[1]);
+    if (filename) return filename;
   }
   const asciiMatch = disposition.match(/filename="?([^";]+)"?/i);
   return asciiMatch?.[1] || '';
+}
+
+function safeDecodeURIComponent(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return '';
+  }
 }

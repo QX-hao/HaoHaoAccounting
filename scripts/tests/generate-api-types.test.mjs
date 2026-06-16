@@ -162,6 +162,8 @@ test('generator requires Vary headers for negotiated responses', () => {
 test('generator requires documented download filename headers', () => {
 	assert.match(generator, /GET \/io\/export is missing Content-Disposition response header/);
 	assert.match(generator, /components\.headers\.ContentDisposition is missing filename\* guidance/);
+	assert.match(webApiClient, /function safeDecodeURIComponent\(value: string\)/);
+	assert.match(webApiClient, /catch \{\n\s+return '';\n\s+\}/);
 });
 
 test('generator requires documented import headers', () => {
