@@ -74,6 +74,17 @@ test('stateful compose healthchecks avoid password command arguments', () => {
 	assert.doesNotMatch(mysql, /mysqladmin[^\n]+-p/);
 });
 
+test('redis compose command keeps password out of process arguments', () => {
+	const redis = composeServiceBlock('redis');
+	const command = redisComposeCommandBlock(redis);
+	assert.match(command, /umask 077/);
+	assert.match(command, /exec redis-server \/tmp\/redis\.conf/);
+	assert.match(command, /requirepass %s/);
+	assert.match(command, /\$\$\{REDIS_PASSWORD\}/);
+	assert.doesNotMatch(command, /--requirepass/);
+	assert.doesNotMatch(command, /(?<!\$)\$\{REDIS_PASSWORD/);
+});
+
 function dockerignorePatterns(path) {
 	return new Set(
 		readFileSync(new URL(path, import.meta.url), 'utf8')
@@ -101,5 +112,11 @@ function runtimeStageHasNonRootUser(dockerfile) {
 function composeServiceBlock(service) {
 	const match = compose.match(new RegExp(`^  ${service}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|^volumes:)`, 'm'));
 	assert.ok(match, `missing compose service ${service}`);
+	return match[0];
+}
+
+function redisComposeCommandBlock(redis) {
+	const match = redis.match(/^\s+command:\n([\s\S]*?)(?=^\s+environment:)/m);
+	assert.ok(match, 'missing redis command');
 	return match[0];
 }

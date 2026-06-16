@@ -210,11 +210,9 @@ services:
     restart: unless-stopped
     command:
       [
-        "redis-server",
-        "--appendonly",
-        "yes",
-        "--requirepass",
-        "${REDIS_PASSWORD:?set REDIS_PASSWORD}",
+        "sh",
+        "-c",
+        "umask 077 && printf 'appendonly yes\nrequirepass %s\n' \"$${REDIS_PASSWORD}\" > /tmp/redis.conf && exec redis-server /tmp/redis.conf",
       ]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
