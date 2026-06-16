@@ -34,6 +34,7 @@ func New(cfg Config) (*RedisCache, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
 		return nil, err
 	}
 
@@ -49,6 +50,17 @@ func (c *RedisCache) Ping(ctx context.Context) error {
 		return nil
 	}
 	return c.client.Ping(ctx).Err()
+}
+
+func (c *RedisCache) Close() error {
+	if !c.Enabled() {
+		return nil
+	}
+	err := c.client.Close()
+	if err == nil {
+		c.client = nil
+	}
+	return err
 }
 
 func (c *RedisCache) GetJSON(ctx context.Context, key string, out any) (bool, error) {

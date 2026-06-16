@@ -58,6 +58,7 @@ func New(cfg Config) (*Store, error) {
 	}
 
 	if err := ApplyPoolConfig(db, cfg.PoolConfig()); err != nil {
+		_ = closeGormDB(db)
 		return nil, err
 	}
 
@@ -71,14 +72,17 @@ func New(cfg Config) (*Store, error) {
 		&models.DailySummary{},
 		&models.MonthlySummary{},
 	); err != nil {
+		_ = closeGormDB(db)
 		return nil, err
 	}
 
 	s := &Store{DB: db}
 	if err := s.migrateFloatAmountsToCents(); err != nil {
+		_ = s.Close()
 		return nil, err
 	}
 	if err := s.seedSystemCategories(); err != nil {
+		_ = s.Close()
 		return nil, err
 	}
 
@@ -123,6 +127,25 @@ func (s *Store) Ping(ctx context.Context) error {
 		return err
 	}
 	return db.PingContext(ctx)
+}
+
+func (s *Store) Close() error {
+	if s == nil || s.DB == nil {
+		return nil
+	}
+	if err := closeGormDB(s.DB); err != nil {
+		return err
+	}
+	s.DB = nil
+	return nil
+}
+
+func closeGormDB(db *gorm.DB) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }
 
 func (s *Store) migrateFloatAmountsToCents() error {

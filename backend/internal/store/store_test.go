@@ -50,3 +50,28 @@ func TestApplyPoolConfig(t *testing.T) {
 		t.Fatalf("MaxOpenConnections = %d, want 7", got)
 	}
 }
+
+func TestStoreCloseClosesDatabaseAndIsIdempotent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("db.DB: %v", err)
+	}
+
+	s := &Store{DB: db}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if s.DB != nil {
+		t.Fatal("Close did not clear Store.DB")
+	}
+	if err := sqlDB.Ping(); err == nil {
+		t.Fatal("expected closed database ping error")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}

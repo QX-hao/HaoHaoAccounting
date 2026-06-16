@@ -21,22 +21,33 @@ import (
 )
 
 func main() {
+	if err := run(context.Background()); err != nil {
+		log.Fatalf("%v", err)
+	}
+}
+
+func run(parent context.Context) error {
 	if err := config.LoadDotEnv(".env"); err != nil {
 		log.Printf("skip .env: %v", err)
 	}
 	cfg, err := config.LoadStrict()
 	if err != nil {
-		log.Fatalf("invalid config: %v", err)
+		return fmt.Errorf("invalid config: %w", err)
 	}
 	if err := validateStartupConfig(cfg); err != nil {
-		log.Fatalf("invalid config: %v", err)
+		return fmt.Errorf("invalid config: %w", err)
 	}
 	applyGinMode(cfg)
 
 	s, err := store.New(storeConfig(cfg.Database))
 	if err != nil {
-		log.Fatalf("failed to init store: %v", err)
+		return fmt.Errorf("failed to init store: %w", err)
 	}
+	defer func() {
+		if err := s.Close(); err != nil {
+			log.Printf("close database: %v", err)
+		}
+	}()
 
 	var redisCache *cache.RedisCache
 	if c, err := cache.New(cache.Config{
@@ -47,11 +58,16 @@ func main() {
 		log.Printf("redis disabled: %v", err)
 	} else {
 		redisCache = c
+		defer func() {
+			if err := redisCache.Close(); err != nil {
+				log.Printf("close redis: %v", err)
+			}
+		}()
 	}
 
 	r := gin.New()
 	if err := r.SetTrustedProxies(cfg.HTTP.TrustedProxies); err != nil {
-		log.Fatalf("failed to set trusted proxies: %v", err)
+		return fmt.Errorf("failed to set trusted proxies: %w", err)
 	}
 	r.Use(middleware.RequestID())
 	r.Use(middleware.RequestTimeout(cfg.HTTP.RequestTimeout))
@@ -63,7 +79,7 @@ func main() {
 	r.Use(middleware.Accept(middleware.APIAcceptRules()))
 
 	if err := app.RegisterRoutesWithConfig(r, s, redisCache, cfg); err != nil {
-		log.Fatalf("failed to register routes: %v", err)
+		return fmt.Errorf("failed to register routes: %w", err)
 	}
 
 	log.Printf(
@@ -73,9 +89,10 @@ func main() {
 		redisCache != nil && redisCache.Enabled(),
 	)
 	server := newHTTPServer(cfg, r)
-	if err := runHTTPServer(context.Background(), server, cfg.HTTP.ShutdownTimeout); err != nil {
-		log.Fatalf("server exit: %v", err)
+	if err := runHTTPServer(parent, server, cfg.HTTP.ShutdownTimeout); err != nil {
+		return fmt.Errorf("server exit: %w", err)
 	}
+	return nil
 }
 
 func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
