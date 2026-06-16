@@ -13,7 +13,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/haohaoaccounting \
-    ./cmd/server
+    ./cmd/server \
+    && CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/dbmigrate \
+    ./cmd/dbmigrate
 
 FROM alpine:3.21
 
@@ -24,6 +29,8 @@ RUN apk add --no-cache ca-certificates tzdata \
 WORKDIR /app
 
 COPY --from=builder /out/haohaoaccounting /app/haohaoaccounting
+COPY --from=builder /out/dbmigrate /app/dbmigrate
+COPY --from=builder /src/migrations /app/migrations
 
 ENV GIN_MODE=release
 ENV PORT=8080

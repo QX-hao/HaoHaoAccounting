@@ -46,6 +46,14 @@ test('application runtime images declare a non-root user', () => {
 	}
 });
 
+test('backend runtime image includes the migration command and SQL migrations', () => {
+	const dockerfile = readFileSync(new URL('../../backend/Dockerfile', import.meta.url), 'utf8');
+
+	assert.match(dockerfile, /go build[\s\S]+-o \/out\/dbmigrate[\s\S]+\.\/cmd\/dbmigrate/);
+	assert.match(dockerfile, /COPY --from=builder \/out\/dbmigrate \/app\/dbmigrate/);
+	assert.match(dockerfile, /COPY --from=builder \/src\/migrations \/app\/migrations/);
+});
+
 function dockerignorePatterns(path) {
 	return new Set(
 		readFileSync(new URL(path, import.meta.url), 'utf8')

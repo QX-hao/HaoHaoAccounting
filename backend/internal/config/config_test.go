@@ -542,6 +542,42 @@ func TestComposeBackendEnvironmentCoversConfigKeys(t *testing.T) {
 	}
 }
 
+func TestProductionComposeRunsMigrationsBeforeBackend(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yaml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yaml: %v", err)
+	}
+
+	backend := composeServiceBlock(string(data), "backend")
+	if backend == "" {
+		t.Fatal("missing backend service")
+	}
+	for _, want := range []string{
+		"dbmigrate:",
+		"condition: service_completed_successfully",
+	} {
+		if !strings.Contains(backend, want) {
+			t.Fatalf("backend service is missing migration dependency %s:\n%s", want, backend)
+		}
+	}
+
+	dbmigrate := composeServiceBlock(string(data), "dbmigrate")
+	if dbmigrate == "" {
+		t.Fatal("missing dbmigrate service")
+	}
+	for _, want := range []string{
+		"image: haohaoaccounting-backend:latest",
+		"restart: \"no\"",
+		"entrypoint: [\"/app/dbmigrate\"]",
+		"postgres:",
+		"condition: service_healthy",
+	} {
+		if !strings.Contains(dbmigrate, want) {
+			t.Fatalf("dbmigrate service is missing %s:\n%s", want, dbmigrate)
+		}
+	}
+}
+
 func TestLocalComposeDatastoresExposeHealthchecks(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.local.yaml"))
 	if err != nil {

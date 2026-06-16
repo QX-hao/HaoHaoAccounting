@@ -175,6 +175,7 @@ http://127.0.0.1:8080/api/v1
 | `haohaoaccounting-mysql:8.4` | `Dockerfile.mysql` | 可选 MySQL 数据库 |
 
 默认生产组合是 `web + backend + postgres + redis`。`mysql` 通过 compose profile 启用，和 PostgreSQL 二选一使用。
+生产 compose 还包含一个一次性 `dbmigrate` 服务，复用后端镜像中的 `/app/dbmigrate` 命令。`backend` 会等待 `dbmigrate` 成功退出后再启动，避免 API 在 schema 尚未迁移完成时接收请求。
 
 独立构建 5 个镜像：
 
@@ -190,6 +191,19 @@ docker build -t haohaoaccounting-postgres:16 -f Dockerfile.postgres .
 docker build -t haohaoaccounting-redis:7 -f Dockerfile.redis .
 
 docker build -t haohaoaccounting-mysql:8.4 -f Dockerfile.mysql .
+```
+
+后端镜像同时包含 HTTP 服务 `/app/haohaoaccounting`、迁移命令 `/app/dbmigrate` 和 `migrations/` SQL 文件，因此可以用同一个镜像执行生产迁移：
+
+```bash
+docker run --rm \
+  -e DB_DRIVER=postgres \
+  -e DB_DSN="host=postgres user=haohao password=... dbname=haohaoaccounting port=5432 sslmode=disable TimeZone=Asia/Shanghai" \
+  -e JWT_SECRET=jwt-secret-with-at-least-32-characters \
+  -e ADMIN_USERNAME=admin \
+  -e ADMIN_PASSWORD=admin-secret \
+  -e CORS_ALLOW_ORIGINS=https://app.example.com \
+  haohaoaccounting-backend:latest /app/dbmigrate
 ```
 
 国内网络构建后端镜像时，可以指定 Go module 代理：
@@ -305,6 +319,8 @@ Compose 对无状态的 `web` 和 `backend` 启用了只读根文件系统、`no
 ```bash
 docker compose up -d --build
 ```
+
+首次启动或镜像更新后，Compose 会先等待 PostgreSQL 健康检查通过，再运行 `dbmigrate`，最后启动 `backend` 和 `web`。
 
 查看状态：
 
