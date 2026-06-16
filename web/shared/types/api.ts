@@ -5,10 +5,10 @@ export type TransactionType = "income" | "expense";
 export type CurrentUser = {
   id: number;
   name: string;
-  username?: string;
-  phone?: string;
-  email?: string;
-  wechatId?: string;
+  username: string;
+  phone: string;
+  email: string;
+  wechatId: string;
 };
 
 export type LoginRequest = {

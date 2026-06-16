@@ -1564,7 +1564,7 @@ components:
     CurrentUser:
       type: object
       additionalProperties: false
-      required: [id, name]
+      required: [id, name, username, phone, email, wechatId]
       properties:
         id:
           type: integer

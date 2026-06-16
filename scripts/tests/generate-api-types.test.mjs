@@ -143,6 +143,13 @@ test('generator requires closed core response schemas', () => {
 	}
 });
 
+test('generator requires stable current user response fields to be required', () => {
+	assert.match(generator, /validateCurrentUserResponseSchema/);
+	for (const fieldName of ['username', 'phone', 'email', 'wechatId']) {
+		assert.doesNotMatch(generatedTypes, new RegExp(`${fieldName}\\?:`));
+	}
+});
+
 test('generator requires closed paginated response schemas', () => {
 	assert.match(generator, /validatePaginatedResponseSchemasAreClosed/);
 	assert.match(openapi, /TransactionListResponse:\n\s+type: object\n\s+additionalProperties: false/);

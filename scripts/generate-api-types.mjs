@@ -78,6 +78,7 @@ function validateSchemaConstraints(allSchemas) {
   validateRequestSchemasAreClosed(allSchemas);
   validateSharedResponseSchemasAreClosed(allSchemas);
   validateCoreResponseSchemasAreClosed(allSchemas);
+  validateCurrentUserResponseSchema(allSchemas.CurrentUser || '');
   validatePaginatedResponseSchemasAreClosed(allSchemas);
   validateReportResponseSchemasAreClosed(allSchemas);
   validateSummaryResponseSchema(allSchemas.Summary || '');
@@ -110,6 +111,14 @@ function validateCoreResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of ['CurrentUser', 'LoginResponse', 'Account', 'Budget', 'Category', 'Transaction']) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateCurrentUserResponseSchema(schema) {
+  for (const propertyName of ['id', 'name', 'username', 'phone', 'email', 'wechatId']) {
+    if (!schemaRequiredProperties(schema).has(propertyName)) {
+      throw new Error(`CurrentUser.${propertyName} is missing required`);
     }
   }
 }
