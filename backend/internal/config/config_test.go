@@ -542,6 +542,27 @@ func TestComposeBackendEnvironmentCoversConfigKeys(t *testing.T) {
 	}
 }
 
+func TestLocalComposeDatastoresExposeHealthchecks(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.local.yaml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.local.yaml: %v", err)
+	}
+
+	for _, service := range []string{"postgres", "redis", "mysql"} {
+		t.Run(service, func(t *testing.T) {
+			block := composeServiceBlock(string(data), service)
+			if block == "" {
+				t.Fatalf("missing %s service", service)
+			}
+			for _, want := range []string{"healthcheck:", "test:", "interval:", "timeout:", "retries:"} {
+				if !strings.Contains(block, want) {
+					t.Fatalf("%s service is missing %s in healthcheck block:\n%s", service, want, block)
+				}
+			}
+		})
+	}
+}
+
 func TestLoadKeepsExplicitDatabaseDSN(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("DB_DRIVER", "mysql")
@@ -714,6 +735,26 @@ func composeBackendEnvironmentKeys(t *testing.T) []string {
 		}
 	}
 	return sortedKeys(keys)
+}
+
+func composeServiceBlock(data, service string) string {
+	lines := strings.Split(data, "\n")
+	serviceLine := "  " + service + ":"
+	for i, line := range lines {
+		if line != serviceLine {
+			continue
+		}
+		start := i
+		end := len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			if strings.HasPrefix(lines[j], "  ") && !strings.HasPrefix(lines[j], "    ") {
+				end = j
+				break
+			}
+		}
+		return strings.Join(lines[start:end], "\n")
+	}
+	return ""
 }
 
 func missingKeys(want []string, got []string) []string {
