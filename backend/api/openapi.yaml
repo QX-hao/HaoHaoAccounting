@@ -1164,6 +1164,21 @@ components:
       description: Attachment disposition for downloaded files. Includes both filename and RFC 5987 filename* parameters.
       schema:
         type: string
+    CacheControl:
+      description: Cache policy for API responses containing user or authentication data.
+      schema:
+        type: string
+        enum: [no-store]
+    Pragma:
+      description: Legacy HTTP/1.0 cache policy retained for intermediary compatibility.
+      schema:
+        type: string
+        enum: [no-cache]
+    Expires:
+      description: Legacy cache expiry value retained for intermediary compatibility.
+      schema:
+        type: string
+        enum: ['0']
     Vary:
       description: Request headers that influenced response representation selection.
       schema:
@@ -1184,6 +1199,12 @@ components:
     BadRequest:
       description: Bad request or validation error.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
       content:
@@ -1193,6 +1214,12 @@ components:
     Unauthorized:
       description: Missing, invalid, or expired authentication token.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
         WWW-Authenticate:
@@ -1204,6 +1231,12 @@ components:
     Forbidden:
       description: Authenticated user cannot perform this action.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
       content:
@@ -1213,6 +1246,12 @@ components:
     NotFound:
       description: Requested resource was not found.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
       content:
@@ -1222,6 +1261,12 @@ components:
     MethodNotAllowed:
       description: HTTP method is not supported for this route.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
         Allow:
@@ -1233,6 +1278,12 @@ components:
     RateLimited:
       description: Too many requests.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
         Retry-After:
@@ -1244,6 +1295,12 @@ components:
     PayloadTooLarge:
       description: Request body is too large.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
       content:
@@ -1253,6 +1310,12 @@ components:
     UnsupportedMediaType:
       description: Request Content-Type is not supported by this operation.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
       content:
@@ -1262,6 +1325,12 @@ components:
     NotAcceptable:
       description: Requested response media type is not available for this operation.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         Vary:
           $ref: '#/components/headers/Vary'
         X-Request-ID:
@@ -1273,6 +1342,12 @@ components:
     InternalError:
       description: Internal server error.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
       content:
@@ -1282,6 +1357,12 @@ components:
     GatewayTimeout:
       description: Request processing exceeded the server timeout budget.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
       content:
@@ -1291,6 +1372,12 @@ components:
     Error:
       description: Error response. Prefer a status-specific response component when possible.
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         X-Request-ID:
           $ref: '#/components/headers/RequestID'
       content:
@@ -1300,6 +1387,12 @@ components:
     Ok:
       description: OK response
       headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
         Vary:
           $ref: '#/components/headers/Vary'
         X-Request-ID:

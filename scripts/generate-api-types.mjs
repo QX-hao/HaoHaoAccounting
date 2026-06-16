@@ -123,6 +123,8 @@ function validateParameterConstraints(openapi) {
 }
 
 function validateResponseComponents(openapi) {
+  validateNoStoreHeaders(openapi);
+
   const methodNotAllowed = openapi.match(/^    MethodNotAllowed:\n(?:      .+\n)+/m)?.[0] || '';
   if (!methodNotAllowed.includes('Allow:')) {
     throw new Error('components.responses.MethodNotAllowed is missing Allow header');
@@ -166,6 +168,44 @@ function validateResponseComponents(openapi) {
 
   const requestID = componentHeaderBlock(openapi, 'RequestID');
   validateRequestIDSchema(requestID, 'components.headers.RequestID');
+}
+
+function validateNoStoreHeaders(openapi) {
+  const expectedHeaders = [
+    ['CacheControl', 'Cache-Control:', 'no-store'],
+    ['Pragma', 'Pragma:', 'no-cache'],
+    ['Expires', 'Expires:', "'0'"],
+  ];
+  for (const [componentName, headerName, expectedValue] of expectedHeaders) {
+    const headerBlock = componentHeaderBlock(openapi, componentName);
+    if (!headerBlock.includes(expectedValue)) {
+      throw new Error(`components.headers.${componentName} is missing ${expectedValue}`);
+    }
+    for (const responseName of noStoreResponseNames()) {
+      const response = responseComponentBlock(openapi, responseName);
+      if (!response.includes(headerName)) {
+        throw new Error(`components.responses.${responseName} is missing ${headerName} no-store header`);
+      }
+    }
+  }
+}
+
+function noStoreResponseNames() {
+  return [
+    'BadRequest',
+    'Unauthorized',
+    'Forbidden',
+    'NotFound',
+    'MethodNotAllowed',
+    'RateLimited',
+    'PayloadTooLarge',
+    'UnsupportedMediaType',
+    'NotAcceptable',
+    'InternalError',
+    'GatewayTimeout',
+    'Error',
+    'Ok',
+  ];
 }
 
 function validateRequestIDSchema(block, name) {

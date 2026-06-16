@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 const generator = readFileSync(new URL('../generate-api-types.mjs', import.meta.url), 'utf8');
+const openapi = readFileSync(new URL('../../backend/api/openapi.yaml', import.meta.url), 'utf8');
 const generatedClient = readFileSync(new URL('../../web/shared/api/generated-client.ts', import.meta.url), 'utf8');
 const generatedTypes = readFileSync(new URL('../../web/shared/types/api.ts', import.meta.url), 'utf8');
 const webApiClient = readFileSync(new URL('../../web/shared/api/client.ts', import.meta.url), 'utf8');
@@ -44,6 +45,15 @@ test('API clients send explicit Accept headers for negotiated responses', () => 
 	assert.match(webDataioApi, /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/);
 	assert.match(mobileApiClient, /headers\.set\('Accept', headers\.get\('Accept'\) \|\| 'application\/json'\)/);
 	assert.match(mobileDataioApi, /downloadText\('\/io\/export\?format=csv', 'text\/csv'\)/);
+});
+
+test('OpenAPI response components document no-store API cache headers', () => {
+	assert.match(generator, /validateNoStoreHeaders/);
+	assert.match(generator, /components\.headers\.\$\{componentName\} is missing \$\{expectedValue\}/);
+	assert.match(generator, /components\.responses\.\$\{responseName\} is missing \$\{headerName\} no-store header/);
+	assert.match(openapi, /CacheControl:[\s\S]+enum: \[no-store\]/);
+	assert.match(openapi, /Pragma:[\s\S]+enum: \[no-cache\]/);
+	assert.match(openapi, /Expires:[\s\S]+enum: \['0'\]/);
 });
 
 test('API clients only default JSON Content-Type when a non-FormData body is present', () => {
