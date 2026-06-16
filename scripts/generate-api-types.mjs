@@ -80,6 +80,7 @@ function validateSchemaConstraints(allSchemas) {
   validateCoreResponseSchemasAreClosed(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
   validateReportResponseSchemasAreClosed(allSchemas);
+  validateSummaryResponseSchema(allSchemas.Summary || '');
   validateImportResponseSchemasAreClosed(allSchemas);
   validateAIResponseSchemasAreClosed(allSchemas);
   validateAIResponseSchema(allSchemas.AIParseResult || '');
@@ -138,6 +139,18 @@ function validateReportResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of reportSchemas) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateSummaryResponseSchema(schema) {
+  for (const propertyName of ['start', 'end']) {
+    const property = schemaPropertyBlock(schema, propertyName);
+    if (!property.includes('type: string')) {
+      throw new Error(`Summary.${propertyName} is missing string schema`);
+    }
+    if (!property.includes('format: date-time')) {
+      throw new Error(`Summary.${propertyName} is missing date-time format`);
     }
   }
 }

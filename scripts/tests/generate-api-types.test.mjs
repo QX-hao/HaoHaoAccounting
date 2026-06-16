@@ -168,6 +168,14 @@ test('generator requires closed report response schemas', () => {
 	}
 });
 
+test('generator requires summary response date range fields', () => {
+	assert.match(generator, /validateSummaryResponseSchema/);
+	assert.match(openapi, /start:\n\s+type: string\n\s+format: date-time/);
+	assert.match(openapi, /end:\n\s+type: string\n\s+format: date-time/);
+	assert.match(generatedTypes, /start: string;/);
+	assert.match(generatedTypes, /end: string;/);
+});
+
 test('generator requires closed import response schemas', () => {
 	assert.match(generator, /validateImportResponseSchemasAreClosed/);
 	for (const schemaName of ['ImportPreviewRow', 'ImportPreview', 'ImportResult', 'ImportJob']) {

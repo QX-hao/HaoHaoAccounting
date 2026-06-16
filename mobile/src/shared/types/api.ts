@@ -188,6 +188,8 @@ export type PeriodCompare = {
 };
 
 export type Summary = {
+  start: string;
+  end: string;
   income: number;
   expense: number;
   balance: number;

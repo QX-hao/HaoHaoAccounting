@@ -1938,8 +1938,14 @@ components:
     Summary:
       type: object
       additionalProperties: false
-      required: [income, expense, balance, byCategory, byAccount]
+      required: [start, end, income, expense, balance, byCategory, byAccount]
       properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
         income:
           type: number
         expense:
