@@ -1,10 +1,14 @@
 package middleware
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"runtime/debug"
+	"strings"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/gin-gonic/gin"
@@ -15,15 +19,27 @@ func Recovery() gin.HandlerFunc {
 }
 
 func recoveryWithWriter(out io.Writer) gin.HandlerFunc {
-	return gin.CustomRecoveryWithWriter(out, func(c *gin.Context, recovered any) {
-		logRecoveredPanic(out, c, recovered)
-		if c.Writer.Written() {
-			c.Abort()
-			return
-		}
-		httputil.Error(c, http.StatusInternalServerError, httputil.CodeInternal, "internal server error")
-		c.Abort()
-	})
+	return func(c *gin.Context) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				logRecoveredPanic(out, c, recovered)
+				if isBrokenPipe(recovered) {
+					if err, ok := recovered.(error); ok {
+						_ = c.Error(err)
+					}
+					c.Abort()
+					return
+				}
+				if c.Writer.Written() {
+					c.Abort()
+					return
+				}
+				httputil.Error(c, http.StatusInternalServerError, httputil.CodeInternal, "internal server error")
+				c.Abort()
+			}
+		}()
+		c.Next()
+	}
 }
 
 func logRecoveredPanic(out io.Writer, c *gin.Context, recovered any) {
@@ -41,4 +57,17 @@ func logRecoveredPanic(out io.Writer, c *gin.Context, recovered any) {
 		fmt.Sprint(recovered),
 		string(debug.Stack()),
 	)
+}
+
+func isBrokenPipe(recovered any) bool {
+	netErr, ok := recovered.(*net.OpError)
+	if !ok {
+		return false
+	}
+	var syscallErr *os.SyscallError
+	if !errors.As(netErr, &syscallErr) {
+		return false
+	}
+	message := strings.ToLower(syscallErr.Error())
+	return strings.Contains(message, "broken pipe") || strings.Contains(message, "connection reset by peer")
 }

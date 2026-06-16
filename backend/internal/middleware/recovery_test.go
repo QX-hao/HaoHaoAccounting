@@ -3,8 +3,11 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -49,6 +52,9 @@ func TestRecoveryReturnsStructuredInternalError(t *testing.T) {
 		t.Fatalf("requestId = %q", body.RequestID)
 	}
 	logOutput := panicLog.String()
+	if strings.Contains(logOutput, "[Recovery]") {
+		t.Fatalf("panic log contains duplicate Gin recovery log: %q", logOutput)
+	}
 	for _, want := range []string{
 		`panic_recovered`,
 		`method="GET"`,
@@ -93,6 +99,38 @@ func TestRecoveryDoesNotLeakPanicDetailsOutsideRelease(t *testing.T) {
 	}
 	if strings.Contains(resp.Body.String(), "debug panic details") {
 		t.Fatalf("response leaked panic details: %s", resp.Body.String())
+	}
+}
+
+func TestRecoveryDoesNotWriteErrorForBrokenPipe(t *testing.T) {
+	gin.SetMode(gin.ReleaseMode)
+	t.Cleanup(func() { gin.SetMode(gin.TestMode) })
+
+	var panicLog bytes.Buffer
+	router := gin.New()
+	router.Use(RequestID(), recoveryWithWriter(&panicLog))
+	router.GET("/panic-broken-pipe", func(*gin.Context) {
+		panic(&net.OpError{Err: &os.SyscallError{Err: errors.New("broken pipe")}})
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/panic-broken-pipe", nil))
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if resp.Body.String() != "" {
+		t.Fatalf("body = %q", resp.Body.String())
+	}
+	logOutput := panicLog.String()
+	for _, want := range []string{
+		`panic_recovered`,
+		`path="/panic-broken-pipe"`,
+		`broken pipe`,
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("panic log = %q, missing %s", logOutput, want)
+		}
 	}
 }
 
