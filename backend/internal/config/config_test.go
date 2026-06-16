@@ -399,6 +399,9 @@ func TestHTTPConfigValidateTrustedProxies(t *testing.T) {
 	}{
 		{name: "wildcard ipv4 cidr", proxies: []string{"0.0.0.0/0"}},
 		{name: "wildcard ipv6 cidr", proxies: []string{"::/0"}},
+		{name: "unspecified ipv4", proxies: []string{"0.0.0.0"}},
+		{name: "unspecified ipv6", proxies: []string{"::"}},
+		{name: "unspecified ipv4 cidr", proxies: []string{"0.0.0.0/8"}},
 		{name: "hostname", proxies: []string{"proxy.internal"}},
 		{name: "invalid cidr", proxies: []string{"10.0.0.0/33"}},
 	}

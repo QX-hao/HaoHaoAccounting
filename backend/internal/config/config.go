@@ -483,13 +483,20 @@ func validateTrustedProxies(proxies []string) error {
 			if err != nil {
 				return fmt.Errorf("TRUSTED_PROXIES entry %q must be an IP address or CIDR", proxy)
 			}
+			if prefix.Addr().IsUnspecified() {
+				return fmt.Errorf("TRUSTED_PROXIES entry %q must not use an unspecified address", proxy)
+			}
 			if prefix.Bits() == 0 {
 				return fmt.Errorf("TRUSTED_PROXIES entry %q must not trust all addresses", proxy)
 			}
 			continue
 		}
-		if _, err := netip.ParseAddr(proxy); err != nil {
+		addr, err := netip.ParseAddr(proxy)
+		if err != nil {
 			return fmt.Errorf("TRUSTED_PROXIES entry %q must be an IP address or CIDR", proxy)
+		}
+		if addr.IsUnspecified() {
+			return fmt.Errorf("TRUSTED_PROXIES entry %q must not use an unspecified address", proxy)
 		}
 	}
 	return nil

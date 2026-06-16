@@ -233,7 +233,7 @@ Web 端使用 Next.js standalone 输出。`NEXT_PUBLIC_API_BASE` 会在构建时
 - `ADMIN_PASSWORD`
 - `CORS_ALLOW_ORIGINS`
 - `GIN_MODE`（可选，默认 `release`，可选值 `debug`、`release`、`test`）
-- `TRUSTED_PROXIES`（可选，部署在反向代理后面时填写代理 IP/CIDR；不要使用 `0.0.0.0/0`、`::/0`、域名或通配符）
+- `TRUSTED_PROXIES`（可选，部署在反向代理后面时填写代理 IP/CIDR；不要使用 unspecified 地址、`0.0.0.0/0`、`::/0`、域名或通配符）
 - `DB_MAX_OPEN_CONNS`、`DB_MAX_IDLE_CONNS`、`DB_CONN_MAX_LIFETIME`、`DB_CONN_MAX_IDLE_TIME`（可选，数据库连接池配置）
 - `HTTP_READ_TIMEOUT`、`HTTP_READ_HEADER_TIMEOUT`、`HTTP_WRITE_TIMEOUT`、`HTTP_IDLE_TIMEOUT`、`HTTP_SHUTDOWN_TIMEOUT`、`HTTP_REQUEST_TIMEOUT`（可选，Go duration 格式）
 - `HTTP_MAX_HEADER_BYTES`（可选，默认 `1048576`，1 MiB）
@@ -294,7 +294,7 @@ CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 
 `Strict-Transport-Security` 默认不发送，避免本地 HTTP 调试或尚未确认 HTTPS 覆盖面的域名被浏览器长期记住为强制 HTTPS。生产环境确认 API 域名只通过 HTTPS 访问后，可以设置 `HTTP_HSTS_MAX_AGE_SECONDS=31536000`；只有确认所有子域也都支持 HTTPS 时再开启 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。准备加入浏览器 preload 列表时再开启 `HTTP_HSTS_PRELOAD=true`，此时启动校验会要求 `HTTP_HSTS_MAX_AGE_SECONDS>=31536000` 且 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。
 
-如果后端直接暴露给公网或本地直连调试，`TRUSTED_PROXIES` 可以留空。只有当服务位于 Nginx、Ingress、负载均衡等可信代理之后，并且需要读取 `X-Forwarded-*` 地址头时，才配置这些代理的具体 IP 或内网 CIDR。启动校验会拒绝 `0.0.0.0/0`、`::/0`、域名和非法 CIDR，避免任意客户端伪造 `X-Forwarded-For` 影响日志和登录限流。
+如果后端直接暴露给公网或本地直连调试，`TRUSTED_PROXIES` 可以留空。只有当服务位于 Nginx、Ingress、负载均衡等可信代理之后，并且需要读取 `X-Forwarded-*` 地址头时，才配置这些代理的具体 IP 或内网 CIDR。启动校验会拒绝 unspecified 地址、`0.0.0.0/0`、`::/0`、域名和非法 CIDR，避免任意客户端伪造 `X-Forwarded-For` 影响日志和登录限流。
 
 后端默认以 Gin `release` 模式启动，生产环境应保持 `GIN_MODE=release`，避免输出调试路由和 debug 警告。只有本地排查框架行为时再临时设为 `debug`；测试代码可以使用 `test`。
 
