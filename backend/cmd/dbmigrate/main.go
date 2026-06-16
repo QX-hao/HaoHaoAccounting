@@ -186,25 +186,112 @@ func migrationApplied(db *gorm.DB, version string) (bool, error) {
 }
 
 func splitSQLStatements(sqlText string) []string {
-	lines := strings.Split(sqlText, "\n")
-	cleaned := make([]string, 0, len(lines))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+	statements := make([]string, 0, 8)
+	var current strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+	dollarQuoteTag := ""
+
+	for i := 0; i < len(sqlText); i++ {
+		if !inSingleQuote && !inDoubleQuote && dollarQuoteTag == "" && i+1 < len(sqlText) && sqlText[i] == '-' && sqlText[i+1] == '-' {
+			current.WriteByte(' ')
+			i = skipLineComment(sqlText, i)
 			continue
 		}
-		cleaned = append(cleaned, line)
-	}
+		if !inSingleQuote && !inDoubleQuote && dollarQuoteTag == "" && i+1 < len(sqlText) && sqlText[i] == '/' && sqlText[i+1] == '*' {
+			current.WriteByte(' ')
+			i = skipBlockComment(sqlText, i)
+			continue
+		}
 
-	parts := strings.Split(strings.Join(cleaned, "\n"), ";")
-	statements := make([]string, 0, len(parts))
-	for _, part := range parts {
-		statement := strings.TrimSpace(part)
-		if statement != "" {
-			statements = append(statements, statement)
+		if !inSingleQuote && !inDoubleQuote && dollarQuoteTag == "" && sqlText[i] == '$' {
+			if tag, ok := dollarQuote(sqlText[i:]); ok {
+				dollarQuoteTag = tag
+				current.WriteString(tag)
+				i += len(tag) - 1
+				continue
+			}
+		}
+
+		if dollarQuoteTag != "" {
+			if strings.HasPrefix(sqlText[i:], dollarQuoteTag) {
+				current.WriteString(dollarQuoteTag)
+				i += len(dollarQuoteTag) - 1
+				dollarQuoteTag = ""
+				continue
+			}
+			current.WriteByte(sqlText[i])
+			continue
+		}
+
+		switch sqlText[i] {
+		case '\'':
+			current.WriteByte(sqlText[i])
+			if inSingleQuote && i+1 < len(sqlText) && sqlText[i+1] == '\'' {
+				i++
+				current.WriteByte(sqlText[i])
+				continue
+			}
+			if !inDoubleQuote {
+				inSingleQuote = !inSingleQuote
+			}
+		case '"':
+			current.WriteByte(sqlText[i])
+			if inDoubleQuote && i+1 < len(sqlText) && sqlText[i+1] == '"' {
+				i++
+				current.WriteByte(sqlText[i])
+				continue
+			}
+			if !inSingleQuote {
+				inDoubleQuote = !inDoubleQuote
+			}
+		case ';':
+			if inSingleQuote || inDoubleQuote {
+				current.WriteByte(sqlText[i])
+				continue
+			}
+			if statement := strings.TrimSpace(current.String()); statement != "" {
+				statements = append(statements, statement)
+			}
+			current.Reset()
+		default:
+			current.WriteByte(sqlText[i])
 		}
 	}
+
+	if statement := strings.TrimSpace(current.String()); statement != "" {
+		statements = append(statements, statement)
+	}
 	return statements
+}
+
+func skipLineComment(sqlText string, start int) int {
+	for start < len(sqlText) && sqlText[start] != '\n' {
+		start++
+	}
+	return start
+}
+
+func skipBlockComment(sqlText string, start int) int {
+	end := strings.Index(sqlText[start+2:], "*/")
+	if end < 0 {
+		return len(sqlText)
+	}
+	return start + end + 3
+}
+
+func dollarQuote(sqlText string) (string, bool) {
+	end := strings.IndexByte(sqlText[1:], '$')
+	if end < 0 {
+		return "", false
+	}
+	end++
+	for _, r := range sqlText[1:end] {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return "", false
+		}
+	}
+	return sqlText[:end+1], true
 }
 
 func isIgnorableMigrationError(err error) bool {

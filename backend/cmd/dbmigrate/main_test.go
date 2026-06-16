@@ -28,6 +28,53 @@ CREATE TABLE accounts (id BIGINT PRIMARY KEY);
 	}
 }
 
+func TestSplitSQLStatementsKeepsSemicolonsInsideQuotedText(t *testing.T) {
+	got := splitSQLStatements(`
+INSERT INTO notes (body) VALUES ('breakfast; lunch; dinner');
+INSERT INTO notes (body) VALUES ('it''s fine; really');
+`)
+	want := []string{
+		"INSERT INTO notes (body) VALUES ('breakfast; lunch; dinner')",
+		"INSERT INTO notes (body) VALUES ('it''s fine; really')",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("splitSQLStatements() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSplitSQLStatementsSkipsBlockCommentsWithSemicolons(t *testing.T) {
+	got := splitSQLStatements(`
+/* create the table after this comment; it includes semicolons; */
+CREATE TABLE notes (id BIGINT PRIMARY KEY);
+`)
+	want := []string{
+		"CREATE TABLE notes (id BIGINT PRIMARY KEY)",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("splitSQLStatements() = %#v, want %#v", got, want)
+	}
+}
+
+func TestSplitSQLStatementsKeepsDollarQuotedFunctionTogether(t *testing.T) {
+	got := splitSQLStatements(`
+CREATE OR REPLACE FUNCTION refresh_summary() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('summary;refresh', 'changed;value');
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TABLE audit_logs (id BIGINT PRIMARY KEY);
+`)
+	want := []string{
+		"CREATE OR REPLACE FUNCTION refresh_summary() RETURNS trigger AS $$\nBEGIN\n  PERFORM pg_notify('summary;refresh', 'changed;value');\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql",
+		"CREATE TABLE audit_logs (id BIGINT PRIMARY KEY)",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("splitSQLStatements() = %#v, want %#v", got, want)
+	}
+}
+
 func TestNormalizeDriverAliasesPostgres(t *testing.T) {
 	if got := normalizeDriver(" pgsql "); got != "postgres" {
 		t.Fatalf("normalizeDriver() = %q, want postgres", got)
