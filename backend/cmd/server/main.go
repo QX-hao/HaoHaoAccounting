@@ -69,14 +69,7 @@ func run(parent context.Context) error {
 	if err := r.SetTrustedProxies(cfg.HTTP.TrustedProxies); err != nil {
 		return fmt.Errorf("failed to set trusted proxies: %w", err)
 	}
-	r.Use(middleware.RequestID())
-	r.Use(middleware.RequestTimeout(cfg.HTTP.RequestTimeout))
-	r.Use(gin.LoggerWithConfig(newLoggerConfig()), middleware.Recovery())
-	r.Use(middleware.SecurityHeaders(securityHeadersConfig(cfg)))
-	r.Use(cors.New(newCORSConfig(cfg)))
-	r.Use(middleware.BodyLimit(cfg.HTTP.MaxBodyBytes))
-	r.Use(middleware.ContentType(middleware.APIMediaTypeRules()))
-	r.Use(middleware.Accept(middleware.APIAcceptRules()))
+	applyGlobalMiddleware(r, cfg)
 
 	if err := app.RegisterRoutesWithConfig(r, s, redisCache, cfg); err != nil {
 		return fmt.Errorf("failed to register routes: %w", err)
@@ -105,6 +98,17 @@ func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
 		IdleTimeout:       cfg.HTTP.IdleTimeout,
 		MaxHeaderBytes:    cfg.HTTP.MaxHeaderBytes,
 	}
+}
+
+func applyGlobalMiddleware(router *gin.Engine, cfg config.Config) {
+	router.Use(middleware.RequestID())
+	router.Use(middleware.RequestTimeout(cfg.HTTP.RequestTimeout))
+	router.Use(gin.LoggerWithConfig(newLoggerConfig()), middleware.Recovery())
+	router.Use(middleware.SecurityHeaders(securityHeadersConfig(cfg)))
+	router.Use(cors.New(newCORSConfig(cfg)))
+	router.Use(middleware.BodyLimit(cfg.HTTP.MaxBodyBytes))
+	router.Use(middleware.ContentType(middleware.APIMediaTypeRules()))
+	router.Use(middleware.Accept(middleware.APIAcceptRules()))
 }
 
 func validateStartupConfig(cfg config.Config) error {

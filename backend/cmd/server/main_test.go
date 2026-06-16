@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/app"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
-	"github.com/gin-contrib/cors"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
 )
 
@@ -264,40 +267,26 @@ func TestEarlyRejectedRequestsKeepGlobalHeaders(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	router.Use(middleware.RequestID())
-	router.Use(middleware.RequestTimeout(cfg.HTTP.RequestTimeout))
-	router.Use(gin.LoggerWithConfig(newLoggerConfig()), middleware.Recovery())
-	router.Use(middleware.SecurityHeaders(securityHeadersConfig(cfg)))
-	router.Use(cors.New(newCORSConfig(cfg)))
-	router.Use(middleware.BodyLimit(cfg.HTTP.MaxBodyBytes))
-	router.Use(middleware.ContentType([]middleware.ContentTypeRule{{
-		Method:       http.MethodPost,
-		Path:         "/api/v1/test",
-		AllowedTypes: []string{"application/json"},
-	}}))
-	router.Use(middleware.Accept([]middleware.AcceptRule{{
-		Method:       http.MethodPost,
-		Path:         "/api/v1/test",
-		OfferedTypes: []string{"application/json"},
-	}}))
-	router.POST("/api/v1/test", func(c *gin.Context) {
+	applyGlobalMiddleware(router, cfg)
+	router.POST("/api/v1/auth/login", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 
 	tests := []struct {
 		name        string
+		path        string
 		body        string
 		contentType string
 		accept      string
 		wantStatus  int
 	}{
-		{name: "body limit", body: "12345", contentType: "application/json", wantStatus: http.StatusRequestEntityTooLarge},
-		{name: "content type", body: "{}", contentType: "text/plain", wantStatus: http.StatusUnsupportedMediaType},
-		{name: "accept", body: "{}", contentType: "application/json", accept: "text/csv", wantStatus: http.StatusNotAcceptable},
+		{name: "body limit", path: "/api/v1/auth/login", body: "12345", contentType: "application/json", wantStatus: http.StatusRequestEntityTooLarge},
+		{name: "content type", path: "/api/v1/auth/login", body: "{}", contentType: "text/plain", wantStatus: http.StatusUnsupportedMediaType},
+		{name: "accept", path: "/api/v1/auth/login", body: "{}", contentType: "application/json", accept: "text/csv", wantStatus: http.StatusNotAcceptable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/test", strings.NewReader(tt.body))
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
 			req.Header.Set("Origin", "https://app.example.com")
 			req.Header.Set("Content-Type", tt.contentType)
 			if tt.accept != "" {
@@ -324,6 +313,72 @@ func TestEarlyRejectedRequestsKeepGlobalHeaders(t *testing.T) {
 				if got := resp.Header().Get("Vary"); got != "Origin, Accept" {
 					t.Fatalf("Vary = %q", got)
 				}
+			}
+		})
+	}
+}
+
+func TestFallbackResponsesKeepGlobalMiddlewareHeaders(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	cfg := config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+			MaxBodyBytes:     6 * 1024 * 1024,
+		},
+		Admin:          config.AdminConfig{Username: "admin", Password: "secret-password", Name: "管理员"},
+		LoginRateLimit: config.LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		JWT:            config.JWTConfig{Secret: "test-jwt-secret-with-at-least-32-chars", TTL: time.Hour, Issuer: "issuer", Audience: "api"},
+	}
+	router := gin.New()
+	applyGlobalMiddleware(router, cfg)
+	if err := app.RegisterRoutesWithConfig(router, testutil.NewStore(t), nil, cfg); err != nil {
+		t.Fatalf("register routes: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "not found", method: http.MethodGet, path: "/api/v1/missing", wantStatus: http.StatusNotFound, wantCode: httputil.CodeNotFound},
+		{name: "method not allowed", method: http.MethodPatch, path: "/api/v1/accounts", wantStatus: http.StatusMethodNotAllowed, wantCode: httputil.CodeMethodNotAllowed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req.Header.Set("Origin", "https://app.example.com")
+			req.Header.Set(middleware.RequestIDHeader, "request-boundary")
+			resp := httptest.NewRecorder()
+
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d, body = %s", resp.Code, tt.wantStatus, resp.Body.String())
+			}
+			if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+				t.Fatalf("Access-Control-Allow-Origin = %q", got)
+			}
+			if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Fatalf("X-Content-Type-Options = %q", got)
+			}
+			if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-boundary" {
+				t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
+			}
+			if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control = %q", got)
+			}
+
+			var body httputil.ErrorResponse
+			if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+				t.Fatalf("parse body: %v, body = %s", err, resp.Body.String())
+			}
+			if body.Code != tt.wantCode || body.RequestID != "request-boundary" {
+				t.Fatalf("body = %#v", body)
 			}
 		})
 	}
