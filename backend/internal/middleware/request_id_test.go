@@ -139,8 +139,14 @@ func TestSecurityHeaders(t *testing.T) {
 	if got := resp.Header().Get("X-DNS-Prefetch-Control"); got != "off" {
 		t.Fatalf("X-DNS-Prefetch-Control = %q", got)
 	}
+	if got := resp.Header().Get("X-Download-Options"); got != "noopen" {
+		t.Fatalf("X-Download-Options = %q", got)
+	}
 	if got := resp.Header().Get("X-Frame-Options"); got != "DENY" {
 		t.Fatalf("X-Frame-Options = %q", got)
+	}
+	if got := resp.Header().Get("X-Permitted-Cross-Domain-Policies"); got != "none" {
+		t.Fatalf("X-Permitted-Cross-Domain-Policies = %q", got)
 	}
 	if got := resp.Header().Get("Referrer-Policy"); got != "no-referrer" {
 		t.Fatalf("Referrer-Policy = %q", got)
