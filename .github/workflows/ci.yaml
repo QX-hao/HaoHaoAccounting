@@ -18,7 +18,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose config
+      - name: Validate production compose config
+        run: docker compose config
         env:
           NEXT_PUBLIC_API_BASE: https://api.example.com/api/v1
           POSTGRES_PASSWORD: postgres-secret
@@ -28,6 +29,10 @@ jobs:
           ADMIN_PASSWORD: admin-secret
           CORS_ALLOW_ORIGINS: https://app.example.com
           MYSQL_ROOT_PASSWORD: mysql-secret
+      - name: Validate local compose config
+        run: docker compose -f docker-compose.local.yaml config
+      - name: Validate local compose mysql profile
+        run: docker compose -f docker-compose.local.yaml --profile mysql config
 
   api-contract:
     runs-on: ubuntu-latest
