@@ -149,6 +149,25 @@ test('generator requires closed paginated response schemas', () => {
 	assert.match(openapi, /Pagination:\n\s+type: object\n\s+additionalProperties: false/);
 });
 
+test('generator requires closed report response schemas', () => {
+	assert.match(generator, /validateReportResponseSchemasAreClosed/);
+	for (const schemaName of [
+		'CategoryStat',
+		'AccountStat',
+		'MonthTrend',
+		'TrendPoint',
+		'CategoryTrendPoint',
+		'AccountBalancePoint',
+		'BudgetExecution',
+		'SummaryTableRow',
+		'PeriodTotals',
+		'PeriodCompare',
+		'Summary',
+	]) {
+		assert.match(openapi, new RegExp(`${schemaName}:\\n\\s+type: object\\n\\s+additionalProperties: false`));
+	}
+});
+
 test('generator requires closed import response schemas', () => {
 	assert.match(generator, /validateImportResponseSchemasAreClosed/);
 	for (const schemaName of ['ImportPreviewRow', 'ImportPreview', 'ImportResult', 'ImportJob']) {

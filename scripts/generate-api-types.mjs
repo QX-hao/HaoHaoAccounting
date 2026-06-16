@@ -79,6 +79,7 @@ function validateSchemaConstraints(allSchemas) {
   validateSharedResponseSchemasAreClosed(allSchemas);
   validateCoreResponseSchemasAreClosed(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
+  validateReportResponseSchemasAreClosed(allSchemas);
   validateImportResponseSchemasAreClosed(allSchemas);
   validateAIResponseSchemasAreClosed(allSchemas);
   validateAIResponseSchema(allSchemas.AIParseResult || '');
@@ -114,6 +115,27 @@ function validateCoreResponseSchemasAreClosed(allSchemas) {
 
 function validatePaginatedResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of ['TransactionListResponse', 'Pagination']) {
+    if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
+      throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateReportResponseSchemasAreClosed(allSchemas) {
+  const reportSchemas = [
+    'CategoryStat',
+    'AccountStat',
+    'MonthTrend',
+    'TrendPoint',
+    'CategoryTrendPoint',
+    'AccountBalancePoint',
+    'BudgetExecution',
+    'SummaryTableRow',
+    'PeriodTotals',
+    'PeriodCompare',
+    'Summary',
+  ];
+  for (const schemaName of reportSchemas) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
     }

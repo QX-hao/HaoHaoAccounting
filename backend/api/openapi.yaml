@@ -1811,6 +1811,7 @@ components:
           $ref: '#/components/schemas/AIParseResult'
     CategoryStat:
       type: object
+      additionalProperties: false
       required: [category, amount]
       properties:
         categoryId:
@@ -1821,6 +1822,7 @@ components:
           type: number
     AccountStat:
       type: object
+      additionalProperties: false
       required: [account, amount]
       properties:
         accountId:
@@ -1831,6 +1833,7 @@ components:
           type: number
     MonthTrend:
       type: object
+      additionalProperties: false
       required: [month, income, expense]
       properties:
         month:
@@ -1841,6 +1844,7 @@ components:
           type: number
     TrendPoint:
       type: object
+      additionalProperties: false
       required: [period, income, expense]
       properties:
         period:
@@ -1851,6 +1855,7 @@ components:
           type: number
     CategoryTrendPoint:
       type: object
+      additionalProperties: false
       required: [period, categoryId, category, amount]
       properties:
         period:
@@ -1863,6 +1868,7 @@ components:
           type: number
     AccountBalancePoint:
       type: object
+      additionalProperties: false
       required: [period, accountId, account, net, balance]
       properties:
         period:
@@ -1877,6 +1883,7 @@ components:
           type: number
     BudgetExecution:
       type: object
+      additionalProperties: false
       required: [budgetId, month, categoryId, category, budget, expense, remaining, usageRate]
       properties:
         budgetId:
@@ -1897,6 +1904,7 @@ components:
           type: number
     SummaryTableRow:
       type: object
+      additionalProperties: false
       required: [period, income, expense, balance, txCount]
       properties:
         period:
@@ -1911,6 +1919,7 @@ components:
           type: integer
     PeriodTotals:
       type: object
+      additionalProperties: false
       required: [income, expense]
       properties:
         income:
@@ -1919,6 +1928,7 @@ components:
           type: number
     PeriodCompare:
       type: object
+      additionalProperties: false
       required: [current, previous]
       properties:
         current:
@@ -1927,6 +1937,7 @@ components:
           $ref: '#/components/schemas/PeriodTotals'
     Summary:
       type: object
+      additionalProperties: false
       required: [income, expense, balance, byCategory, byAccount]
       properties:
         income:
