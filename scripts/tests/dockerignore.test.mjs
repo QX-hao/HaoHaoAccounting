@@ -35,6 +35,17 @@ test('docker build contexts exclude editor and local OS files', () => {
 	}
 });
 
+test('application runtime images declare a non-root user', () => {
+	for (const [name, path] of [
+		['backend', '../../backend/Dockerfile'],
+		['web', '../../web/Dockerfile'],
+		['mobile', '../../mobile/Dockerfile'],
+	]) {
+		const dockerfile = readFileSync(new URL(path, import.meta.url), 'utf8');
+		assert.ok(runtimeStageHasNonRootUser(dockerfile), `${name} Dockerfile runtime stage must declare a non-root USER`);
+	}
+});
+
 function dockerignorePatterns(path) {
 	return new Set(
 		readFileSync(new URL(path, import.meta.url), 'utf8')
@@ -49,4 +60,12 @@ function assertHasAnyPattern(name, patterns, candidates) {
 		candidates.some((candidate) => patterns.has(candidate)),
 		`${name} .dockerignore is missing one of: ${candidates.join(', ')}`,
 	);
+}
+
+function runtimeStageHasNonRootUser(dockerfile) {
+	const finalStage = dockerfile.split(/^FROM\s+/im).at(-1);
+	return finalStage
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.some((line) => /^USER\s+/i.test(line) && !/^USER\s+(?:0|root)(?=$|\s)/i.test(line));
 }

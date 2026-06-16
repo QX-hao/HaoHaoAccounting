@@ -17,11 +17,13 @@ ENV EXPO_PUBLIC_API_BASE=${EXPO_PUBLIC_API_BASE}
 
 RUN npx expo export --platform web --output-dir dist
 
-FROM nginx:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.27-alpine
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 8080
+
+USER nginx
 
 CMD ["nginx", "-g", "daemon off;"]
