@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime/debug"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/gin-gonic/gin"
@@ -31,12 +32,13 @@ func logRecoveredPanic(out io.Writer, c *gin.Context, recovered any) {
 	}
 	fmt.Fprintf(
 		out,
-		"panic_recovered method=%q path=%q client_ip=%q request_id=%q panic_type=%q panic_value=%q\n",
+		"panic_recovered method=%q path=%q client_ip=%q request_id=%q panic_type=%q panic_value=%q stack=%q\n",
 		c.Request.Method,
 		c.Request.URL.Path,
 		c.ClientIP(),
 		RequestIDFromContext(c),
 		fmt.Sprintf("%T", recovered),
 		fmt.Sprint(recovered),
+		string(debug.Stack()),
 	)
 }

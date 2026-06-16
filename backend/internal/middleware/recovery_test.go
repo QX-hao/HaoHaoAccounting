@@ -56,6 +56,8 @@ func TestRecoveryReturnsStructuredInternalError(t *testing.T) {
 		`request_id="request-123"`,
 		`panic_type="string"`,
 		`panic_value="sensitive panic details"`,
+		`stack="goroutine `,
+		`TestRecoveryReturnsStructuredInternalError`,
 	} {
 		if !strings.Contains(logOutput, want) {
 			t.Fatalf("panic log = %q, missing %s", logOutput, want)
