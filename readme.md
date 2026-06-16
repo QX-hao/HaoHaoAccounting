@@ -292,7 +292,7 @@ CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 
 后端会统一返回基础安全响应头，包括 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY` 和一个保守的 `Permissions-Policy`，默认关闭相机、定位、麦克风和支付能力。
 
-`Strict-Transport-Security` 默认不发送，避免本地 HTTP 调试或尚未确认 HTTPS 覆盖面的域名被浏览器长期记住为强制 HTTPS。生产环境确认 API 域名只通过 HTTPS 访问后，可以设置 `HTTP_HSTS_MAX_AGE_SECONDS=31536000`；只有确认所有子域也都支持 HTTPS 时再开启 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`，准备加入浏览器 preload 列表时再开启 `HTTP_HSTS_PRELOAD=true`。
+`Strict-Transport-Security` 默认不发送，避免本地 HTTP 调试或尚未确认 HTTPS 覆盖面的域名被浏览器长期记住为强制 HTTPS。生产环境确认 API 域名只通过 HTTPS 访问后，可以设置 `HTTP_HSTS_MAX_AGE_SECONDS=31536000`；只有确认所有子域也都支持 HTTPS 时再开启 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。准备加入浏览器 preload 列表时再开启 `HTTP_HSTS_PRELOAD=true`，此时启动校验会要求 `HTTP_HSTS_MAX_AGE_SECONDS>=31536000` 且 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。
 
 如果后端直接暴露给公网或本地直连调试，`TRUSTED_PROXIES` 可以留空。只有当服务位于 Nginx、Ingress、负载均衡等可信代理之后，并且需要读取 `X-Forwarded-*` 地址头时，才配置这些代理的具体 IP 或内网 CIDR。启动校验会拒绝 `0.0.0.0/0`、`::/0`、域名和非法 CIDR，避免任意客户端伪造 `X-Forwarded-For` 影响日志和登录限流。
 

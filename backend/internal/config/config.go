@@ -19,6 +19,7 @@ const (
 	defaultDBConnMaxLifetime = time.Hour
 	defaultDBConnMaxIdleTime = 30 * time.Minute
 	minJWTSecretLength       = 32
+	hstsPreloadMinMaxAge     = 31536000
 )
 
 type Config struct {
@@ -457,8 +458,16 @@ func (c HTTPConfig) Validate() error {
 	if err := validateTrustedProxies(c.TrustedProxies); err != nil {
 		errs = append(errs, err)
 	}
-	if c.HSTSMaxAgeSeconds == 0 && (c.HSTSIncludeSubDomains || c.HSTSPreload) {
-		errs = append(errs, errors.New("HTTP_HSTS_MAX_AGE_SECONDS must be positive when HSTS directives are enabled"))
+	if c.HSTSMaxAgeSeconds == 0 && c.HSTSIncludeSubDomains {
+		errs = append(errs, errors.New("HTTP_HSTS_MAX_AGE_SECONDS must be positive when HSTS includeSubDomains is enabled"))
+	}
+	if c.HSTSPreload {
+		if c.HSTSMaxAgeSeconds < hstsPreloadMinMaxAge {
+			errs = append(errs, fmt.Errorf("HTTP_HSTS_MAX_AGE_SECONDS must be at least %d when HTTP_HSTS_PRELOAD is enabled", hstsPreloadMinMaxAge))
+		}
+		if !c.HSTSIncludeSubDomains {
+			errs = append(errs, errors.New("HTTP_HSTS_INCLUDE_SUBDOMAINS must be true when HTTP_HSTS_PRELOAD is enabled"))
+		}
 	}
 	return errors.Join(errs...)
 }

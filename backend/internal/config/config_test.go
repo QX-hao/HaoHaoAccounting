@@ -348,7 +348,20 @@ func TestHTTPConfigValidate(t *testing.T) {
 	invalidHSTSPreload := valid
 	invalidHSTSPreload.HSTSPreload = true
 	if err := invalidHSTSPreload.Validate(); err == nil {
-		t.Fatal("expected hsts preload without max-age error")
+		t.Fatal("expected hsts preload without preload max-age error")
+	}
+	invalidHSTSPreloadMaxAge := valid
+	invalidHSTSPreloadMaxAge.HSTSMaxAgeSeconds = 300
+	invalidHSTSPreloadMaxAge.HSTSIncludeSubDomains = true
+	invalidHSTSPreloadMaxAge.HSTSPreload = true
+	if err := invalidHSTSPreloadMaxAge.Validate(); err == nil {
+		t.Fatal("expected hsts preload below preload max-age error")
+	}
+	invalidHSTSPreloadSubdomains := valid
+	invalidHSTSPreloadSubdomains.HSTSMaxAgeSeconds = 31536000
+	invalidHSTSPreloadSubdomains.HSTSPreload = true
+	if err := invalidHSTSPreloadSubdomains.Validate(); err == nil {
+		t.Fatal("expected hsts preload without includeSubDomains error")
 	}
 	validHSTS := valid
 	validHSTS.HSTSMaxAgeSeconds = 31536000
