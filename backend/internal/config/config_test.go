@@ -37,6 +37,37 @@ REDIS_DB=3
 	}
 }
 
+func TestLoadDotEnvParsesCommonDotEnvSyntax(t *testing.T) {
+	clearConfigEnv(t)
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("\ufeff# local development\nexport ADMIN_USERNAME=admin # owner login\nADMIN_PASSWORD=\"pass#word\"\nADMIN_NAME='好好 # 用户'\nDB_DSN=postgres://localhost/db#fragment\nJWT_ISSUER=\"line\\nissuer\"\nJWT_AUDIENCE=\"haohao\\\\api\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadDotEnv(path); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+
+	if got := os.Getenv("ADMIN_USERNAME"); got != "admin" {
+		t.Fatalf("ADMIN_USERNAME = %q", got)
+	}
+	if got := os.Getenv("ADMIN_PASSWORD"); got != "pass#word" {
+		t.Fatalf("ADMIN_PASSWORD = %q", got)
+	}
+	if got := os.Getenv("ADMIN_NAME"); got != "好好 # 用户" {
+		t.Fatalf("ADMIN_NAME = %q", got)
+	}
+	if got := os.Getenv("DB_DSN"); got != "postgres://localhost/db#fragment" {
+		t.Fatalf("DB_DSN = %q", got)
+	}
+	if got := os.Getenv("JWT_ISSUER"); got != "line\nissuer" {
+		t.Fatalf("JWT_ISSUER = %q", got)
+	}
+	if got := os.Getenv("JWT_AUDIENCE"); got != "haohao\\api" {
+		t.Fatalf("JWT_AUDIENCE = %q", got)
+	}
+}
+
 func TestLoadDotEnvIgnoresMissingFile(t *testing.T) {
 	if err := LoadDotEnv(filepath.Join(t.TempDir(), "missing.env")); err != nil {
 		t.Fatalf("LoadDotEnv missing file: %v", err)

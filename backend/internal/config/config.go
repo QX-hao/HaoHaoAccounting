@@ -94,16 +94,19 @@ func LoadDotEnv(path string) error {
 
 	for _, line := range strings.Split(string(data), "\n") {
 		clean := strings.TrimSpace(line)
+		clean = strings.TrimPrefix(clean, "\ufeff")
 		if clean == "" || strings.HasPrefix(clean, "#") {
 			continue
+		}
+		if keyValue, ok := strings.CutPrefix(clean, "export "); ok {
+			clean = strings.TrimSpace(keyValue)
 		}
 		key, value, ok := strings.Cut(clean, "=")
 		if !ok {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
+		value = parseDotEnvValue(value)
 		if key == "" || os.Getenv(key) != "" {
 			continue
 		}
@@ -112,6 +115,66 @@ func LoadDotEnv(path string) error {
 		}
 	}
 	return nil
+}
+
+func parseDotEnvValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	quote := value[0]
+	if quote == '"' || quote == '\'' {
+		return parseQuotedDotEnvValue(value, quote)
+	}
+	return strings.TrimSpace(stripDotEnvInlineComment(value))
+}
+
+func parseQuotedDotEnvValue(value string, quote byte) string {
+	var builder strings.Builder
+	escaped := false
+	for i := 1; i < len(value); i++ {
+		char := value[i]
+		if quote == '"' && escaped {
+			switch char {
+			case 'n':
+				builder.WriteByte('\n')
+			case 'r':
+				builder.WriteByte('\r')
+			case '"', '\\':
+				builder.WriteByte(char)
+			default:
+				builder.WriteByte('\\')
+				builder.WriteByte(char)
+			}
+			escaped = false
+			continue
+		}
+		if quote == '"' && char == '\\' {
+			escaped = true
+			continue
+		}
+		if char == quote {
+			return builder.String()
+		}
+		builder.WriteByte(char)
+	}
+	if quote == '"' && escaped {
+		builder.WriteByte('\\')
+	}
+	return strings.Trim(value, `"'`)
+}
+
+func stripDotEnvInlineComment(value string) string {
+	for i, char := range value {
+		if char == '#' && i > 0 && isDotEnvSpace(rune(value[i-1])) {
+			return value[:i]
+		}
+	}
+	return value
+}
+
+func isDotEnvSpace(char rune) bool {
+	return char == ' ' || char == '\t'
 }
 
 func Load() Config {
