@@ -322,6 +322,10 @@ test('generator requires documented download filename headers', () => {
 test('generator requires documented import headers', () => {
 	assert.match(generator, /ImportTextRequest', 'occurred_at,type,amount,category,account,note,tags'/);
 	assert.match(generator, /ImportFileRequest', 'occurred_at,type,amount,category,account,note,tags'/);
+	assert.match(generator, /ImportTextRequest', 'UTF-8 BOM'/);
+	assert.match(generator, /ImportFileRequest', 'UTF-8 BOM'/);
+	assert.match(openapi, /ImportTextRequest:[\s\S]+UTF-8 BOM on the first header is accepted/);
+	assert.match(openapi, /ImportFileRequest:[\s\S]+UTF-8 BOM on the first header is accepted/);
 });
 
 test('generator requires bounded pagination response schema', () => {

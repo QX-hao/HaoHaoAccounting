@@ -67,7 +67,9 @@ function validateSchemaConstraints(allSchemas) {
     ['AIParseRequest', 'minLength: 1'],
     ['ImportTextRequest', 'maxLength: 5242880'],
     ['ImportTextRequest', 'occurred_at,type,amount,category,account,note,tags'],
+    ['ImportTextRequest', 'UTF-8 BOM'],
     ['ImportFileRequest', 'occurred_at,type,amount,category,account,note,tags'],
+    ['ImportFileRequest', 'UTF-8 BOM'],
   ];
   for (const [schemaName, requiredText] of checks) {
     if (!allSchemas[schemaName]?.includes(requiredText)) {

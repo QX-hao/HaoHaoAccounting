@@ -146,11 +146,19 @@ func validateImportHeader(row []string) error {
 		return fmt.Errorf("invalid header: expected %s", strings.Join(requiredImportHeaders, ","))
 	}
 	for i, want := range requiredImportHeaders {
-		if strings.TrimSpace(strings.ToLower(row[i])) != want {
+		if normalizedImportHeader(row[i], i) != want {
 			return fmt.Errorf("invalid header: expected %s", strings.Join(requiredImportHeaders, ","))
 		}
 	}
 	return nil
+}
+
+func normalizedImportHeader(value string, index int) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if index == 0 {
+		value = strings.TrimPrefix(value, "\ufeff")
+	}
+	return value
 }
 
 func parseImportRecord(row []string) (importRecord, error) {

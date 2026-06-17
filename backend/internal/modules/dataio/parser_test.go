@@ -65,6 +65,16 @@ func TestReadCSVDataRowsRejectsInvalidHeader(t *testing.T) {
 	}
 }
 
+func TestReadCSVDataRowsAllowsUTF8BOMHeader(t *testing.T) {
+	rows, err := readCSVDataRows(strings.NewReader("\ufeffoccurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,1,餐饮,现金,午饭,\n"))
+	if err != nil {
+		t.Fatalf("readCSVDataRows error = %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v", rows)
+	}
+}
+
 func TestReadCSVDataRowsAllowsAdditionalColumns(t *testing.T) {
 	rows, err := readCSVDataRows(strings.NewReader(" occurred_at ,TYPE,amount,category,account,note,tags,source\n2026-06-01T12:30:00+08:00,expense,1,餐饮,现金,午饭,,import\n"))
 	if err != nil {

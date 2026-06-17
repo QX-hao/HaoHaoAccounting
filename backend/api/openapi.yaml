@@ -2019,13 +2019,13 @@ components:
     ImportFileRequest:
       type: object
       additionalProperties: false
-      description: CSV/XLSX import file. The first row must start with occurred_at,type,amount,category,account,note,tags; additional columns are ignored.
+      description: CSV/XLSX import file. The first row must start with occurred_at,type,amount,category,account,note,tags; a UTF-8 BOM on the first header is accepted and additional columns are ignored.
       required: [file]
       properties:
         file:
           type: string
           format: binary
-          description: CSV or XLSX file. The first row must start with occurred_at,type,amount,category,account,note,tags.
+          description: CSV or XLSX file. The first row must start with occurred_at,type,amount,category,account,note,tags; a UTF-8 BOM on the first header is accepted.
         skipDuplicates:
           type: boolean
     ImportTextRequest:
@@ -2037,7 +2037,7 @@ components:
           type: string
         content:
           type: string
-          description: CSV text. The first row must start with occurred_at,type,amount,category,account,note,tags.
+          description: CSV text. The first row must start with occurred_at,type,amount,category,account,note,tags; a UTF-8 BOM on the first header is accepted.
           minLength: 1
           maxLength: 5242880
         skipDuplicates:
