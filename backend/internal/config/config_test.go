@@ -40,7 +40,7 @@ REDIS_DB=3
 func TestLoadDotEnvParsesCommonDotEnvSyntax(t *testing.T) {
 	clearConfigEnv(t)
 	path := filepath.Join(t.TempDir(), ".env")
-	if err := os.WriteFile(path, []byte("\ufeff# local development\nexport ADMIN_USERNAME=admin # owner login\nADMIN_PASSWORD=\"pass#word\"\nADMIN_NAME='好好 # 用户'\nDB_DSN=postgres://localhost/db#fragment\nJWT_ISSUER=\"line\\nissuer\"\nJWT_AUDIENCE=\"haohao\\\\api\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("\ufeff# local development\nexport ADMIN_USERNAME=admin # owner login\nexport\tADMIN_PASSWORD=\"pass#word\"\nADMIN_NAME='好好 # 用户'\nDB_DSN=postgres://localhost/db#fragment\nJWT_ISSUER=\"line\\nissuer\"\nJWT_AUDIENCE=\"haohao\\\\api\"\nexported=value\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -65,6 +65,9 @@ func TestLoadDotEnvParsesCommonDotEnvSyntax(t *testing.T) {
 	}
 	if got := os.Getenv("JWT_AUDIENCE"); got != "haohao\\api" {
 		t.Fatalf("JWT_AUDIENCE = %q", got)
+	}
+	if got := os.Getenv("exported"); got != "value" {
+		t.Fatalf("exported = %q", got)
 	}
 }
 

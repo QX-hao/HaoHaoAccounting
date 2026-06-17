@@ -98,9 +98,7 @@ func LoadDotEnv(path string) error {
 		if clean == "" || strings.HasPrefix(clean, "#") {
 			continue
 		}
-		if keyValue, ok := strings.CutPrefix(clean, "export "); ok {
-			clean = strings.TrimSpace(keyValue)
-		}
+		clean = trimDotEnvExportPrefix(clean)
 		key, value, ok := strings.Cut(clean, "=")
 		if !ok {
 			continue
@@ -115,6 +113,16 @@ func LoadDotEnv(path string) error {
 		}
 	}
 	return nil
+}
+
+func trimDotEnvExportPrefix(line string) string {
+	if len(line) <= len("export") || !strings.HasPrefix(line, "export") {
+		return line
+	}
+	if !isDotEnvSpace(rune(line[len("export")])) {
+		return line
+	}
+	return strings.TrimSpace(line[len("export"):])
 }
 
 func parseDotEnvValue(value string) string {
