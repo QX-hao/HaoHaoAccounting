@@ -62,13 +62,16 @@ func (s *Service) PreviewRows(ctx context.Context, userID uint, filename string,
 	preview := ImportPreview{
 		Filename:     filename,
 		Size:         size,
-		TotalRows:    len(sourceRows),
 		MaxRows:      MaxImportRows,
 		MaxFileBytes: MaxImportFileBytes,
 		Rows:         make([]ImportPreviewRow, 0, min(len(sourceRows), ImportPreviewRows)),
 	}
 	seen := map[duplicateKey]int{}
 	for i, row := range sourceRows {
+		if isEmptyImportRow(row) {
+			continue
+		}
+		preview.TotalRows++
 		record, err := parseImportRecord(row)
 		duplicateReason := ""
 		if err != nil {
@@ -91,7 +94,7 @@ func (s *Service) PreviewRows(ctx context.Context, userID uint, filename string,
 			preview.Rows = append(preview.Rows, importPreviewRow(i, record, err, duplicateReason))
 		}
 	}
-	preview.Truncated = len(sourceRows) > len(preview.Rows)
+	preview.Truncated = preview.TotalRows > len(preview.Rows)
 	return preview
 }
 
@@ -116,7 +119,7 @@ func (s *Service) StartImportJob(ctx context.Context, userID uint, file *multipa
 		UserID:   userID,
 		Filename: strings.TrimSpace(file.Filename),
 		Status:   "queued",
-		Total:    len(sourceRows),
+		Total:    countImportDataRows(sourceRows),
 	}
 	if job.Filename == "" {
 		job.Filename = "import.csv"
@@ -198,13 +201,14 @@ func (s *Service) ImportRows(ctx context.Context, userID uint, sourceRows [][]st
 }
 
 func (s *Service) ImportRowsWithOptions(ctx context.Context, userID uint, sourceRows [][]string, options ImportOptions) ImportResult {
-	result := ImportResult{Total: len(sourceRows), Errors: make([]string, 0)}
+	result := ImportResult{Errors: make([]string, 0)}
 	records := make([]importRecord, 0, len(sourceRows))
 	seen := map[duplicateKey]int{}
 	for i, row := range sourceRows {
-		if strings.TrimSpace(strings.Join(row, "")) == "" {
+		if isEmptyImportRow(row) {
 			continue
 		}
+		result.Total++
 		record, err := parseImportRecord(row)
 		if err != nil {
 			result.Failed++

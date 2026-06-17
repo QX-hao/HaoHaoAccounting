@@ -51,6 +51,9 @@ func readImportRows(file *multipart.FileHeader) ([][]string, error) {
 		if len(rows) == 0 {
 			return nil, errors.New("empty xlsx")
 		}
+		if countImportDataRows(rows) == 0 {
+			return nil, errors.New("empty xlsx")
+		}
 		return rows, nil
 	}
 	if ext != ".csv" {
@@ -64,6 +67,9 @@ func readImportRows(file *multipart.FileHeader) ([][]string, error) {
 	if len(rows) == 0 {
 		return nil, errors.New("empty csv")
 	}
+	if countImportDataRows(rows) == 0 {
+		return nil, errors.New("empty csv")
+	}
 	return rows, nil
 }
 
@@ -72,6 +78,7 @@ func readCSVDataRows(r io.Reader) ([][]string, error) {
 	reader.FieldsPerRecord = -1
 	rows := make([][]string, 0)
 	line := 0
+	dataRows := 0
 	for {
 		row, err := reader.Read()
 		if errors.Is(err, io.EOF) {
@@ -88,7 +95,10 @@ func readCSVDataRows(r io.Reader) ([][]string, error) {
 			continue
 		}
 		rows = append(rows, row)
-		if len(rows) > MaxImportRows {
+		if !isEmptyImportRow(row) {
+			dataRows++
+		}
+		if dataRows > MaxImportRows {
 			return nil, fmt.Errorf("too many rows: max %d", MaxImportRows)
 		}
 	}
@@ -104,6 +114,7 @@ func readXLSXDataRows(xlsx *excelize.File, sheet string) ([][]string, error) {
 
 	rows := make([][]string, 0)
 	line := 0
+	dataRows := 0
 	for iter.Next() {
 		row, err := iter.Columns()
 		if err != nil {
@@ -117,7 +128,10 @@ func readXLSXDataRows(xlsx *excelize.File, sheet string) ([][]string, error) {
 			continue
 		}
 		rows = append(rows, row)
-		if len(rows) > MaxImportRows {
+		if !isEmptyImportRow(row) {
+			dataRows++
+		}
+		if dataRows > MaxImportRows {
 			return nil, fmt.Errorf("too many rows: max %d", MaxImportRows)
 		}
 	}
@@ -136,6 +150,9 @@ func readImportRowsFromCSVContent(content string) ([][]string, error) {
 		return nil, err
 	}
 	if len(rows) == 0 {
+		return nil, errors.New("empty csv")
+	}
+	if countImportDataRows(rows) == 0 {
 		return nil, errors.New("empty csv")
 	}
 	return rows, nil
@@ -191,4 +208,18 @@ func parseImportRecord(row []string) (importRecord, error) {
 		Note:       get(5),
 		Tags:       get(6),
 	}, nil
+}
+
+func countImportDataRows(rows [][]string) int {
+	total := 0
+	for _, row := range rows {
+		if !isEmptyImportRow(row) {
+			total++
+		}
+	}
+	return total
+}
+
+func isEmptyImportRow(row []string) bool {
+	return strings.TrimSpace(strings.Join(row, "")) == ""
 }

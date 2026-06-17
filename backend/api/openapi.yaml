@@ -2082,6 +2082,7 @@ components:
           type: integer
         totalRows:
           type: integer
+          description: Non-empty data rows excluding the header and blank rows.
         validRows:
           type: integer
         failedRows:

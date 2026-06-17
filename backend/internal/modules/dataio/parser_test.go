@@ -58,10 +58,32 @@ func TestReadCSVDataRowsRejectsTooManyRows(t *testing.T) {
 	}
 }
 
+func TestReadCSVDataRowsDoesNotCountBlankRowsTowardLimit(t *testing.T) {
+	var buf strings.Builder
+	writer := csv.NewWriter(&buf)
+	_ = writer.Write([]string{"occurred_at", "type", "amount", "category", "account", "note", "tags"})
+	_ = writer.Write([]string{"", "", "", "", "", "", ""})
+	for i := 0; i < MaxImportRows; i++ {
+		_ = writer.Write([]string{"2026-06-01T12:30:00+08:00", "expense", "1", "餐饮", "现金", fmt.Sprintf("row-%d", i), ""})
+	}
+	writer.Flush()
+
+	if _, err := readCSVDataRows(strings.NewReader(buf.String())); err != nil {
+		t.Fatalf("readCSVDataRows error = %v", err)
+	}
+}
+
 func TestReadCSVDataRowsRejectsInvalidHeader(t *testing.T) {
 	_, err := readCSVDataRows(strings.NewReader("when,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,1,餐饮,现金,午饭,\n"))
 	if err == nil || !strings.Contains(err.Error(), "invalid header") {
 		t.Fatalf("readCSVDataRows error = %v, want invalid header", err)
+	}
+}
+
+func TestReadImportRowsFromCSVContentRejectsBlankOnlyRows(t *testing.T) {
+	_, err := readImportRowsFromCSVContent("occurred_at,type,amount,category,account,note,tags\n,,,,,,\n  ,\t,,,,,\n")
+	if err == nil || !strings.Contains(err.Error(), "empty csv") {
+		t.Fatalf("readImportRowsFromCSVContent error = %v, want empty csv", err)
 	}
 }
 

@@ -36,6 +36,26 @@ func TestImportPreviewReportsValidAndInvalidRows(t *testing.T) {
 	}
 }
 
+func TestImportPreviewIgnoresBlankRowsAndKeepsSourceLine(t *testing.T) {
+	s := testutil.NewStore(t)
+	user := models.User{Username: "alice", PasswordHash: "hash"}
+	if err := s.DB.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	file := writeImportFile(t, "preview.csv", "occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n,,,,,,\nwrong,expense,1,餐饮,现金,坏行,\n")
+	preview, err := NewService(s, transactions.NewService(s, nil), nil).Preview(context.Background(), user.ID, file)
+	if err != nil {
+		t.Fatalf("preview import: %v", err)
+	}
+	if preview.TotalRows != 2 || preview.ValidRows != 1 || preview.FailedRows != 1 {
+		t.Fatalf("unexpected preview counts: %#v", preview)
+	}
+	if len(preview.Rows) != 2 || preview.Rows[1].Line != 4 {
+		t.Fatalf("unexpected preview rows: %#v", preview.Rows)
+	}
+}
+
 func TestImportPreviewMarksDuplicateRows(t *testing.T) {
 	s := testutil.NewStore(t)
 	user := models.User{Username: "alice", PasswordHash: "hash"}
@@ -75,6 +95,23 @@ func TestImportCreatesRowsInBatchAndUpdatesBalance(t *testing.T) {
 	}
 	if account.BalanceCents != 6450 {
 		t.Fatalf("balance cents = %d, want 6450", account.BalanceCents)
+	}
+}
+
+func TestImportIgnoresBlankRowsInTotals(t *testing.T) {
+	s := testutil.NewStore(t)
+	user := models.User{Username: "alice", PasswordHash: "hash"}
+	if err := s.DB.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	file := writeImportFile(t, "import.csv", "occurred_at,type,amount,category,account,note,tags\n,,,,,,\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n")
+	result, err := NewService(s, transactions.NewService(s, nil), nil).Import(context.Background(), user.ID, file)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if result.Total != 1 || result.Success != 1 || result.Failed != 0 {
+		t.Fatalf("unexpected result: %#v", result)
 	}
 }
 
@@ -139,7 +176,7 @@ func TestStartImportJobPersistsProgressAndHistory(t *testing.T) {
 	}
 
 	service := NewService(s, transactions.NewService(s, nil), nil)
-	file := writeImportFile(t, "job.csv", "occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n")
+	file := writeImportFile(t, "job.csv", "occurred_at,type,amount,category,account,note,tags\n,,,,,,\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n")
 	ctx := context.Background()
 	job, err := service.StartImportJob(ctx, user.ID, file, ImportOptions{SkipDuplicates: true})
 	if err != nil {
@@ -161,7 +198,7 @@ func TestStartImportJobPersistsProgressAndHistory(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if completed.Status != "completed" || completed.Success != 1 || completed.Failed != 0 {
+	if completed.Status != "completed" || completed.Total != 1 || completed.Success != 1 || completed.Failed != 0 {
 		t.Fatalf("unexpected completed job: %#v", completed)
 	}
 
