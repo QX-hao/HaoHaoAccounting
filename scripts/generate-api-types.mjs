@@ -286,6 +286,9 @@ function validateResponseComponents(openapi) {
     throw new Error('components.responses.Unauthorized is missing WWW-Authenticate header');
   }
   const wwwAuthenticate = componentHeaderBlock(openapi, 'WWWAuthenticate');
+  if (!wwwAuthenticate.includes('realm="haohao-accounting-api"')) {
+    throw new Error('components.headers.WWWAuthenticate is missing bearer realm guidance');
+  }
   if (!wwwAuthenticate.includes('invalid_token')) {
     throw new Error('components.headers.WWWAuthenticate is missing invalid_token guidance');
   }

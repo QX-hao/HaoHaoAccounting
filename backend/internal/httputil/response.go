@@ -36,6 +36,11 @@ const StatusClientClosedRequest = 499
 
 const requestIDContextKey = "request_id"
 
+const (
+	bearerChallenge             = `Bearer realm="haohao-accounting-api"`
+	invalidBearerTokenChallenge = bearerChallenge + `, error="invalid_token"`
+)
+
 type ErrorResponse struct {
 	Error     string `json:"error"`
 	Code      string `json:"code"`
@@ -65,12 +70,12 @@ func InvalidRequest(c *gin.Context, message string) {
 }
 
 func Unauthorized(c *gin.Context, message string) {
-	c.Header("WWW-Authenticate", "Bearer")
+	c.Header("WWW-Authenticate", bearerChallenge)
 	Error(c, http.StatusUnauthorized, CodeUnauthorized, message)
 }
 
 func InvalidToken(c *gin.Context, message string) {
-	c.Header("WWW-Authenticate", `Bearer error="invalid_token"`)
+	c.Header("WWW-Authenticate", invalidBearerTokenChallenge)
 	Error(c, http.StatusUnauthorized, CodeUnauthorized, message)
 }
 

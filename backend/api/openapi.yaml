@@ -1344,7 +1344,7 @@ components:
       schema:
         type: string
     WWWAuthenticate:
-      description: Authentication challenge for protected resources. Invalid bearer tokens include error="invalid_token" per RFC 6750.
+      description: Authentication challenge for protected resources. Challenges use realm="haohao-accounting-api"; invalid bearer tokens also include error="invalid_token" per RFC 6750.
       schema:
         type: string
     RetryAfter:

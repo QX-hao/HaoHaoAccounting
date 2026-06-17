@@ -271,6 +271,7 @@ test('generator requires Allow header on method-not-allowed response', () => {
 
 test('generator requires WWW-Authenticate header on unauthorized response', () => {
 	assert.match(generator, /components\.responses\.Unauthorized is missing WWW-Authenticate header/);
+	assert.match(generator, /components\.headers\.WWWAuthenticate is missing bearer realm guidance/);
 	assert.match(generator, /components\.headers\.WWWAuthenticate is missing invalid_token guidance/);
 });
 

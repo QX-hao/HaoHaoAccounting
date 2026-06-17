@@ -165,7 +165,7 @@ func TestUnauthorizedSetsAuthenticateChallenge(t *testing.T) {
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d", resp.Code)
 	}
-	if got := resp.Header().Get("WWW-Authenticate"); got != "Bearer" {
+	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api"` {
 		t.Fatalf("WWW-Authenticate = %q", got)
 	}
 	if body.Code != CodeUnauthorized {
@@ -185,7 +185,7 @@ func TestInvalidTokenSetsBearerErrorChallenge(t *testing.T) {
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d", resp.Code)
 	}
-	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer error="invalid_token"` {
+	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api", error="invalid_token"` {
 		t.Fatalf("WWW-Authenticate = %q", got)
 	}
 	if body.Code != CodeUnauthorized {
