@@ -9,6 +9,7 @@ const dockerignores = [
 	['mobile', '../../mobile/.dockerignore'],
 ].map(([name, path]) => [name, dockerignorePatterns(path)]);
 const compose = readFileSync(new URL('../../docker-compose.yaml', import.meta.url), 'utf8');
+const localCompose = readFileSync(new URL('../../docker-compose.local.yaml', import.meta.url), 'utf8');
 
 test('docker build contexts exclude local secrets and dependency caches', () => {
 	for (const [name, patterns] of dockerignores) {
@@ -74,6 +75,26 @@ test('stateful compose healthchecks avoid password command arguments', () => {
 	assert.doesNotMatch(mysql, /mysqladmin[^\n]+-p/);
 });
 
+test('local compose healthchecks avoid password command arguments', () => {
+	const redis = composeServiceBlock('redis', localCompose);
+	assert.match(redis, /REDISCLI_AUTH=\\?"\$\${REDIS_PASSWORD}\\?" redis-cli ping/);
+	assert.doesNotMatch(redis, /redis-cli\s+-a/);
+
+	const mysql = composeServiceBlock('mysql', localCompose);
+	assert.match(mysql, /MYSQL_PWD=\\?"\$\${MYSQL_ROOT_PASSWORD}\\?" mysqladmin ping/);
+	assert.doesNotMatch(mysql, /mysqladmin[^\n]+-p/);
+});
+
+test('local redis compose command keeps password out of process arguments', () => {
+	const redis = composeServiceBlock('redis', localCompose);
+	const command = redisComposeCommandBlock(redis);
+	assert.match(command, /umask 077/);
+	assert.match(command, /exec redis-server \/tmp\/redis\.conf/);
+	assert.match(command, /requirepass %s/);
+	assert.match(command, /\$\$\{REDIS_PASSWORD\}/);
+	assert.doesNotMatch(command, /--requirepass/);
+});
+
 test('redis compose command keeps password out of process arguments', () => {
 	const redis = composeServiceBlock('redis');
 	const command = redisComposeCommandBlock(redis);
@@ -109,8 +130,8 @@ function runtimeStageHasNonRootUser(dockerfile) {
 		.some((line) => /^USER\s+/i.test(line) && !/^USER\s+(?:0|root)(?=$|\s)/i.test(line));
 }
 
-function composeServiceBlock(service) {
-	const match = compose.match(new RegExp(`^  ${service}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|^volumes:)`, 'm'));
+function composeServiceBlock(service, source = compose) {
+	const match = source.match(new RegExp(`^  ${service}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|^volumes:)`, 'm'));
 	assert.ok(match, `missing compose service ${service}`);
 	return match[0];
 }

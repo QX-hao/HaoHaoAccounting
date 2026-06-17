@@ -31,14 +31,21 @@ services:
     container_name: haohao-local-test-redis
     ports:
       - "56379:6379"
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "haohao123"]
+    command:
+      [
+        "sh",
+        "-c",
+        "umask 077 && printf 'appendonly yes\nrequirepass %s\n' \"$${REDIS_PASSWORD}\" > /tmp/redis.conf && exec redis-server /tmp/redis.conf",
+      ]
+    environment:
+      REDIS_PASSWORD: haohao123
     volumes:
       - haohao_redis_data:/data
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "redis-cli -a haohao123 ping | grep PONG",
+          "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep PONG",
         ]
       interval: 10s
       timeout: 5s
@@ -61,7 +68,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent",
+          "MYSQL_PWD=\"$${MYSQL_ROOT_PASSWORD}\" mysqladmin ping -h 127.0.0.1 -uroot --silent",
         ]
       interval: 10s
       timeout: 5s
