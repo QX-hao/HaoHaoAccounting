@@ -57,6 +57,18 @@ test('generated error codes stay available to API clients', () => {
 	assert.match(mobileApiClient, /function networkError\(err: unknown\)/);
 });
 
+test('API clients send request ids for log correlation', () => {
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /function ensureRequestId\(headers: Headers\)/);
+		assert.match(source, /headers\.has\('X-Request-ID'\)/);
+		assert.match(source, /headers\.set\('X-Request-ID', newRequestId\(\)\)/);
+		assert.match(source, /function withRequestId\(headers: HeadersInit\): Headers/);
+		assert.match(source, /function newRequestId\(\)/);
+	}
+	assert.match(webApiClient, /return `web-\$\{Date\.now\(\)\.toString\(36\)\}-\$\{Math\.random\(\)\.toString\(36\)\.slice\(2, 10\)\}`;/);
+	assert.match(mobileApiClient, /return `mobile-\$\{Date\.now\(\)\.toString\(36\)\}-\$\{Math\.random\(\)\.toString\(36\)\.slice\(2, 10\)\}`;/);
+});
+
 test('API clients send explicit Accept headers for negotiated responses', () => {
 	assert.match(webApiClient, /headers\.set\('Accept', headers\.get\('Accept'\) \|\| 'application\/json'\)/);
 	assert.match(webApiClient, /headers\.set\('Accept', 'application\/json'\)/);

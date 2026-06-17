@@ -32,6 +32,7 @@ export class ApiError extends Error {
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers || {});
+  ensureRequestId(headers);
   headers.set('Accept', headers.get('Accept') || 'application/json');
   if (init.body !== undefined && init.body !== null && !(init.body instanceof FormData)) {
     headers.set('Content-Type', headers.get('Content-Type') || 'application/json');
@@ -58,6 +59,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
 export async function upload<T>(path: string, formData: FormData): Promise<T> {
   const headers = new Headers();
+  ensureRequestId(headers);
   headers.set('Accept', 'application/json');
   const token = getToken();
   if (token) {
@@ -86,6 +88,7 @@ export type DownloadResult = {
 export async function download(path: string, accept = '*/*'): Promise<DownloadResult> {
   const token = getToken();
   const headers = new Headers();
+  ensureRequestId(headers);
   headers.set('Accept', accept);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
@@ -110,8 +113,24 @@ export async function logout(): Promise<void> {
 
   await fetchAPI('/auth/logout', {
     method: 'POST',
-    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    headers: withRequestId({ Accept: 'application/json', Authorization: `Bearer ${token}` }),
   }).catch(() => undefined);
+}
+
+function ensureRequestId(headers: Headers) {
+  if (!headers.has('X-Request-ID')) {
+    headers.set('X-Request-ID', newRequestId());
+  }
+}
+
+function withRequestId(headers: HeadersInit): Headers {
+  const next = new Headers(headers);
+  ensureRequestId(next);
+  return next;
+}
+
+function newRequestId() {
+  return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function handleUnauthorized(status: number) {

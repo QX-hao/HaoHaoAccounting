@@ -49,6 +49,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const headers = new Headers(init.headers || {});
   const token = await getToken();
 
+  ensureRequestId(headers);
   headers.set('Accept', headers.get('Accept') || 'application/json');
   if (init.body !== undefined && init.body !== null && !(init.body instanceof FormData)) {
     headers.set('Content-Type', headers.get('Content-Type') || 'application/json');
@@ -82,6 +83,7 @@ export function upload<T>(path: string, formData: FormData) {
 
 export async function downloadText(path: string, accept = 'text/plain'): Promise<string> {
   const headers = new Headers();
+  ensureRequestId(headers);
   headers.set('Accept', accept);
 
   const token = await getToken();
@@ -108,8 +110,24 @@ export async function logout() {
 
   await fetchAPI('/auth/logout', {
     method: 'POST',
-    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    headers: withRequestId({ Accept: 'application/json', Authorization: `Bearer ${token}` }),
   }).catch(() => undefined);
+}
+
+function ensureRequestId(headers: Headers) {
+  if (!headers.has('X-Request-ID')) {
+    headers.set('X-Request-ID', newRequestId());
+  }
+}
+
+function withRequestId(headers: HeadersInit): Headers {
+  const next = new Headers(headers);
+  ensureRequestId(next);
+  return next;
+}
+
+function newRequestId() {
+  return `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
