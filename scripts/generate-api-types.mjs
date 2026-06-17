@@ -298,8 +298,8 @@ function validateResponseComponents(openapi) {
     throw new Error('components.responses.RateLimited is missing Retry-After header');
   }
   const retryAfter = componentHeaderBlock(openapi, 'RetryAfter');
-  if (!retryAfter.includes('HTTP-date') || !retryAfter.includes('delay-seconds') || !retryAfter.includes('type: string')) {
-    throw new Error('components.headers.RetryAfter must document HTTP-date or delay-seconds');
+  if (!retryAfter.includes('Remaining wait time') || !retryAfter.includes('HTTP-date') || !retryAfter.includes('delay-seconds') || !retryAfter.includes('type: string')) {
+    throw new Error('components.headers.RetryAfter must document remaining wait time as HTTP-date or delay-seconds');
   }
 
   const notAcceptable = openapi.match(/^    NotAcceptable:\n(?:      .+\n)+/m)?.[0] || '';

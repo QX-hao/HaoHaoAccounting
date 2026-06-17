@@ -65,7 +65,7 @@ func (h *Handler) login(c *gin.Context) {
 
 	limiterKey := loginLimiterKey(c.ClientIP(), req.Username)
 	if h.loginLimiter != nil && !h.loginLimiter.Allow(limiterKey) {
-		httputil.RateLimited(c, "登录失败次数过多，请稍后再试", h.loginRetryAfter())
+		httputil.RateLimited(c, "登录失败次数过多，请稍后再试", h.loginLimiter.RetryAfter(limiterKey))
 		return
 	}
 
@@ -235,13 +235,6 @@ func (h *Handler) recordLoginFailure(key string) {
 	if h.loginLimiter != nil {
 		h.loginLimiter.RecordFailure(key)
 	}
-}
-
-func (h *Handler) loginRetryAfter() time.Duration {
-	if h.loginLimiter == nil {
-		return 0
-	}
-	return h.loginLimiter.window
 }
 
 func (h *Handler) recordLoginSuccess(key string) {

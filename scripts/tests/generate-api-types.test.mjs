@@ -289,7 +289,8 @@ test('generator requires WWW-Authenticate header on unauthorized response', () =
 
 test('generator requires Retry-After header on rate-limited response', () => {
 	assert.match(generator, /components\.responses\.RateLimited is missing Retry-After header/);
-	assert.match(generator, /components\.headers\.RetryAfter must document HTTP-date or delay-seconds/);
+	assert.match(generator, /components\.headers\.RetryAfter must document remaining wait time as HTTP-date or delay-seconds/);
+	assert.match(openapi, /RetryAfter:[\s\S]+Remaining wait time before retrying/);
 });
 
 test('generator requires not-acceptable responses for operations with response bodies', () => {

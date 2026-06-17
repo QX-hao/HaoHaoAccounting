@@ -76,6 +76,44 @@ func TestLoginRateLimiterBlocksRepeatedFailures(t *testing.T) {
 	}
 }
 
+func TestLoginRateLimiterReportsRemainingRetryAfter(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-jwt-secret-with-at-least-32-chars")
+	gin.SetMode(gin.TestMode)
+
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	s := testutil.NewStore(t)
+	hash, err := hashPassword("secret-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "admin", PasswordHash: hash, Name: "管理员"}
+	if err := s.DB.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	router := gin.New()
+	limiter := newLoginLimiter(2, time.Minute)
+	limiter.now = func() time.Time { return now }
+	handler := &Handler{store: s, loginLimiter: limiter, tokenService: testTokenService(t)}
+	handler.RegisterPublic(router.Group("/api/v1"))
+
+	for i := 0; i < 2; i++ {
+		resp := postLogin(t, router, `{"username":"admin","password":"wrong"}`)
+		if resp.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d status = %d, want 401", i+1, resp.Code)
+		}
+	}
+
+	now = now.Add(45 * time.Second)
+	resp := postLogin(t, router, `{"username":"admin","password":"wrong"}`)
+	if resp.Code != http.StatusTooManyRequests {
+		t.Fatalf("blocked status = %d, want 429", resp.Code)
+	}
+	if got := resp.Header().Get("Retry-After"); got != "15" {
+		t.Fatalf("Retry-After = %q", got)
+	}
+}
+
 func TestLoginRateLimiterClearsAfterSuccessfulLogin(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-jwt-secret-with-at-least-32-chars")
 	gin.SetMode(gin.TestMode)

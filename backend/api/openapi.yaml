@@ -1348,7 +1348,7 @@ components:
       schema:
         type: string
     RetryAfter:
-      description: Retry delay as either HTTP-date or delay-seconds.
+      description: Remaining wait time before retrying, as either HTTP-date or delay-seconds.
       schema:
         type: string
   responses:

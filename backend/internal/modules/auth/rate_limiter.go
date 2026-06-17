@@ -44,6 +44,28 @@ func (l *loginLimiter) Allow(key string) bool {
 	return attempt.failures < l.maxFailures
 }
 
+func (l *loginLimiter) RetryAfter(key string) time.Duration {
+	if l == nil {
+		return 0
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := l.now()
+	l.pruneExpired(now)
+	attempt, ok := l.attempts[key]
+	if !ok || attempt.failures < l.maxFailures {
+		return 0
+	}
+	remaining := l.window - now.Sub(attempt.firstFailure)
+	if remaining <= 0 {
+		delete(l.attempts, key)
+		return 0
+	}
+	return remaining
+}
+
 func (l *loginLimiter) RecordFailure(key string) {
 	if l == nil {
 		return
