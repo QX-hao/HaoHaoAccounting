@@ -187,6 +187,48 @@ func TestNewCORSConfigIncludesRequestIDHeader(t *testing.T) {
 	}
 }
 
+func TestCORSAllowMethodsCoverRegisteredAPIMethods(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+		},
+	}
+	router := gin.New()
+	if err := app.RegisterRoutesWithConfig(router, testutil.NewStore(t), nil, corsRouteContractConfig()); err != nil {
+		t.Fatalf("register routes: %v", err)
+	}
+
+	corsConfig := newCORSConfig(cfg)
+	for _, route := range router.Routes() {
+		if !strings.HasPrefix(route.Path, "/api/v1/") {
+			continue
+		}
+		if !slices.Contains(corsConfig.AllowMethods, route.Method) {
+			t.Fatalf("AllowMethods = %#v, missing %s for %s", corsConfig.AllowMethods, route.Method, route.Path)
+		}
+	}
+}
+
+func corsRouteContractConfig() config.Config {
+	return config.Config{
+		Admin: config.AdminConfig{
+			Username: "admin",
+			Password: "secret-password",
+			Name:     "管理员",
+		},
+		LoginRateLimit: config.LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		JWT: config.JWTConfig{
+			Secret:    "test-jwt-secret-with-at-least-32-chars",
+			TTL:       time.Hour,
+			ClockSkew: 30 * time.Second,
+			Issuer:    "issuer",
+			Audience:  "api",
+		},
+	}
+}
+
 func TestValidateCORSConfig(t *testing.T) {
 	valid := config.Config{
 		HTTP: config.HTTPConfig{
