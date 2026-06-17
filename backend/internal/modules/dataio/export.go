@@ -57,11 +57,11 @@ func writeXLSX(c *gin.Context, rows []models.Transaction) error {
 		_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", line), row.OccurredAt.Format(time.RFC3339))
 		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", line), row.Type)
 		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", line), money.FromCents(row.AmountCents))
-		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", line), row.Category.Name)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", line), row.Account.Name)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("F%d", line), row.Note)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", line), row.Tags)
-		_ = f.SetCellValue(sheet, fmt.Sprintf("H%d", line), row.Source)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", line), safeCSVCell(row.Category.Name))
+		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", line), safeCSVCell(row.Account.Name))
+		_ = f.SetCellValue(sheet, fmt.Sprintf("F%d", line), safeCSVCell(row.Note))
+		_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", line), safeCSVCell(row.Tags))
+		_ = f.SetCellValue(sheet, fmt.Sprintf("H%d", line), safeCSVCell(row.Source))
 	}
 
 	buf, err := f.WriteToBuffer()

@@ -18,6 +18,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/transactions"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
+	"github.com/xuri/excelize/v2"
 )
 
 var errFailingWrite = errors.New("write failed")
@@ -109,6 +110,54 @@ func TestWriteCSVNeutralizesFormulaCells(t *testing.T) {
 	for i, value := range records[1][3:] {
 		if value != want[i] {
 			t.Fatalf("field %d = %q, want %q", i+3, value, want[i])
+		}
+	}
+}
+
+func TestWriteXLSXNeutralizesFormulaCells(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resp := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(resp)
+
+	rows := []models.Transaction{{
+		Type:        "expense",
+		AmountCents: 12345,
+		Category:    models.Category{Name: "=category"},
+		Account:     models.Account{Name: "+account"},
+		Note:        "-note",
+		Tags:        "@tags",
+		Source:      "\t=source",
+		OccurredAt:  time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+	}}
+
+	if err := writeXLSX(c, rows); err != nil {
+		t.Fatalf("writeXLSX error = %v", err)
+	}
+
+	f, err := excelize.OpenReader(bytes.NewReader(resp.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("open xlsx: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil {
+			t.Fatalf("close xlsx: %v", err)
+		}
+	})
+
+	sheet := f.GetSheetName(0)
+	for cell, want := range map[string]string{
+		"D2": "'=category",
+		"E2": "'+account",
+		"F2": "'-note",
+		"G2": "'@tags",
+		"H2": "'\t=source",
+	} {
+		got, err := f.GetCellValue(sheet, cell)
+		if err != nil {
+			t.Fatalf("read %s: %v", cell, err)
+		}
+		if got != want {
+			t.Fatalf("%s = %q, want %q", cell, got, want)
 		}
 	}
 }
