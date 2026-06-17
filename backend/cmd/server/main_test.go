@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -537,5 +539,67 @@ func TestRunHTTPServerStopsWhenContextIsCanceled(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runHTTPServer did not stop after context cancellation")
+	}
+}
+
+func TestRunHTTPServerReturnsListenError(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	server := &http.Server{Addr: listener.Addr().String()}
+	err = runHTTPServer(context.Background(), server, time.Second)
+	if err == nil {
+		t.Fatal("expected listen error")
+	}
+	if !errors.Is(err, syscall.EADDRINUSE) {
+		t.Fatalf("listen error = %v", err)
+	}
+}
+
+func TestRunHTTPServerTreatsExternalCloseAsCleanShutdown(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &http.Server{Addr: addr}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runHTTPServer(context.Background(), server, time.Second)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resp, err := http.Get("http://" + addr)
+		if err == nil {
+			if err := resp.Body.Close(); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = server.Close()
+			t.Fatalf("server did not start: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := server.Close(); err != nil {
+		t.Fatalf("close server: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("runHTTPServer returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runHTTPServer did not stop after server close")
 	}
 }
