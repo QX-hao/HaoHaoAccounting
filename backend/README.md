@@ -31,4 +31,5 @@ The OpenAPI contract lives in `api/openapi.yaml`. Regenerate web/mobile TypeScri
 
 ```bash
 npm run generate:api-types
+npm run verify:api-contract
 ```

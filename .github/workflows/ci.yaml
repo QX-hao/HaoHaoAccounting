@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,21 +19,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Validate production compose config
-        run: docker compose config
-        env:
-          NEXT_PUBLIC_API_BASE: https://api.example.com/api/v1
-          POSTGRES_PASSWORD: postgres-secret
-          REDIS_PASSWORD: redis-secret
-          JWT_SECRET: jwt-secret-with-at-least-32-characters
-          ADMIN_USERNAME: admin
-          ADMIN_PASSWORD: admin-secret
-          CORS_ALLOW_ORIGINS: https://app.example.com
-          MYSQL_ROOT_PASSWORD: mysql-secret
-      - name: Validate local compose config
-        run: docker compose -f docker-compose.local.yaml config
-      - name: Validate local compose mysql profile
-        run: docker compose -f docker-compose.local.yaml --profile mysql config
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run verify:compose
 
   api-contract:
     runs-on: ubuntu-latest
@@ -42,32 +32,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm run generate:api-types
-      - run: npm run test:api-generator
-      - run: git diff --exit-code -- web/shared/types/api.ts mobile/src/shared/types/api.ts web/shared/api/generated-client.ts mobile/src/shared/api/generated-client.ts
+      - run: npm run verify:api-contract
 
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - run: test -z "$(gofmt -l .)"
-      - run: go vet ./...
-      - run: go test ./...
+      - run: npm run verify:backend
 
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -75,21 +58,14 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run build
-        env:
-          NEXT_PUBLIC_API_BASE: http://127.0.0.1:8080/api/v1
-      - run: npm run typecheck
-      - run: npx playwright install --with-deps chrome
-      - run: npm run test:e2e
+      - run: npm --prefix web ci
+      - run: npm run verify:web
+      - run: npm --prefix web exec -- playwright install --with-deps chrome
+      - run: npm run verify:web:e2e
 
   mobile:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: mobile
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -97,5 +73,5 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: mobile/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
+      - run: npm --prefix mobile ci
+      - run: npm run verify:mobile
