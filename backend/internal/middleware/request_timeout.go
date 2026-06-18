@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
@@ -23,7 +22,7 @@ func RequestTimeout(timeout time.Duration) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 		if ctx.Err() == context.DeadlineExceeded && !c.Writer.Written() {
-			httputil.GatewayTimeout(c, http.StatusText(http.StatusGatewayTimeout))
+			httputil.GatewayTimeout(c, "request timed out")
 			c.Abort()
 		}
 	}

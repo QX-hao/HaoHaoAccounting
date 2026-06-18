@@ -76,6 +76,9 @@ func TestRequestTimeoutWritesGatewayTimeoutWhenHandlerLeavesResponseEmpty(t *tes
 	if body.Code != httputil.CodeRequestTimeout || body.RequestID != "request-timeout" {
 		t.Fatalf("body = %#v", body)
 	}
+	if body.Error != "request timed out" {
+		t.Fatalf("error = %q", body.Error)
+	}
 }
 
 func TestRequestTimeoutDisabledDoesNotSetDeadline(t *testing.T) {
