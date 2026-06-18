@@ -34,6 +34,31 @@ func TestRequestIDPreservesCallerHeader(t *testing.T) {
 	}
 }
 
+func TestRequestIDNormalizesCallerHeaderWhitespace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(RequestID())
+	router.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"requestId": RequestIDFromContext(c),
+			"header":    c.GetHeader(RequestIDHeader),
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	req.Header.Set(RequestIDHeader, "  client-request-123  ")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got := resp.Header().Get(RequestIDHeader); got != "client-request-123" {
+		t.Fatalf("response request id = %q, want normalized caller request id", got)
+	}
+	if got := resp.Body.String(); got != `{"header":"client-request-123","requestId":"client-request-123"}` {
+		t.Fatalf("body = %s", got)
+	}
+}
+
 func TestRequestIDGeneratesWhenMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -95,7 +120,7 @@ func TestValidRequestIDRejectsUnsafeValues(t *testing.T) {
 	if validRequestID("bad\nid") {
 		t.Fatal("request id with control characters should be invalid")
 	}
-	if validRequestID("  padded  ") {
+	if validRequestID("bad id") {
 		t.Fatal("request id with spaces should be invalid")
 	}
 }

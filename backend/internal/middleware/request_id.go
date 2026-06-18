@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,7 +18,7 @@ type requestIDStdContextKey struct{}
 
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		requestID := c.GetHeader(RequestIDHeader)
+		requestID := strings.TrimSpace(c.GetHeader(RequestIDHeader))
 		if !validRequestID(requestID) {
 			requestID = newRequestID()
 		}
