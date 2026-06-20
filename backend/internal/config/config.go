@@ -105,7 +105,7 @@ func LoadDotEnv(path string) error {
 		}
 		key = strings.TrimSpace(key)
 		value = parseDotEnvValue(value)
-		if key == "" || os.Getenv(key) != "" {
+		if _, exists := os.LookupEnv(key); key == "" || exists {
 			continue
 		}
 		if err := os.Setenv(key, value); err != nil {

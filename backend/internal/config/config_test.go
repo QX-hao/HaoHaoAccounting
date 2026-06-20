@@ -37,10 +37,11 @@ REDIS_DB=3
 	}
 }
 
-func TestLoadDotEnvParsesCommonDotEnvSyntax(t *testing.T) {
-	clearConfigEnv(t)
+func TestLoadDotEnvDoesNotOverrideExplicitEmptyValues(t *testing.T) {
+	t.Setenv("LOAD_DOTENV_TEST_EMPTY", "")
+	restoreEnv(t, "LOAD_DOTENV_TEST_MISSING")
 	path := filepath.Join(t.TempDir(), ".env")
-	if err := os.WriteFile(path, []byte("\ufeff# local development\nexport ADMIN_USERNAME=admin # owner login\nexport\tADMIN_PASSWORD=\"pass#word\"\nADMIN_NAME='好好 # 用户'\nDB_DSN=postgres://localhost/db#fragment\nJWT_ISSUER=\"line\\nissuer\"\nJWT_AUDIENCE=\"haohao\\\\api\"\nexported=value\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("LOAD_DOTENV_TEST_EMPTY=secret-from-file\nLOAD_DOTENV_TEST_MISSING=from-file\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,23 +49,53 @@ func TestLoadDotEnvParsesCommonDotEnvSyntax(t *testing.T) {
 		t.Fatalf("LoadDotEnv: %v", err)
 	}
 
-	if got := os.Getenv("ADMIN_USERNAME"); got != "admin" {
-		t.Fatalf("ADMIN_USERNAME = %q", got)
+	if got := os.Getenv("LOAD_DOTENV_TEST_EMPTY"); got != "" {
+		t.Fatalf("LOAD_DOTENV_TEST_EMPTY = %q, want explicit empty value preserved", got)
 	}
-	if got := os.Getenv("ADMIN_PASSWORD"); got != "pass#word" {
-		t.Fatalf("ADMIN_PASSWORD = %q", got)
+	if got := os.Getenv("LOAD_DOTENV_TEST_MISSING"); got != "from-file" {
+		t.Fatalf("LOAD_DOTENV_TEST_MISSING = %q", got)
 	}
-	if got := os.Getenv("ADMIN_NAME"); got != "好好 # 用户" {
-		t.Fatalf("ADMIN_NAME = %q", got)
+}
+
+func TestLoadDotEnvParsesCommonDotEnvSyntax(t *testing.T) {
+	keys := []string{
+		"LOAD_DOTENV_USERNAME",
+		"LOAD_DOTENV_PASSWORD",
+		"LOAD_DOTENV_NAME",
+		"LOAD_DOTENV_DSN",
+		"LOAD_DOTENV_ISSUER",
+		"LOAD_DOTENV_AUDIENCE",
+		"exported",
 	}
-	if got := os.Getenv("DB_DSN"); got != "postgres://localhost/db#fragment" {
-		t.Fatalf("DB_DSN = %q", got)
+	for _, key := range keys {
+		restoreEnv(t, key)
 	}
-	if got := os.Getenv("JWT_ISSUER"); got != "line\nissuer" {
-		t.Fatalf("JWT_ISSUER = %q", got)
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("\ufeff# local development\nexport LOAD_DOTENV_USERNAME=admin # owner login\nexport\tLOAD_DOTENV_PASSWORD=\"pass#word\"\nLOAD_DOTENV_NAME='好好 # 用户'\nLOAD_DOTENV_DSN=postgres://localhost/db#fragment\nLOAD_DOTENV_ISSUER=\"line\\nissuer\"\nLOAD_DOTENV_AUDIENCE=\"haohao\\\\api\"\nexported=value\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if got := os.Getenv("JWT_AUDIENCE"); got != "haohao\\api" {
-		t.Fatalf("JWT_AUDIENCE = %q", got)
+
+	if err := LoadDotEnv(path); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+
+	if got := os.Getenv("LOAD_DOTENV_USERNAME"); got != "admin" {
+		t.Fatalf("LOAD_DOTENV_USERNAME = %q", got)
+	}
+	if got := os.Getenv("LOAD_DOTENV_PASSWORD"); got != "pass#word" {
+		t.Fatalf("LOAD_DOTENV_PASSWORD = %q", got)
+	}
+	if got := os.Getenv("LOAD_DOTENV_NAME"); got != "好好 # 用户" {
+		t.Fatalf("LOAD_DOTENV_NAME = %q", got)
+	}
+	if got := os.Getenv("LOAD_DOTENV_DSN"); got != "postgres://localhost/db#fragment" {
+		t.Fatalf("LOAD_DOTENV_DSN = %q", got)
+	}
+	if got := os.Getenv("LOAD_DOTENV_ISSUER"); got != "line\nissuer" {
+		t.Fatalf("LOAD_DOTENV_ISSUER = %q", got)
+	}
+	if got := os.Getenv("LOAD_DOTENV_AUDIENCE"); got != "haohao\\api" {
+		t.Fatalf("LOAD_DOTENV_AUDIENCE = %q", got)
 	}
 	if got := os.Getenv("exported"); got != "value" {
 		t.Fatalf("exported = %q", got)
@@ -952,4 +983,23 @@ func clearConfigEnv(t *testing.T) {
 	} {
 		t.Setenv(key, "")
 	}
+}
+
+func restoreEnv(t *testing.T, key string) {
+	t.Helper()
+	original, existed := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			if err := os.Setenv(key, original); err != nil {
+				t.Fatalf("restore %s: %v", key, err)
+			}
+			return
+		}
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+	})
 }
