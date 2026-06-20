@@ -27,9 +27,13 @@ const schemas = Object.fromEntries(schemaNames.map((name, index) => {
   return [name, schemasSource.slice(start, end)];
 }));
 
+validateOpenAPIDescription(source);
+validateOpenAPIServers(source);
+validateOpenAPITags(source);
 validateSchemaConstraints(schemas);
 validateParameterConstraints(source);
 validateResponseComponents(source);
+validateSecuritySchemes(source);
 
 const generated = [
   '// Generated from backend/api/openapi.yaml. Do not edit by hand.',
@@ -48,6 +52,30 @@ const client = emitClient(endpoints);
 for (const outputPath of clientOutputPaths) {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, client);
+}
+
+function validateOpenAPIDescription(openapi) {
+  const info = topLevelBlock(openapi, 'info');
+  if (!info.includes('CORS_ALLOW_ORIGINS') || !info.includes('Access-Control-Allow-Origin')) {
+    throw new Error('OpenAPI info.description must document CORS allowlist rejection behavior');
+  }
+}
+
+function validateOpenAPIServers(openapi) {
+  const servers = topLevelBlock(openapi, 'servers');
+  if (!servers.includes('url: http://localhost:8080/api/v1')) {
+    throw new Error('OpenAPI servers must include the local development API base URL');
+  }
+  if (!servers.includes('description: Local development API server.')) {
+    throw new Error('OpenAPI local server must include a human-readable description');
+  }
+}
+
+function validateOpenAPITags(openapi) {
+  const tags = declaredOpenAPITags(openapi);
+  if (tags.size === 0) {
+    throw new Error('OpenAPI top-level tags must declare API groups');
+  }
 }
 
 function validateSchemaConstraints(allSchemas) {
@@ -277,6 +305,7 @@ function validateParameterConstraints(openapi) {
 
 function validateResponseComponents(openapi) {
   validateNoStoreHeaders(openapi);
+  validateErrorResponseExamples(openapi);
 
   const methodNotAllowed = openapi.match(/^    MethodNotAllowed:\n(?:      .+\n)+/m)?.[0] || '';
   if (!methodNotAllowed.includes('Allow:')) {
@@ -305,10 +334,18 @@ function validateResponseComponents(openapi) {
   if (!rateLimited.includes('Retry-After:')) {
     throw new Error('components.responses.RateLimited is missing Retry-After header');
   }
+  for (const headerName of ['RateLimit-Limit:', 'RateLimit-Remaining:', 'RateLimit-Reset:']) {
+    if (!rateLimited.includes(headerName)) {
+      throw new Error(`components.responses.RateLimited is missing ${headerName} header`);
+    }
+  }
   const retryAfter = componentHeaderBlock(openapi, 'RetryAfter');
   if (!retryAfter.includes('Remaining wait time') || !retryAfter.includes('HTTP-date') || !retryAfter.includes('delay-seconds') || !retryAfter.includes('type: string')) {
     throw new Error('components.headers.RetryAfter must document remaining wait time as HTTP-date or delay-seconds');
   }
+  validateRateLimitHeader(openapi, 'RateLimitLimit', 'Maximum number of failed login attempts');
+  validateRateLimitHeader(openapi, 'RateLimitRemaining', 'Remaining failed login attempts');
+  validateRateLimitHeader(openapi, 'RateLimitReset', 'Delay in seconds');
 
   const notAcceptable = openapi.match(/^    NotAcceptable:\n(?:      .+\n)+/m)?.[0] || '';
   if (!notAcceptable.includes('application/json:')) {
@@ -322,8 +359,17 @@ function validateResponseComponents(openapi) {
   if (!vary.includes('type: string')) {
     throw new Error('components.headers.Vary is missing string schema');
   }
-  if (!vary.includes('enum: [Accept]')) {
+  if (!vary.includes('Accept')) {
     throw new Error('components.headers.Vary must document Accept negotiation');
+  }
+  if (!vary.includes('Origin')) {
+    throw new Error('components.headers.Vary must document CORS origin variance');
+  }
+  if (!vary.includes('Access-Control-Request-Method') || !vary.includes('Access-Control-Request-Headers')) {
+    throw new Error('components.headers.Vary must document CORS preflight variance');
+  }
+  if (!vary.includes('example: Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers')) {
+    throw new Error('components.headers.Vary is missing combined negotiation and CORS example');
   }
 
   const contentDisposition = componentHeaderBlock(openapi, 'ContentDisposition');
@@ -333,6 +379,17 @@ function validateResponseComponents(openapi) {
 
   const requestID = componentHeaderBlock(openapi, 'RequestID');
   validateRequestIDSchema(requestID, 'components.headers.RequestID');
+}
+
+function validateSecuritySchemes(openapi) {
+  const schemes = nestedBlock(openAPIComponentsBlock(openapi), 'securitySchemes:');
+  const bearerAuth = nestedBlock(schemes, 'bearerAuth:');
+  if (!bearerAuth.includes('scheme: bearer') || !bearerAuth.includes('bearerFormat: JWT')) {
+    throw new Error('components.securitySchemes.bearerAuth must document HTTP bearer JWT auth');
+  }
+  if (!bearerAuth.includes('Authorization: Bearer <JWT>')) {
+    throw new Error('components.securitySchemes.bearerAuth is missing Authorization header guidance');
+  }
 }
 
 function validateNoStoreHeaders(openapi) {
@@ -353,6 +410,45 @@ function validateNoStoreHeaders(openapi) {
       }
     }
   }
+}
+
+function validateRateLimitHeader(openapi, componentName, descriptionText) {
+  const header = componentHeaderBlock(openapi, componentName);
+  if (!header.includes(descriptionText) || !header.includes('type: integer') || !header.includes('minimum: 0') && !header.includes('minimum: 1')) {
+    throw new Error(`components.headers.${componentName} must document a bounded integer rate-limit value`);
+  }
+}
+
+function validateErrorResponseExamples(openapi) {
+  for (const responseName of errorResponseNames()) {
+    const response = responseComponentBlock(openapi, responseName);
+    if (!response.includes("$ref: '#/components/schemas/ErrorResponse'")) {
+      throw new Error(`components.responses.${responseName} is missing ErrorResponse schema`);
+    }
+    const example = nestedBlock(nestedBlock(response, 'application/json:'), 'example:');
+    for (const field of ['error:', 'code:', 'requestId:']) {
+      if (!example.includes(field)) {
+        throw new Error(`components.responses.${responseName} example is missing ${field}`);
+      }
+    }
+  }
+}
+
+function errorResponseNames() {
+  return [
+    'BadRequest',
+    'Unauthorized',
+    'Forbidden',
+    'NotFound',
+    'MethodNotAllowed',
+    'RateLimited',
+    'PayloadTooLarge',
+    'UnsupportedMediaType',
+    'NotAcceptable',
+    'InternalError',
+    'GatewayTimeout',
+    'Error',
+  ];
 }
 
 function noStoreResponseNames() {
@@ -511,6 +607,7 @@ function parseEndpoints(openapi) {
   const pathsBlock = openapi.slice(openapi.indexOf('paths:'), openapi.indexOf('components:'));
   const pathMatches = [...pathsBlock.matchAll(/^  (\/[^:]+):$/gm)];
   const operationIds = new Map();
+  const declaredTags = declaredOpenAPITags(openapi);
   const result = [];
   for (const [index, match] of pathMatches.entries()) {
     const apiPath = match[1];
@@ -541,6 +638,11 @@ function parseEndpoints(openapi) {
       operationIds.set(operationId, `${method.toUpperCase()} ${apiPath}`);
       if (tags.length === 0) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing tags`);
+      }
+      for (const tag of tags) {
+        if (!declaredTags.has(tag)) {
+          throw new Error(`${method.toUpperCase()} ${apiPath} uses undeclared tag ${tag}`);
+        }
       }
       if (![...responseStatuses].some((status) => /^2\d\d$/.test(status))) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing 2xx success response`);
@@ -671,16 +773,26 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
   if (apiPath === '/transactions' && method === 'get') {
     require400Response(method, apiPath, responseStatuses);
     requireParameterText(method, apiPath, methodBlock, 'page', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'page', 'default: 1');
+    requireParameterText(method, apiPath, methodBlock, 'page', 'Defaults to 1 when omitted');
+    requireParameterText(method, apiPath, methodBlock, 'page', 'example: 1');
     requireParameterText(method, apiPath, methodBlock, 'pageSize', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'pageSize', 'maximum: 200');
+    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'default: 20');
+    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'Defaults to 20 when omitted');
+    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'example: 20');
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
     requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'q', 'matched against transaction notes and tags');
+    requireParameterText(method, apiPath, methodBlock, 'q', 'example: lunch');
   }
   if (apiPath === '/budgets' && method === 'get') {
     require400Response(method, apiPath, responseStatuses);
     requireParameterText(method, apiPath, methodBlock, 'month', "pattern: '^\\d{4}-\\d{2}$'");
+    requireParameterText(method, apiPath, methodBlock, 'month', 'Budget month in YYYY-MM format');
+    requireParameterText(method, apiPath, methodBlock, 'month', "example: '2026-06'");
   }
   if (apiPath === '/categories' && method === 'get') {
     require400Response(method, apiPath, responseStatuses);
@@ -693,10 +805,16 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
     requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'trend', 'enum: [day, week, month]');
+    requireParameterText(method, apiPath, methodBlock, 'trend', 'default: month');
+    requireParameterText(method, apiPath, methodBlock, 'trend', 'Defaults to month when omitted');
+    requireParameterText(method, apiPath, methodBlock, 'trend', 'example: month');
   }
   if (apiPath === '/io/export' && method === 'get') {
     require400Response(method, apiPath, responseStatuses);
     requireParameterText(method, apiPath, methodBlock, 'format', 'enum: [csv, xlsx]');
+    requireParameterText(method, apiPath, methodBlock, 'format', 'default: csv');
+    requireParameterText(method, apiPath, methodBlock, 'format', 'Defaults to csv when omitted');
+    requireParameterText(method, apiPath, methodBlock, 'format', 'example: csv');
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
     if (!methodBlock.includes('Content-Disposition:')) {
@@ -723,6 +841,7 @@ function requireDateTimeQueryParameter(method, apiPath, block, name) {
   for (const acceptedFormat of ['RFC3339', 'YYYY-MM-DD', 'YYYY-MM-DD HH:mm:ss', 'YYYY/MM/DD']) {
     requireParameterText(method, apiPath, block, name, acceptedFormat);
   }
+  requireParameterText(method, apiPath, block, name, name === 'end' ? "example: '2026-06-30'" : "example: '2026-06-01T00:00:00+08:00'");
   if (name === 'end') {
     requireParameterText(method, apiPath, block, name, 'Date-only values cover the entire day');
   }
@@ -768,6 +887,30 @@ function componentHeaderBlock(openapi, componentName) {
 function openAPIComponentsBlock(openapi) {
   const start = openapi.indexOf('components:\n');
   return start === -1 ? '' : openapi.slice(start);
+}
+
+function topLevelBlock(openapi, key) {
+  const marker = `${key}:\n`;
+  const start = openapi.indexOf(marker);
+  if (start === -1) return '';
+  const rest = openapi.slice(start + marker.length);
+  const next = rest.search(/^[A-Za-z][A-Za-z0-9_-]*:\n/m);
+  return marker + rest.slice(0, next === -1 ? rest.length : next);
+}
+
+function declaredOpenAPITags(openapi) {
+  const tagsBlock = topLevelBlock(openapi, 'tags');
+  const tagBlocks = tagsBlock.split(/\n(?=  - name: )/).filter((block) => block.includes('- name:'));
+  const tags = new Set();
+  for (const tagBlock of tagBlocks) {
+    const name = tagBlock.match(/^\s+- name:\s+([A-Za-z][A-Za-z0-9_-]*)/m)?.[1] || '';
+    if (!name) continue;
+    if (!tagBlock.match(/^\s+description:\s+\S.+$/m)) {
+      throw new Error(`OpenAPI tag ${name} is missing description`);
+    }
+    tags.add(name);
+  }
+  return tags;
 }
 
 function operationResponseBlocks(block) {

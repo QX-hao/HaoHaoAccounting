@@ -182,8 +182,33 @@ func TestNewCORSConfigIncludesRequestIDHeader(t *testing.T) {
 	if !slices.Contains(corsConfig.ExposeHeaders, "Retry-After") {
 		t.Fatalf("ExposeHeaders = %#v, missing Retry-After", corsConfig.ExposeHeaders)
 	}
+	for _, header := range []string{"RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset"} {
+		if !slices.Contains(corsConfig.ExposeHeaders, header) {
+			t.Fatalf("ExposeHeaders = %#v, missing %s", corsConfig.ExposeHeaders, header)
+		}
+	}
 	if !slices.Contains(corsConfig.ExposeHeaders, "Allow") {
 		t.Fatalf("ExposeHeaders = %#v, missing Allow", corsConfig.ExposeHeaders)
+	}
+}
+
+func TestNewCORSConfigKeepsExplicitOriginsAndNoCredentials(t *testing.T) {
+	cfg := config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+		},
+	}
+
+	corsConfig := newCORSConfig(cfg)
+
+	if corsConfig.AllowAllOrigins {
+		t.Fatal("AllowAllOrigins must stay disabled")
+	}
+	if corsConfig.AllowCredentials {
+		t.Fatal("AllowCredentials must stay disabled")
+	}
+	if got := corsConfig.AllowOrigins; !slices.Equal(got, []string{"https://app.example.com"}) {
+		t.Fatalf("AllowOrigins = %#v", got)
 	}
 }
 
@@ -409,18 +434,7 @@ func TestEarlyRejectedRequestsKeepGlobalHeaders(t *testing.T) {
 }
 
 func TestCORSPreflightKeepsGlobalMiddlewareHeaders(t *testing.T) {
-	previousMode := gin.Mode()
-	gin.SetMode(gin.TestMode)
-	t.Cleanup(func() { gin.SetMode(previousMode) })
-
-	cfg := config.Config{
-		HTTP: config.HTTPConfig{
-			CORSAllowOrigins: []string{"https://app.example.com"},
-			MaxBodyBytes:     6 * 1024 * 1024,
-		},
-	}
-	router := gin.New()
-	applyGlobalMiddleware(router, cfg)
+	router := newCORSMiddlewareTestRouter(t)
 	router.POST("/api/v1/auth/login", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
@@ -428,7 +442,7 @@ func TestCORSPreflightKeepsGlobalMiddlewareHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/auth/login", nil)
 	req.Header.Set("Origin", "https://app.example.com")
 	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	req.Header.Set("Access-Control-Request-Headers", "Authorization, X-Request-ID, Content-Type")
+	req.Header.Set("Access-Control-Request-Headers", "Authorization, X-Request-ID, Content-Type, X-Admin-Override")
 	req.Header.Set(middleware.RequestIDHeader, "request-preflight")
 	resp := httptest.NewRecorder()
 
@@ -446,11 +460,20 @@ func TestCORSPreflightKeepsGlobalMiddlewareHeaders(t *testing.T) {
 	if got := resp.Header().Get("Access-Control-Allow-Methods"); !headerHasToken(got, http.MethodPost) {
 		t.Fatalf("Access-Control-Allow-Methods = %q, missing %s", got, http.MethodPost)
 	}
+	vary := strings.Join(resp.Header().Values("Vary"), ",")
+	for _, header := range []string{"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"} {
+		if !headerHasToken(vary, header) {
+			t.Fatalf("Vary = %q, missing %s", vary, header)
+		}
+	}
 	allowHeaders := resp.Header().Get("Access-Control-Allow-Headers")
 	for _, header := range []string{"Authorization", middleware.RequestIDHeader, "Content-Type"} {
 		if !headerHasToken(allowHeaders, header) {
 			t.Fatalf("Access-Control-Allow-Headers = %q, missing %s", allowHeaders, header)
 		}
+	}
+	if headerHasToken(allowHeaders, "X-Admin-Override") {
+		t.Fatalf("Access-Control-Allow-Headers = %q, should not allow X-Admin-Override", allowHeaders)
 	}
 	if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q", got)
@@ -458,6 +481,181 @@ func TestCORSPreflightKeepsGlobalMiddlewareHeaders(t *testing.T) {
 	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-preflight" {
 		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
 	}
+}
+
+func TestCORSAllowedOriginExposesClientHeaders(t *testing.T) {
+	router := newCORSMiddlewareTestRouter(t)
+	router.GET("/api/v1/accounts", func(c *gin.Context) {
+		c.Header("Link", "</api/v1/accounts?page=2>; rel=\"next\"")
+		c.Header("X-Total-Count", "2")
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	req.Header.Set(middleware.RequestIDHeader, "request-cors-expose")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body = %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("Access-Control-Allow-Credentials = %q, want empty", got)
+	}
+	exposeHeaders := resp.Header().Get("Access-Control-Expose-Headers")
+	for _, header := range []string{"Allow", "Content-Disposition", "Link", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "WWW-Authenticate", "Retry-After", "X-Total-Count", middleware.RequestIDHeader} {
+		if !headerHasToken(exposeHeaders, header) {
+			t.Fatalf("Access-Control-Expose-Headers = %q, missing %s", exposeHeaders, header)
+		}
+	}
+	if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-cors-expose" {
+		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
+	}
+}
+
+func TestCORSIgnoresSameOriginRequestsWithOriginHeader(t *testing.T) {
+	router := newCORSMiddlewareTestRouter(t)
+	router.GET("/api/v1/me", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/api/v1/me", nil)
+	req.Host = "api.example.com"
+	req.Header.Set("Origin", "https://api.example.com")
+	req.Header.Set(middleware.RequestIDHeader, "request-same-origin")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body = %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
+	}
+	if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-same-origin" {
+		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
+	}
+}
+
+func TestCORSIgnoresRequestsWithoutOriginHeader(t *testing.T) {
+	router := newCORSMiddlewareTestRouter(t)
+	router.GET("/api/v1/me", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set(middleware.RequestIDHeader, "request-no-origin")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body = %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
+	}
+	if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-no-origin" {
+		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
+	}
+}
+
+func TestCORSRejectsUntrustedOriginsWithoutAllowHeaders(t *testing.T) {
+	router := newCORSMiddlewareTestRouter(t)
+	router.POST("/api/v1/auth/login", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	tests := []struct {
+		name       string
+		method     string
+		preflight  bool
+		wantAbsent []string
+	}{
+		{
+			name:      "actual request",
+			method:    http.MethodPost,
+			preflight: false,
+			wantAbsent: []string{
+				"Access-Control-Allow-Origin",
+				"Access-Control-Allow-Credentials",
+				"Access-Control-Expose-Headers",
+			},
+		},
+		{
+			name:      "preflight",
+			method:    http.MethodOptions,
+			preflight: true,
+			wantAbsent: []string{
+				"Access-Control-Allow-Origin",
+				"Access-Control-Allow-Credentials",
+				"Access-Control-Allow-Methods",
+				"Access-Control-Allow-Headers",
+				"Access-Control-Max-Age",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, "/api/v1/auth/login", nil)
+			req.Header.Set("Origin", "https://evil.example.com")
+			req.Header.Set(middleware.RequestIDHeader, "request-denied-cors")
+			if tt.preflight {
+				req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+				req.Header.Set("Access-Control-Request-Headers", "Authorization, X-Request-ID, Content-Type")
+			}
+			resp := httptest.NewRecorder()
+
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d, body = %s", resp.Code, http.StatusForbidden, resp.Body.String())
+			}
+			for _, header := range tt.wantAbsent {
+				if got := resp.Header().Get(header); got != "" {
+					t.Fatalf("%s = %q, want empty", header, got)
+				}
+			}
+			if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Fatalf("X-Content-Type-Options = %q", got)
+			}
+			if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-denied-cors" {
+				t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
+			}
+		})
+	}
+}
+
+func newCORSMiddlewareTestRouter(t *testing.T) *gin.Engine {
+	t.Helper()
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	cfg := config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+			MaxBodyBytes:     6 * 1024 * 1024,
+		},
+	}
+	router := gin.New()
+	applyGlobalMiddleware(router, cfg)
+	return router
 }
 
 func headerHasToken(value, token string) bool {

@@ -74,6 +74,15 @@ func TestLoginRateLimiterBlocksRepeatedFailures(t *testing.T) {
 	if got := resp.Header().Get("Retry-After"); got != "60" {
 		t.Fatalf("Retry-After = %q", got)
 	}
+	if got := resp.Header().Get("RateLimit-Limit"); got != "2" {
+		t.Fatalf("RateLimit-Limit = %q", got)
+	}
+	if got := resp.Header().Get("RateLimit-Remaining"); got != "0" {
+		t.Fatalf("RateLimit-Remaining = %q", got)
+	}
+	if got := resp.Header().Get("RateLimit-Reset"); got != "60" {
+		t.Fatalf("RateLimit-Reset = %q", got)
+	}
 }
 
 func TestLoginRateLimiterReportsRemainingRetryAfter(t *testing.T) {
@@ -111,6 +120,9 @@ func TestLoginRateLimiterReportsRemainingRetryAfter(t *testing.T) {
 	}
 	if got := resp.Header().Get("Retry-After"); got != "15" {
 		t.Fatalf("Retry-After = %q", got)
+	}
+	if got := resp.Header().Get("RateLimit-Reset"); got != "15" {
+		t.Fatalf("RateLimit-Reset = %q", got)
 	}
 }
 

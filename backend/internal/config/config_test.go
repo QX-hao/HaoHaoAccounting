@@ -617,6 +617,25 @@ func TestConfigEnvironmentKeysStayDocumented(t *testing.T) {
 	}
 }
 
+func TestEnvExampleDocumentsExplicitCORSOrigins(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".env.example"))
+	if err != nil {
+		t.Fatalf("read backend/.env.example: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"explicit HTTP(S) origins only",
+		"Do not include paths, query",
+		"fragments, or wildcards",
+		"CORS_ALLOW_ORIGINS=http://localhost:3000,http://127.0.0.1:3000",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("backend/.env.example is missing CORS guidance %q", want)
+		}
+	}
+}
+
 func TestComposeBackendEnvironmentCoversConfigKeys(t *testing.T) {
 	sourceKeys := configSourceEnvKeys(t)
 

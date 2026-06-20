@@ -10,6 +10,9 @@ export class ApiError extends Error {
   code: ApiErrorCode;
   requestId: string;
   retryAfterSeconds: number | null;
+  rateLimitLimit: number | null;
+  rateLimitRemaining: number | null;
+  rateLimitResetSeconds: number | null;
   authenticateChallenge: string;
 
   constructor(
@@ -18,6 +21,9 @@ export class ApiError extends Error {
     code: ApiErrorCode = '',
     requestId = '',
     retryAfterSeconds: number | null = null,
+    rateLimitLimit: number | null = null,
+    rateLimitRemaining: number | null = null,
+    rateLimitResetSeconds: number | null = null,
     authenticateChallenge = '',
   ) {
     super(message);
@@ -26,6 +32,9 @@ export class ApiError extends Error {
     this.code = code;
     this.requestId = requestId;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.rateLimitLimit = rateLimitLimit;
+    this.rateLimitRemaining = rateLimitRemaining;
+    this.rateLimitResetSeconds = rateLimitResetSeconds;
     this.authenticateChallenge = authenticateChallenge;
   }
 }
@@ -176,8 +185,19 @@ function apiError(resp: Response, data: ApiErrorBody): ApiError {
     data.code || '',
     requestId,
     retryAfterSeconds(resp),
+    nonNegativeIntegerHeader(resp, 'RateLimit-Limit'),
+    nonNegativeIntegerHeader(resp, 'RateLimit-Remaining'),
+    nonNegativeIntegerHeader(resp, 'RateLimit-Reset'),
     resp.headers.get('WWW-Authenticate') || '',
   );
+}
+
+function nonNegativeIntegerHeader(resp: Response, name: string): number | null {
+  const value = resp.headers.get(name)?.trim();
+  if (!value) return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
 }
 
 function retryAfterSeconds(resp: Response): number | null {

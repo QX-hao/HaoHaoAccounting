@@ -299,6 +299,26 @@ func TestRateLimitedRoundsRetryAfterUp(t *testing.T) {
 	}
 }
 
+func TestRateLimitedWithPolicySetsStandardRateLimitHeaders(t *testing.T) {
+	resp := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(resp)
+	RateLimitedWithPolicy(c, "too many requests", 1500*time.Millisecond, 5, 0)
+
+	if resp.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d", resp.Code)
+	}
+	for key, want := range map[string]string{
+		"Retry-After":         "2",
+		"RateLimit-Limit":     "5",
+		"RateLimit-Remaining": "0",
+		"RateLimit-Reset":     "2",
+	} {
+		if got := resp.Header().Get(key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestSetPaginationHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

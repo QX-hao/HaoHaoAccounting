@@ -98,6 +98,19 @@ func RateLimited(c *gin.Context, message string, retryAfter time.Duration) {
 	Error(c, http.StatusTooManyRequests, CodeRateLimited, message)
 }
 
+func RateLimitedWithPolicy(c *gin.Context, message string, retryAfter time.Duration, limit int, remaining int) {
+	if limit > 0 {
+		c.Header("RateLimit-Limit", strconv.Itoa(limit))
+	}
+	if remaining >= 0 {
+		c.Header("RateLimit-Remaining", strconv.Itoa(remaining))
+	}
+	if retryAfter > 0 {
+		c.Header("RateLimit-Reset", strconv.FormatInt(int64(math.Ceil(retryAfter.Seconds())), 10))
+	}
+	RateLimited(c, message, retryAfter)
+}
+
 func PayloadTooLarge(c *gin.Context, message string) {
 	Error(c, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, message)
 }

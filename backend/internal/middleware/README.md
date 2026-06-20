@@ -8,4 +8,14 @@ Gin middleware and auth token helpers.
 
 `Recovery` returns the structured internal-error response while logging the recovered panic with method, path, client IP, and request ID so production incidents can be correlated without exposing panic details to clients.
 
-`RequireAuth` validates the bearer token and puts the user ID into request context for module handlers. Token revocation checks fail closed: if the revocation backend cannot be queried, the request is rejected instead of being passed to business handlers.
+`SecurityHeaders` sets conservative browser security headers on API responses. `Strict-Transport-Security` is opt-in through HTTP config so local HTTP development and partial HTTPS rollouts do not accidentally persist HSTS in browsers.
+
+`BodyLimit` rejects oversized requests before handlers run when `Content-Length` is known, and wraps streaming request bodies with `http.MaxBytesReader` so JSON and multipart handlers can map over-limit reads to the same structured payload-too-large response.
+
+`ContentType` enforces declared request media types on routes with bodies, including structured `application/*+json` variants for JSON endpoints and multipart form data for import endpoints.
+
+`Accept` enforces declared response media types for API routes, supports compatible media ranges and structured syntax suffixes, and appends `Vary: Accept` on negotiated routes.
+
+`NoStore` applies `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0` to API responses that should not be cached by browsers or intermediaries.
+
+`RequireAuth` validates the bearer JWT signature, expiration, issued-at time, issuer, and audience before putting the user ID into request context for module handlers. Token revocation checks fail closed: if the revocation backend cannot be queried, the request is rejected instead of being passed to business handlers.

@@ -2,8 +2,13 @@ openapi: 3.0.3
 info:
   title: HaoHaoAccounting API
   version: 0.1.0
+  description: |
+    Cross-origin browser requests must come from an origin configured in CORS_ALLOW_ORIGINS.
+    Requests from other origins are rejected by CORS middleware with 403 before route handlers run
+    and do not include Access-Control-Allow-Origin.
 servers:
   - url: http://localhost:8080/api/v1
+    description: Local development API server.
 tags:
   - name: auth
     description: Authentication and current user endpoints.
@@ -340,9 +345,11 @@ paths:
       parameters:
         - name: month
           in: query
+          description: Budget month in YYYY-MM format.
           schema:
             type: string
             pattern: '^\d{4}-\d{2}$'
+          example: '2026-06'
       responses:
         '200':
           description: Budget list
@@ -671,27 +678,35 @@ paths:
       parameters:
         - name: page
           in: query
+          description: Page number. Defaults to 1 when omitted.
           schema:
             type: integer
             minimum: 1
+            default: 1
+          example: 1
         - name: pageSize
           in: query
+          description: Number of items per page. Defaults to 20 when omitted.
           schema:
             type: integer
             minimum: 1
             maximum: 200
+            default: 20
+          example: 20
         - name: start
           in: query
           description: Inclusive start datetime. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
+          example: '2026-06-01T00:00:00+08:00'
         - name: end
           in: query
           description: Inclusive end datetime. Date-only values cover the entire day. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
+          example: '2026-06-30'
         - name: type
           in: query
           schema:
@@ -708,8 +723,10 @@ paths:
             minimum: 1
         - name: q
           in: query
+          description: Keyword filter matched against transaction notes and tags.
           schema:
             type: string
+          example: lunch
       responses:
         '200':
           description: Transaction list
@@ -917,12 +934,14 @@ paths:
           schema:
             type: string
             format: date-time
+          example: '2026-06-01T00:00:00+08:00'
         - name: end
           in: query
           description: Inclusive end datetime. Date-only values cover the entire day. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
+          example: '2026-06-30'
         - name: categoryId
           in: query
           schema:
@@ -935,9 +954,12 @@ paths:
             minimum: 1
         - name: trend
           in: query
+          description: Trend aggregation granularity. Defaults to month when omitted.
           schema:
             type: string
             enum: [day, week, month]
+            default: month
+          example: month
       responses:
         '200':
           description: Report summary
@@ -1262,21 +1284,26 @@ paths:
       parameters:
         - name: format
           in: query
+          description: Export file format. Defaults to csv when omitted.
           schema:
             type: string
             enum: [csv, xlsx]
+            default: csv
+          example: csv
         - name: start
           in: query
           description: Inclusive start datetime. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
+          example: '2026-06-01T00:00:00+08:00'
         - name: end
           in: query
           description: Inclusive end datetime. Date-only values cover the entire day. Accepts RFC3339, YYYY-MM-DD, YYYY-MM-DD HH:mm:ss, or YYYY/MM/DD.
           schema:
             type: string
             format: date-time
+          example: '2026-06-30'
       responses:
         '200':
           description: Exported ledger file
@@ -1320,6 +1347,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: 'Send the access token as `Authorization: Bearer <JWT>`.'
   parameters:
     Id:
       name: id
@@ -1383,10 +1411,10 @@ components:
         enum: ['0']
       example: '0'
     Vary:
-      description: Negotiated API responses vary on the Accept request header.
+      description: Response cache keys vary by negotiated response and CORS request headers.
       schema:
         type: string
-        enum: [Accept]
+      example: Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers
     Allow:
       description: HTTP methods supported by the target route.
       schema:
@@ -1402,6 +1430,24 @@ components:
       schema:
         type: string
       example: '60'
+    RateLimitLimit:
+      description: Maximum number of failed login attempts permitted in the active rate-limit window.
+      schema:
+        type: integer
+        minimum: 1
+      example: 5
+    RateLimitRemaining:
+      description: Remaining failed login attempts before the client is blocked.
+      schema:
+        type: integer
+        minimum: 0
+      example: 0
+    RateLimitReset:
+      description: Delay in seconds until the active rate-limit window resets.
+      schema:
+        type: integer
+        minimum: 0
+      example: 60
   responses:
     BadRequest:
       description: Bad request or validation error.
@@ -1458,6 +1504,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: forbidden
+            code: forbidden
+            requestId: api-20260620-example
     NotFound:
       description: Requested resource was not found.
       headers:
@@ -1473,6 +1523,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: route not found
+            code: not_found
+            requestId: api-20260620-example
     MethodNotAllowed:
       description: HTTP method is not supported for this route.
       headers:
@@ -1490,6 +1544,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: method not allowed
+            code: method_not_allowed
+            requestId: api-20260620-example
     RateLimited:
       description: Too many requests.
       headers:
@@ -1503,10 +1561,20 @@ components:
           $ref: '#/components/headers/RequestID'
         Retry-After:
           $ref: '#/components/headers/RetryAfter'
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: 登录失败次数过多，请稍后再试
+            code: rate_limited
+            requestId: api-20260620-example
     PayloadTooLarge:
       description: Request body is too large.
       headers:
@@ -1522,6 +1590,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: request body too large
+            code: payload_too_large
+            requestId: api-20260620-example
     UnsupportedMediaType:
       description: Request Content-Type is not supported by this operation.
       headers:
@@ -1537,6 +1609,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: 'unsupported media type: expected application/json'
+            code: unsupported_media_type
+            requestId: api-20260620-example
     NotAcceptable:
       description: Requested response media type is not available for this operation.
       headers:
@@ -1554,6 +1630,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: 'not acceptable: expected application/json'
+            code: not_acceptable
+            requestId: api-20260620-example
     InternalError:
       description: Internal server error.
       headers:
@@ -1569,6 +1649,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: internal server error
+            code: internal_error
+            requestId: api-20260620-example
     GatewayTimeout:
       description: Request processing exceeded the server timeout budget.
       headers:
@@ -1584,6 +1668,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: request timed out
+            code: request_timeout
+            requestId: api-20260620-example
     Error:
       description: Error response. Prefer a status-specific response component when possible.
       headers:
@@ -1599,6 +1687,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: request failed
+            code: internal_error
+            requestId: api-20260620-example
     Ok:
       description: OK response
       headers:

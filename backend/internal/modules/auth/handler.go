@@ -65,7 +65,7 @@ func (h *Handler) login(c *gin.Context) {
 
 	limiterKey := loginLimiterKey(c.ClientIP(), req.Username)
 	if h.loginLimiter != nil && !h.loginLimiter.Allow(limiterKey) {
-		httputil.RateLimited(c, "登录失败次数过多，请稍后再试", h.loginLimiter.RetryAfter(limiterKey))
+		httputil.RateLimitedWithPolicy(c, "登录失败次数过多，请稍后再试", h.loginLimiter.RetryAfter(limiterKey), h.loginLimiter.maxFailures, 0)
 		return
 	}
 

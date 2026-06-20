@@ -3,7 +3,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ErrorResponse } from '../types/api';
 
 const TOKEN_KEY = 'haohao_token';
-export const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'http://127.0.0.1:8080/api/v1';
+const DEFAULT_API_BASE = 'http://127.0.0.1:8080/api/v1';
+export const API_BASE = normalizePublicApiBase(
+  process.env.EXPO_PUBLIC_API_BASE,
+  DEFAULT_API_BASE,
+  'EXPO_PUBLIC_API_BASE',
+);
 
 type ApiErrorCode = ErrorResponse['code'] | 'network_error' | '';
 type ApiErrorBody = Partial<ErrorResponse>;
@@ -13,6 +18,9 @@ export class ApiError extends Error {
   code: ApiErrorCode;
   requestId: string;
   retryAfterSeconds: number | null;
+  rateLimitLimit: number | null;
+  rateLimitRemaining: number | null;
+  rateLimitResetSeconds: number | null;
   authenticateChallenge: string;
 
   constructor(
@@ -21,6 +29,9 @@ export class ApiError extends Error {
     code: ApiErrorCode = '',
     requestId = '',
     retryAfterSeconds: number | null = null,
+    rateLimitLimit: number | null = null,
+    rateLimitRemaining: number | null = null,
+    rateLimitResetSeconds: number | null = null,
     authenticateChallenge = '',
   ) {
     super(message);
@@ -29,6 +40,9 @@ export class ApiError extends Error {
     this.code = code;
     this.requestId = requestId;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.rateLimitLimit = rateLimitLimit;
+    this.rateLimitRemaining = rateLimitRemaining;
+    this.rateLimitResetSeconds = rateLimitResetSeconds;
     this.authenticateChallenge = authenticateChallenge;
   }
 }
@@ -150,6 +164,23 @@ function newRequestId() {
   return `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function normalizePublicApiBase(value: string | undefined, fallback: string, name: string) {
+  const raw = value?.trim() || fallback;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`${name} must be an absolute http(s) URL`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`${name} must use http or https`);
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error(`${name} must not include credentials, query strings, or fragments`);
+  }
+  return url.toString().replace(/\/+$/, '');
+}
+
 async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
   const contentType = resp.headers.get('Content-Type') || '';
   if (isJSONContentType(contentType)) {
@@ -185,8 +216,19 @@ function apiError(resp: Response, data: ApiErrorBody): ApiError {
     data.code || '',
     requestId,
     retryAfterSeconds(resp),
+    nonNegativeIntegerHeader(resp, 'RateLimit-Limit'),
+    nonNegativeIntegerHeader(resp, 'RateLimit-Remaining'),
+    nonNegativeIntegerHeader(resp, 'RateLimit-Reset'),
     resp.headers.get('WWW-Authenticate') || '',
   );
+}
+
+function nonNegativeIntegerHeader(resp: Response, name: string): number | null {
+  const value = resp.headers.get(name)?.trim();
+  if (!value) return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
 }
 
 function retryAfterSeconds(resp: Response): number | null {

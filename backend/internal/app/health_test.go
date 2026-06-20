@@ -211,6 +211,15 @@ func TestLoginRateLimitContractThroughRegisteredRoutes(t *testing.T) {
 		if got := resp.Header().Get("Retry-After"); got != "60" {
 			t.Fatalf("Retry-After = %q", got)
 		}
+		if got := resp.Header().Get("RateLimit-Limit"); got != "1" {
+			t.Fatalf("RateLimit-Limit = %q", got)
+		}
+		if got := resp.Header().Get("RateLimit-Remaining"); got != "0" {
+			t.Fatalf("RateLimit-Remaining = %q", got)
+		}
+		if got := resp.Header().Get("RateLimit-Reset"); got != "60" {
+			t.Fatalf("RateLimit-Reset = %q", got)
+		}
 		if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-limit" {
 			t.Fatalf("request id header = %q", got)
 		}
