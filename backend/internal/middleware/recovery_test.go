@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
@@ -134,6 +135,62 @@ func TestRecoveryDoesNotWriteErrorForBrokenPipe(t *testing.T) {
 	}
 	if strings.Contains(logOutput, `stack="`) {
 		t.Fatalf("broken pipe panic log should not include stack: %q", logOutput)
+	}
+}
+
+func TestRecoveryDoesNotWriteErrorForConnectionAbortErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		recovered error
+		wantLog   string
+	}{
+		{
+			name:      "http abort handler",
+			recovered: http.ErrAbortHandler,
+			wantLog:   "net/http: abort Handler",
+		},
+		{
+			name:      "wrapped connection reset",
+			recovered: &net.OpError{Err: &os.SyscallError{Err: syscall.ECONNRESET}},
+			wantLog:   "connection reset by peer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.ReleaseMode)
+			t.Cleanup(func() { gin.SetMode(gin.TestMode) })
+
+			var panicLog bytes.Buffer
+			router := gin.New()
+			router.Use(RequestID(), recoveryWithWriter(&panicLog))
+			router.GET("/panic-abort", func(*gin.Context) {
+				panic(tt.recovered)
+			})
+
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/panic-abort", nil))
+
+			if resp.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+			}
+			if resp.Body.String() != "" {
+				t.Fatalf("body = %q", resp.Body.String())
+			}
+			logOutput := panicLog.String()
+			for _, want := range []string{
+				`panic_recovered`,
+				`path="/panic-abort"`,
+				tt.wantLog,
+			} {
+				if !strings.Contains(logOutput, want) {
+					t.Fatalf("panic log = %q, missing %s", logOutput, want)
+				}
+			}
+			if strings.Contains(logOutput, `stack="`) {
+				t.Fatalf("connection abort panic log should not include stack: %q", logOutput)
+			}
+		})
 	}
 }
 

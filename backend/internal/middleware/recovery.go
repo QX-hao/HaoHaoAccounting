@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"syscall"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/gin-gonic/gin"
@@ -73,7 +74,14 @@ func logRecoveredPanic(out io.Writer, c *gin.Context, recovered any) {
 }
 
 func isBrokenPipe(recovered any) bool {
-	netErr, ok := recovered.(*net.OpError)
+	err, ok := recovered.(error)
+	if !ok {
+		return false
+	}
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, http.ErrAbortHandler) {
+		return true
+	}
+	netErr, ok := err.(*net.OpError)
 	if !ok {
 		return false
 	}
