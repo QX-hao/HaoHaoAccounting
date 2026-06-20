@@ -319,8 +319,14 @@ test('generator requires documented accepted datetime query formats', () => {
 test('generator requires documented download filename headers', () => {
 	assert.match(generator, /GET \/io\/export is missing Content-Disposition response header/);
 	assert.match(generator, /components\.headers\.ContentDisposition is missing filename\* guidance/);
-	assert.match(webApiClient, /function safeDecodeURIComponent\(value: string\)/);
-	assert.match(webApiClient, /catch \{\n\s+return '';\n\s+\}/);
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /function contentDispositionParams\(disposition: string\)/);
+		assert.match(source, /function splitHeaderParameters\(value: string\)/);
+		assert.match(source, /function decodeExtendedFilename\(value: string\)/);
+		assert.match(source, /params\.get\('filename\*'\)/);
+		assert.match(source, /params\.get\('filename'\)/);
+		assert.match(source, /catch \{\n\s+return '';\n\s+\}/);
+	}
 });
 
 test('generator requires documented import headers', () => {

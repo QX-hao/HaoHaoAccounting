@@ -199,13 +199,84 @@ function retryAfterSeconds(resp: Response): number | null {
 
 function filenameFromDisposition(disposition: string | null) {
   if (!disposition) return '';
-  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-  if (utf8Match?.[1]) {
-    const filename = safeDecodeURIComponent(utf8Match[1]);
-    if (filename) return filename;
+  const params = contentDispositionParams(disposition);
+  const extendedFilename = params.get('filename*');
+  if (extendedFilename) {
+    const filename = decodeExtendedFilename(extendedFilename);
+    if (filename) {
+      return filename;
+    }
   }
-  const asciiMatch = disposition.match(/filename="?([^";]+)"?/i);
-  return asciiMatch?.[1] || '';
+  return params.get('filename') || '';
+}
+
+function contentDispositionParams(disposition: string) {
+  const params = new Map<string, string>();
+  for (const part of splitHeaderParameters(disposition).slice(1)) {
+    const separator = part.indexOf('=');
+    if (separator === -1) continue;
+    const key = part.slice(0, separator).trim().toLowerCase();
+    const value = part.slice(separator + 1).trim();
+    if (key) {
+      params.set(key, unquoteHeaderValue(value));
+    }
+  }
+  return params;
+}
+
+function splitHeaderParameters(value: string) {
+  const parts: string[] = [];
+  let current = '';
+  let quoted = false;
+  let escaped = false;
+  for (const char of value) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\' && quoted) {
+      current += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      quoted = !quoted;
+    }
+    if (char === ';' && !quoted) {
+      parts.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current.trim());
+  return parts;
+}
+
+function unquoteHeaderValue(value: string) {
+  if (!value.startsWith('"') || !value.endsWith('"')) {
+    return value;
+  }
+  let result = '';
+  for (let index = 1; index < value.length - 1; index++) {
+    if (value[index] === '\\' && index + 1 < value.length - 1) {
+      index++;
+    }
+    result += value[index];
+  }
+  return result;
+}
+
+function decodeExtendedFilename(value: string) {
+  const match = value.match(/^([^']*)'[^']*'(.*)$/);
+  if (!match) {
+    return safeDecodeURIComponent(value);
+  }
+  if (match[1] && match[1].toLowerCase() !== 'utf-8') {
+    return '';
+  }
+  return safeDecodeURIComponent(match[2]);
 }
 
 function safeDecodeURIComponent(value: string) {
