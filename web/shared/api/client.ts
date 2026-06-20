@@ -143,11 +143,16 @@ function handleUnauthorized(status: number) {
 
 async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
   const contentType = resp.headers.get('Content-Type') || '';
-  if (contentType.includes('application/json')) {
+  if (isJSONContentType(contentType)) {
     return resp.json().catch(() => ({}));
   }
   const text = await resp.text().catch(() => '');
   return text ? { error: text } : {};
+}
+
+function isJSONContentType(contentType: string) {
+  const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase() || '';
+  return mediaType === 'application/json' || mediaType.startsWith('application/') && mediaType.endsWith('+json');
 }
 
 async function fetchAPI(path: string, init: RequestInit = {}) {

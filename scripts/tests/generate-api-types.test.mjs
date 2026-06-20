@@ -123,6 +123,15 @@ test('API clients parse non-JSON error bodies through the shared error parser', 
 	assert.match(mobileApiClient, expected);
 });
 
+test('API clients parse structured JSON error media types', () => {
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /function isJSONContentType\(contentType: string\)/);
+		assert.match(source, /mediaType === 'application\/json'/);
+		assert.match(source, /mediaType\.startsWith\('application\/'\) && mediaType\.endsWith\('\+json'\)/);
+		assert.match(source, /if \(isJSONContentType\(contentType\)\)/);
+	}
+});
+
 test('API clients route logout through shared network error handling', () => {
 	assert.match(webApiClient, /await fetchAPI\('\/auth\/logout', \{/);
 	assert.match(mobileApiClient, /await fetchAPI\('\/auth\/logout', \{/);
