@@ -29,7 +29,7 @@
 ## 本地开发
 
 本地开发推荐只用 Docker 跑 PostgreSQL 和 Redis，后端、Web、移动端在宿主机运行。
-Node.js 版本以仓库根目录 `.nvmrc` 为准，当前为 22；CI 和 Docker 镜像也使用同一个主版本。
+Node.js 版本以仓库根目录 `.nvmrc` 为准，当前为 22；根目录、Web、Mobile 的 `package.json` 通过 `engines` 声明同一主版本，CI 和 Docker 镜像也使用同一个主版本。
 
 ### 1. 启动数据库和缓存
 
@@ -107,7 +107,7 @@ npm run verify:web:e2e
 ```bash
 cd web
 cp .env.example .env.local
-npm install
+npm ci
 npm run dev
 ```
 
@@ -129,7 +129,7 @@ password: haohao123
 ```bash
 cd mobile
 cp .env.example .env
-npm install
+npm ci
 npm run start
 ```
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 const dockerignores = [
@@ -13,6 +13,20 @@ const localCompose = readFileSync(new URL('../../docker-compose.local.yaml', imp
 const mobileNginx = readFileSync(new URL('../../mobile/nginx.conf', import.meta.url), 'utf8');
 const dependabot = readFileSync(new URL('../../.github/dependabot.yml', import.meta.url), 'utf8');
 const ciWorkflow = readFileSync(new URL('../../.github/workflows/ci.yaml', import.meta.url), 'utf8');
+const rootReadme = readFileSync(new URL('../../readme.md', import.meta.url), 'utf8');
+const nvmrc = readFileSync(new URL('../../.nvmrc', import.meta.url), 'utf8').trim();
+const packageJSONs = [
+	['root', '../../package.json'],
+	['web', '../../web/package.json'],
+	['mobile', '../../mobile/package.json'],
+].map(([name, path]) => [name, JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'))]);
+const packageLocks = [
+	['web', '../../web/package-lock.json'],
+	['mobile', '../../mobile/package-lock.json'],
+].map(([name, path]) => [name, JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'))]);
+const packageJSONByName = new Map(packageJSONs);
+const packageLockByName = new Map(packageLocks);
+const ciNpmPackageDirs = [...ciWorkflow.matchAll(/npm --prefix ([^\s]+) ci/g)].map((match) => match[1]).sort();
 const dockerfiles = [
 	['backend', '../../backend/Dockerfile'],
 	['web', '../../web/Dockerfile'],
@@ -87,6 +101,14 @@ test('dependabot watches every Dockerfile directory', () => {
 	}
 });
 
+test('dependabot only watches npm packages with lockfiles', () => {
+	const npmDependabotDirs = dependabotDirectories('npm');
+	assert.deepEqual([...npmDependabotDirs].sort(), ciNpmPackageDirs.map((directory) => `/${directory}`));
+	for (const directory of ciNpmPackageDirs) {
+		assert.ok(packageLockByName.has(directory), `${directory} npm package must have a tracked package-lock.json`);
+	}
+});
+
 test('CI workflow runs the same verification commands documented for local checks', () => {
 	for (const [job, command] of [
 		['deployment-config', 'npm run verify:compose'],
@@ -102,6 +124,48 @@ test('CI workflow runs the same verification commands documented for local check
 	assert.match(ciWorkflow, /concurrency:\n\s+group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n\s+cancel-in-progress: true/);
 	assert.match(ciWorkflow, /actions\/setup-node@v4/);
 	assert.match(ciWorkflow, /actions\/setup-go@v5/);
+});
+
+test('CI npm installs use lockfiles tracked by Dependabot', () => {
+	const npmDependabotDirs = dependabotDirectories('npm');
+	assert.ok(ciNpmPackageDirs.length > 0, 'CI must install at least one npm package with npm ci');
+	for (const directory of ciNpmPackageDirs) {
+		assert.ok(packageJSONByName.has(directory), `${directory} npm ci must have package.json metadata`);
+		assert.ok(existsSync(new URL(`../../${directory}/package-lock.json`, import.meta.url)), `${directory} npm ci must have package-lock.json`);
+		assert.ok(npmDependabotDirs.has(`/${directory}`), `${directory} npm package must be watched by Dependabot`);
+		assert.match(ciWorkflow, new RegExp(`cache-dependency-path: ${escapeRegExp(directory)}\\/package-lock\\.json`));
+	}
+});
+
+test('Node toolchain contract stays aligned across package metadata, CI, and Docker', () => {
+	assert.equal(nvmrc, '22');
+	assert.equal(packageJSONs[0][1].private, true, 'root package.json must stay private because it only owns repository-level scripts');
+	assert.equal(packageJSONs[0][1].dependencies, undefined, 'root package.json must not add runtime dependencies without a root lockfile');
+	assert.equal(packageJSONs[0][1].devDependencies, undefined, 'root package.json must not add dev dependencies without a root lockfile');
+	for (const [name, pkg] of packageJSONs) {
+		assert.equal(pkg.engines?.node, '22.x', `${name} package.json must pin the Node major used by .nvmrc and Docker`);
+		assert.equal(pkg.engines?.npm, '>=10 <12', `${name} package.json must declare the supported npm range`);
+	}
+	for (const name of ciNpmPackageDirs) {
+		const pkg = packageJSONByName.get(name);
+		const lock = packageLockByName.get(name);
+		assert.ok(pkg, `${name} npm package must have package.json metadata`);
+		assert.ok(lock, `${name} npm package must have a package-lock.json`);
+		assert.deepEqual(lock.packages?.['']?.engines, pkg.engines, `${name} package-lock.json must mirror package.json engines`);
+	}
+	assert.match(ciWorkflow, /node-version-file: \.nvmrc/);
+	for (const directory of ciNpmPackageDirs) {
+		assert.match(ciWorkflow, new RegExp(`cache-dependency-path: ${escapeRegExp(directory)}\\/package-lock\\.json`));
+	}
+	assert.match(dockerfileSource('web'), /^FROM node:22-bookworm-slim AS deps$/m);
+	assert.match(dockerfileSource('web'), /^FROM node:22-bookworm-slim AS builder$/m);
+	assert.match(dockerfileSource('web'), /^FROM node:22-bookworm-slim AS runner$/m);
+	assert.match(dockerfileSource('mobile'), /^FROM node:22-bookworm-slim AS deps$/m);
+	assert.match(dockerfileSource('mobile'), /^FROM node:22-bookworm-slim AS builder$/m);
+	assert.match(rootReadme, /package\.json` 通过 `engines` 声明同一主版本/);
+	assert.doesNotMatch(rootReadme, /npm install/);
+	assert.match(rootReadme, /cd web\ncp \.env\.example \.env\.local\nnpm ci\nnpm run dev/);
+	assert.match(rootReadme, /cd mobile\ncp \.env\.example \.env\nnpm ci\nnpm run start/);
 });
 
 test('migration job stays internal and one-shot', () => {
@@ -219,6 +283,14 @@ function redisComposeCommandBlock(redis) {
 	const match = redis.match(/^\s+command:\n([\s\S]*?)(?=^\s+environment:)/m);
 	assert.ok(match, 'missing redis command');
 	return match[0];
+}
+
+function dependabotDirectories(ecosystem) {
+	return new Set(
+		[...dependabot.matchAll(new RegExp(`package-ecosystem: ${escapeRegExp(ecosystem)}\\n\\s+directory: ([^\\n]+)`, 'g'))].map(
+			(match) => match[1].trim(),
+		),
+	);
 }
 
 function escapeRegExp(value) {
