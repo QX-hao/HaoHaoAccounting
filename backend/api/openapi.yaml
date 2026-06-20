@@ -56,6 +56,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoginResponse'
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example.signature
+                user:
+                  id: 1
+                  name: 好好用户
+                  username: admin
+                  phone: ''
+                  email: ''
+                  wechatId: ''
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -1329,6 +1338,7 @@ components:
         minLength: 1
         maxLength: 128
         pattern: '^[!-~]+$'
+      example: client-request-123
   headers:
     RequestID:
       description: Request correlation id for tracing logs and API calls.
@@ -1337,50 +1347,61 @@ components:
         minLength: 1
         maxLength: 128
         pattern: '^[!-~]+$'
+      example: client-request-123
     Link:
       description: RFC 8288 pagination links for first, previous, next, and last pages when available.
       schema:
         type: string
+      example: </api/v1/transactions?page=2&pageSize=20>; rel="next", </api/v1/transactions?page=5&pageSize=20>; rel="last"
     TotalCount:
       description: Total number of records matching the query before pagination.
       schema:
         type: integer
         minimum: 0
+      example: 95
     ContentDisposition:
       description: Attachment disposition for downloaded files. Includes both filename and RFC 5987 filename* parameters.
       schema:
         type: string
+      example: attachment; filename="transactions.csv"; filename*=UTF-8''transactions.csv
     CacheControl:
       description: Cache policy for API responses containing user or authentication data.
       schema:
         type: string
         enum: [no-store]
+      example: no-store
     Pragma:
       description: Legacy HTTP/1.0 cache policy retained for intermediary compatibility.
       schema:
         type: string
         enum: [no-cache]
+      example: no-cache
     Expires:
       description: Legacy cache expiry value retained for intermediary compatibility.
       schema:
         type: string
         enum: ['0']
+      example: '0'
     Vary:
-      description: Request headers that influenced response representation selection.
+      description: Negotiated API responses vary on the Accept request header.
       schema:
         type: string
+        enum: [Accept]
     Allow:
       description: HTTP methods supported by the target route.
       schema:
         type: string
+      example: GET, POST
     WWWAuthenticate:
-      description: Authentication challenge for protected resources. Challenges use realm="haohao-accounting-api"; invalid bearer tokens also include error="invalid_token" per RFC 6750.
+      description: Authentication challenge for protected resources. Challenges use realm="haohao-accounting-api"; invalid bearer tokens also include error="invalid_token" and error_description per RFC 6750.
       schema:
         type: string
+      example: Bearer realm="haohao-accounting-api", error="invalid_token", error_description="The access token is missing, expired, revoked, or invalid"
     RetryAfter:
       description: Remaining wait time before retrying, as either HTTP-date or delay-seconds.
       schema:
         type: string
+      example: '60'
   responses:
     BadRequest:
       description: Bad request or validation error.
@@ -1397,6 +1418,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: validation failed
+            code: bad_request
+            requestId: api-20260620-example
     Unauthorized:
       description: Missing, invalid, or expired authentication token.
       headers:
@@ -1414,6 +1439,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: invalid Authorization format
+            code: unauthorized
+            requestId: api-20260620-example
     Forbidden:
       description: Authenticated user cannot perform this action.
       headers:
@@ -1612,6 +1641,9 @@ components:
       type: object
       additionalProperties: false
       required: [username, password]
+      example:
+        username: admin
+        password: example-password
       properties:
         username:
           type: string
@@ -1623,6 +1655,15 @@ components:
       type: object
       additionalProperties: false
       required: [token, user]
+      example:
+        token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example.signature
+        user:
+          id: 1
+          name: 好好用户
+          username: admin
+          phone: ''
+          email: ''
+          wechatId: ''
       properties:
         token:
           type: string
@@ -1653,6 +1694,10 @@ components:
       type: object
       additionalProperties: false
       required: [name, type]
+      example:
+        name: 招商银行卡
+        type: debit
+        balance: 1200.5
       properties:
         name:
           type: string
@@ -1771,6 +1816,16 @@ components:
       type: object
       additionalProperties: false
       required: [type, amount, categoryId, accountId, note]
+      example:
+        type: expense
+        amount: 35.8
+        categoryId: 2
+        accountId: 1
+        note: 午餐
+        tags:
+          - 工作日
+        occurredAt: '2026-06-20T12:30:00+08:00'
+        source: manual
       properties:
         type:
           $ref: '#/components/schemas/TransactionType'
@@ -2180,6 +2235,10 @@ components:
       type: object
       additionalProperties: false
       required: [error, code]
+      example:
+        error: invalid Authorization format
+        code: unauthorized
+        requestId: api-20260620-example
       properties:
         error:
           type: string

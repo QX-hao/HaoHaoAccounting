@@ -10,6 +10,7 @@ const dockerignores = [
 ].map(([name, path]) => [name, dockerignorePatterns(path)]);
 const compose = readFileSync(new URL('../../docker-compose.yaml', import.meta.url), 'utf8');
 const localCompose = readFileSync(new URL('../../docker-compose.local.yaml', import.meta.url), 'utf8');
+const mobileNginx = readFileSync(new URL('../../mobile/nginx.conf', import.meta.url), 'utf8');
 
 test('docker build contexts exclude local secrets and dependency caches', () => {
 	for (const [name, patterns] of dockerignores) {
@@ -104,6 +105,20 @@ test('redis compose command keeps password out of process arguments', () => {
 	assert.match(command, /\$\$\{REDIS_PASSWORD\}/);
 	assert.doesNotMatch(command, /--requirepass/);
 	assert.doesNotMatch(command, /(?<!\$)\$\{REDIS_PASSWORD/);
+});
+
+test('mobile nginx keeps the SPA entrypoint revalidated', () => {
+	assert.match(mobileNginx, /server_tokens off;/);
+	assert.match(mobileNginx, /location = \/index\.html \{[\s\S]+add_header Cache-Control "no-cache" always;/);
+	assert.match(mobileNginx, /location \/ \{[\s\S]+try_files \$uri \$uri\/ \/index\.html;/);
+});
+
+test('mobile nginx caches static assets immutably without SPA fallback', () => {
+	const staticLocation = mobileNginx.match(/location ~\* \\\.\([\s\S]+?\n    \}/)?.[0] || '';
+	assert.match(staticLocation, /add_header Cache-Control "public, max-age=31536000, immutable" always;/);
+	assert.match(staticLocation, /try_files \$uri =404;/);
+	assert.doesNotMatch(staticLocation, /\/index\.html/);
+	assert.doesNotMatch(mobileNginx, /expires 30d/);
 });
 
 function dockerignorePatterns(path) {

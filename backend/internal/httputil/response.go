@@ -38,7 +38,7 @@ const requestIDContextKey = "request_id"
 
 const (
 	bearerChallenge             = `Bearer realm="haohao-accounting-api"`
-	invalidBearerTokenChallenge = bearerChallenge + `, error="invalid_token"`
+	invalidBearerTokenChallenge = bearerChallenge + `, error="invalid_token", error_description="The access token is missing, expired, revoked, or invalid"`
 )
 
 type ErrorResponse struct {

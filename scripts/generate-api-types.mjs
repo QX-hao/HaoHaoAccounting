@@ -294,6 +294,12 @@ function validateResponseComponents(openapi) {
   if (!wwwAuthenticate.includes('invalid_token')) {
     throw new Error('components.headers.WWWAuthenticate is missing invalid_token guidance');
   }
+  if (!wwwAuthenticate.includes('error_description')) {
+    throw new Error('components.headers.WWWAuthenticate is missing error_description guidance');
+  }
+  if (!wwwAuthenticate.includes('example: Bearer realm="haohao-accounting-api"')) {
+    throw new Error('components.headers.WWWAuthenticate is missing bearer challenge example');
+  }
 
   const rateLimited = openapi.match(/^    RateLimited:\n(?:      .+\n)+/m)?.[0] || '';
   if (!rateLimited.includes('Retry-After:')) {
@@ -315,6 +321,9 @@ function validateResponseComponents(openapi) {
   const vary = componentHeaderBlock(openapi, 'Vary');
   if (!vary.includes('type: string')) {
     throw new Error('components.headers.Vary is missing string schema');
+  }
+  if (!vary.includes('enum: [Accept]')) {
+    throw new Error('components.headers.Vary must document Accept negotiation');
   }
 
   const contentDisposition = componentHeaderBlock(openapi, 'ContentDisposition');
@@ -373,6 +382,9 @@ function validateRequestIDSchema(block, name) {
   }
   if (!block.includes("pattern: '^[!-~]+$'")) {
     throw new Error(`${name} is missing visible ASCII pattern`);
+  }
+  if (!block.includes('example: client-request-123')) {
+    throw new Error(`${name} is missing request id example`);
   }
 }
 

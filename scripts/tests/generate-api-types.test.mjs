@@ -22,6 +22,36 @@ function openapiSchema(schemaName) {
 	return marker + rest.slice(0, next === -1 ? rest.length : next);
 }
 
+function openapiPathBlock(apiPath) {
+	const marker = `  ${apiPath}:\n`;
+	const start = openapi.indexOf(marker);
+	assert.notEqual(start, -1, `${apiPath} path not found`);
+	const rest = openapi.slice(start + marker.length);
+	const next = rest.search(/^  \//m);
+	return marker + rest.slice(0, next === -1 ? rest.length : next);
+}
+
+function responseBlock(source, status) {
+	const marker = `        '${status}':\n`;
+	const start = source.indexOf(marker);
+	assert.notEqual(start, -1, `${status} response not found`);
+	const rest = source.slice(start + marker.length);
+	const next = rest.search(/^        '[0-9]{3}':/m);
+	return marker + rest.slice(0, next === -1 ? rest.length : next);
+}
+
+function componentResponseBlock(responseName) {
+	const responsesStart = openapi.indexOf('  responses:');
+	const schemasStart = openapi.indexOf('  schemas:');
+	const responses = openapi.slice(responsesStart, schemasStart);
+	const marker = `    ${responseName}:\n`;
+	const start = responses.indexOf(marker);
+	assert.notEqual(start, -1, `${responseName} response not found`);
+	const rest = responses.slice(start + marker.length);
+	const next = rest.search(/^    [A-Za-z][A-Za-z0-9]*:\n/m);
+	return marker + rest.slice(0, next === -1 ? rest.length : next);
+}
+
 test('OpenAPI YAML disallows duplicate mapping keys', () => {
 	const duplicates = duplicateYamlMappingKeys(openapi);
 	assert.deepEqual(duplicates, []);
@@ -97,6 +127,9 @@ test('OpenAPI response components document no-store API cache headers', () => {
 	assert.match(openapi, /CacheControl:[\s\S]+enum: \[no-store\]/);
 	assert.match(openapi, /Pragma:[\s\S]+enum: \[no-cache\]/);
 	assert.match(openapi, /Expires:[\s\S]+enum: \['0'\]/);
+	assert.match(openapi, /CacheControl:[\s\S]+example: no-store/);
+	assert.match(openapi, /Pragma:[\s\S]+example: no-cache/);
+	assert.match(openapi, /Expires:[\s\S]+example: '0'/);
 	assert.match(openapi, /'200':\n\s+description: Login success\n\s+headers:\n\s+Cache-Control:/);
 });
 
@@ -162,6 +195,22 @@ test('generator requires human-readable operation summaries', () => {
 	}
 });
 
+test('OpenAPI core schemas include readable examples', () => {
+	for (const schemaName of ['LoginRequest', 'LoginResponse', 'AccountRequest', 'TransactionRequest', 'ErrorResponse']) {
+		const schema = openapiSchema(schemaName);
+		assert.match(schema, /^\s+example:\n\s+\S/m, `${schemaName} is missing example`);
+	}
+});
+
+test('OpenAPI key auth responses include media type examples', () => {
+	const login = openapiPathBlock('/auth/login');
+	const loginSuccess = responseBlock(login, '200');
+	assert.match(loginSuccess, /application\/json:[\s\S]+example:[\s\S]+token:/);
+
+	const unauthorized = componentResponseBlock('Unauthorized');
+	assert.match(unauthorized, /application\/json:[\s\S]+example:[\s\S]+code: unauthorized/);
+});
+
 test('generator requires a 2xx success response for every operation', () => {
 	assert.match(generator, /missing 2xx success response/);
 	assert.match(generator, /\^2\\d\\d\$/);
@@ -181,6 +230,9 @@ test('generator requires bounded visible ASCII request ids', () => {
 	assert.match(generator, /validateRequestIDSchema/);
 	assert.match(generator, /components\.parameters\.RequestID.*visible ASCII pattern/s);
 	assert.match(generator, /components\.headers\.RequestID.*maxLength: 128/s);
+	assert.match(generator, /is missing request id example/);
+	assert.match(openapi, /parameters:[\s\S]+RequestID:[\s\S]+example: client-request-123/);
+	assert.match(openapi, /headers:[\s\S]+RequestID:[\s\S]+example: client-request-123/);
 });
 
 test('generator requires closed request schemas', () => {
@@ -314,18 +366,23 @@ test('generator requires body error responses for every request body operation',
 
 test('generator requires Allow header on method-not-allowed response', () => {
 	assert.match(generator, /components\.responses\.MethodNotAllowed is missing Allow header/);
+	assert.match(openapi, /Allow:[\s\S]+example: GET, POST/);
 });
 
 test('generator requires WWW-Authenticate header on unauthorized response', () => {
 	assert.match(generator, /components\.responses\.Unauthorized is missing WWW-Authenticate header/);
 	assert.match(generator, /components\.headers\.WWWAuthenticate is missing bearer realm guidance/);
 	assert.match(generator, /components\.headers\.WWWAuthenticate is missing invalid_token guidance/);
+	assert.match(generator, /components\.headers\.WWWAuthenticate is missing error_description guidance/);
+	assert.match(generator, /components\.headers\.WWWAuthenticate is missing bearer challenge example/);
+	assert.match(openapi, /WWWAuthenticate:[\s\S]+example: Bearer realm="haohao-accounting-api", error="invalid_token"/);
 });
 
 test('generator requires Retry-After header on rate-limited response', () => {
 	assert.match(generator, /components\.responses\.RateLimited is missing Retry-After header/);
 	assert.match(generator, /components\.headers\.RetryAfter must document remaining wait time as HTTP-date or delay-seconds/);
 	assert.match(openapi, /RetryAfter:[\s\S]+Remaining wait time before retrying/);
+	assert.match(openapi, /RetryAfter:[\s\S]+example: '60'/);
 });
 
 test('generator requires not-acceptable responses for operations with response bodies', () => {
@@ -336,6 +393,8 @@ test('generator requires not-acceptable responses for operations with response b
 
 test('generator requires Vary headers for negotiated responses', () => {
 	assert.match(generator, /components\.headers\.Vary is missing string schema/);
+	assert.match(generator, /components\.headers\.Vary must document Accept negotiation/);
+	assert.match(openapi, /Vary:[\s\S]+enum: \[Accept\]/);
 	assert.match(generator, /negotiated response is missing Vary header/);
 });
 
@@ -350,6 +409,7 @@ test('generator requires documented accepted datetime query formats', () => {
 test('generator requires documented download filename headers', () => {
 	assert.match(generator, /GET \/io\/export is missing Content-Disposition response header/);
 	assert.match(generator, /components\.headers\.ContentDisposition is missing filename\* guidance/);
+	assert.match(openapi, /ContentDisposition:[\s\S]+example: attachment; filename="transactions\.csv"; filename\*=UTF-8''transactions\.csv/);
 	for (const source of [webApiClient, mobileApiClient]) {
 		assert.match(source, /function contentDispositionParams\(disposition: string\)/);
 		assert.match(source, /function splitHeaderParameters\(value: string\)/);
@@ -373,6 +433,8 @@ test('generator requires bounded pagination response schema', () => {
 	assert.match(generator, /validatePaginationSchema/);
 	assert.match(generator, /Pagination\.pageSize is missing maximum: 200/);
 	assert.match(generator, /Pagination\.total is missing minimum: 0/);
+	assert.match(openapi, /Link:[\s\S]+example: <\/api\/v1\/transactions\?page=2&pageSize=20>; rel="next"/);
+	assert.match(openapi, /TotalCount:[\s\S]+example: 95/);
 });
 
 test('generator requires login rate limit response', () => {

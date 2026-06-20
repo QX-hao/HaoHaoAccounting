@@ -284,7 +284,7 @@ func TestRequireAuthSkipsRevocationCheckForInvalidToken(t *testing.T) {
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.Code)
 	}
-	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api", error="invalid_token"` {
+	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api", error="invalid_token", error_description="The access token is missing, expired, revoked, or invalid"` {
 		t.Fatalf("WWW-Authenticate = %q", got)
 	}
 	if checker.calls != 0 {
@@ -319,7 +319,7 @@ func TestRequireAuthFailsClosedWhenRevocationCheckErrors(t *testing.T) {
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.Code)
 	}
-	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api", error="invalid_token"` {
+	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api", error="invalid_token", error_description="The access token is missing, expired, revoked, or invalid"` {
 		t.Fatalf("WWW-Authenticate = %q", got)
 	}
 }
