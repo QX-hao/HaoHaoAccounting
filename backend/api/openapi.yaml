@@ -30,6 +30,7 @@ paths:
     post:
       tags: [auth]
       operationId: postAuthLogin
+      summary: Log in with username and password
       security: []
       requestBody:
         required: true
@@ -79,6 +80,7 @@ paths:
     post:
       tags: [auth]
       operationId: postAuthRefresh
+      summary: Refresh the current access token
       responses:
         '200':
           description: Refreshed token
@@ -115,6 +117,7 @@ paths:
     post:
       tags: [auth]
       operationId: postAuthLogout
+      summary: Log out the current user
       responses:
         '200':
           $ref: '#/components/responses/Ok'
@@ -134,6 +137,7 @@ paths:
     get:
       tags: [auth]
       operationId: getMe
+      summary: Get the current user profile
       responses:
         '200':
           description: Current user
@@ -170,6 +174,7 @@ paths:
     get:
       tags: [accounts]
       operationId: getAccounts
+      summary: List accounts
       responses:
         '200':
           description: Account list
@@ -203,6 +208,7 @@ paths:
     post:
       tags: [accounts]
       operationId: postAccounts
+      summary: Create an account
       requestBody:
         required: true
         content:
@@ -249,6 +255,7 @@ paths:
     put:
       tags: [accounts]
       operationId: putAccountsById
+      summary: Update an account
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -296,6 +303,7 @@ paths:
     delete:
       tags: [accounts]
       operationId: deleteAccountsById
+      summary: Delete an account
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -319,6 +327,7 @@ paths:
     get:
       tags: [budgets]
       operationId: getBudgets
+      summary: List budgets
       parameters:
         - name: month
           in: query
@@ -360,6 +369,7 @@ paths:
     post:
       tags: [budgets]
       operationId: postBudgets
+      summary: Create a budget
       requestBody:
         required: true
         content:
@@ -408,6 +418,7 @@ paths:
     put:
       tags: [budgets]
       operationId: putBudgetsById
+      summary: Update a budget
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -455,6 +466,7 @@ paths:
     delete:
       tags: [budgets]
       operationId: deleteBudgetsById
+      summary: Delete a budget
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -480,6 +492,7 @@ paths:
     get:
       tags: [categories]
       operationId: getCategories
+      summary: List categories
       parameters:
         - name: type
           in: query
@@ -520,6 +533,7 @@ paths:
     post:
       tags: [categories]
       operationId: postCategories
+      summary: Create a category
       requestBody:
         required: true
         content:
@@ -566,6 +580,7 @@ paths:
     put:
       tags: [categories]
       operationId: putCategoriesById
+      summary: Update a category
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -615,6 +630,7 @@ paths:
     delete:
       tags: [categories]
       operationId: deleteCategoriesById
+      summary: Delete a category
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -642,6 +658,7 @@ paths:
     get:
       tags: [transactions]
       operationId: getTransactions
+      summary: List transactions
       parameters:
         - name: page
           in: query
@@ -721,6 +738,7 @@ paths:
     post:
       tags: [transactions]
       operationId: postTransactions
+      summary: Create a transaction
       requestBody:
         required: true
         content:
@@ -767,6 +785,7 @@ paths:
     put:
       tags: [transactions]
       operationId: putTransactionsById
+      summary: Update a transaction
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -814,6 +833,7 @@ paths:
     delete:
       tags: [transactions]
       operationId: deleteTransactionsById
+      summary: Delete a transaction
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -837,6 +857,7 @@ paths:
     post:
       tags: [ai]
       operationId: postAiParse
+      summary: Parse ledger text with AI
       requestBody:
         required: true
         content:
@@ -879,6 +900,7 @@ paths:
     get:
       tags: [reports]
       operationId: getReportsSummary
+      summary: Get report summary
       parameters:
         - name: start
           in: query
@@ -943,6 +965,7 @@ paths:
     post:
       tags: [dataio]
       operationId: postIoImportPreview
+      summary: Preview an uploaded import file
       requestBody:
         required: true
         content:
@@ -985,6 +1008,7 @@ paths:
     post:
       tags: [dataio]
       operationId: postIoImport
+      summary: Import an uploaded file
       requestBody:
         required: true
         content:
@@ -1027,6 +1051,7 @@ paths:
     get:
       tags: [dataio]
       operationId: getIoImportJobs
+      summary: List import jobs
       responses:
         '200':
           description: Import job history
@@ -1060,6 +1085,7 @@ paths:
     post:
       tags: [dataio]
       operationId: postIoImportJobs
+      summary: Queue an import job
       requestBody:
         required: true
         content:
@@ -1102,6 +1128,7 @@ paths:
     get:
       tags: [dataio]
       operationId: getIoImportJobsById
+      summary: Get import job status
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -1136,6 +1163,7 @@ paths:
     post:
       tags: [dataio]
       operationId: postIoImportTextPreview
+      summary: Preview pasted import text
       requestBody:
         required: true
         content:
@@ -1178,6 +1206,7 @@ paths:
     post:
       tags: [dataio]
       operationId: postIoImportText
+      summary: Import pasted text
       requestBody:
         required: true
         content:
@@ -1220,6 +1249,7 @@ paths:
     get:
       tags: [dataio]
       operationId: getIoExport
+      summary: Export transactions
       parameters:
         - name: format
           in: query

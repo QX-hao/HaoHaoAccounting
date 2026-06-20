@@ -513,11 +513,15 @@ function parseEndpoints(openapi) {
       const methodEnd = methodMatches[methodIndex + 1]?.index ?? pathBlock.length;
       const methodBlock = pathBlock.slice(methodStart, methodEnd);
       const operationId = methodBlock.match(/operationId:\s+([A-Za-z][A-Za-z0-9]*)/)?.[1] || '';
+      const summary = operationSummary(methodBlock);
       const tags = operationTags(methodBlock);
       const responseStatuses = operationResponseStatuses(methodBlock);
       const parameters = [...pathParameters, ...parseOperationParameters(methodBlock)];
       if (!operationId) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing operationId`);
+      }
+      if (!summary) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} is missing summary`);
       }
       if (operationIds.has(operationId)) {
         throw new Error(`${operationId} is used by both ${operationIds.get(operationId)} and ${method.toUpperCase()} ${apiPath}`);
@@ -571,6 +575,10 @@ function parseEndpoints(openapi) {
     }
   }
   return result;
+}
+
+function operationSummary(block) {
+  return block.match(/^\s+summary:\s+(.+)$/m)?.[1]?.trim() || '';
 }
 
 function validateAuthOperationContract(method, apiPath, methodBlock, responseStatuses) {

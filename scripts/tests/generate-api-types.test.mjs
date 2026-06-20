@@ -131,6 +131,18 @@ test('generator rejects duplicate OpenAPI operationId values', () => {
 	assert.match(generator, /is used by both/);
 });
 
+test('generator requires human-readable operation summaries', () => {
+	assert.match(generator, /operationSummary\(methodBlock\)/);
+	assert.match(generator, /is missing summary/);
+	for (const operationId of openapi.matchAll(/operationId:\s+([A-Za-z][A-Za-z0-9]*)/g)) {
+		const blockStart = openapi.lastIndexOf('\n    ', operationId.index);
+		const nextOperation = openapi.indexOf('\n      operationId:', operationId.index + 1);
+		const blockEnd = nextOperation === -1 ? openapi.indexOf('\ncomponents:', operationId.index) : nextOperation;
+		const block = openapi.slice(blockStart, blockEnd);
+		assert.match(block, /^\s+summary:\s+\S.+$/m, `${operationId[1]} is missing summary`);
+	}
+});
+
 test('generator requires a 2xx success response for every operation', () => {
 	assert.match(generator, /missing 2xx success response/);
 	assert.match(generator, /\^2\\d\\d\$/);
