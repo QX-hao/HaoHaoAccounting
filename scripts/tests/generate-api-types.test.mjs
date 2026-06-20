@@ -22,6 +22,16 @@ function openapiSchema(schemaName) {
 	return marker + rest.slice(0, next === -1 ? rest.length : next);
 }
 
+test('OpenAPI YAML disallows duplicate mapping keys', () => {
+	const duplicates = duplicateYamlMappingKeys(openapi);
+	assert.deepEqual(duplicates, []);
+});
+
+test('YAML duplicate key scanner treats sequence item maps independently', () => {
+	assert.deepEqual(duplicateYamlMappingKeys('items:\n  - name: one\n    description: first\n  - name: two\n    description: second\n'), []);
+	assert.deepEqual(duplicateYamlMappingKeys('root:\n  value: one\n  value: two\n'), ['value at line 3']);
+});
+
 test('generated clients preserve explicit numeric zero query params', () => {
 	assert.match(generator, /if \(value === undefined \|\| value === null \|\| value === ''\) return;/);
 	assert.doesNotMatch(generator, /typeof value === 'number' && value === 0/);
@@ -367,3 +377,35 @@ test('generator requires explicit auth security contract', () => {
 	assert.match(generator, /must document 401 for bearer authentication/);
 	assert.match(generator, /const publicOperations = new Set\(\['POST \/auth\/login'\]\)/);
 });
+
+function duplicateYamlMappingKeys(source) {
+	const duplicates = [];
+	const stack = [{ indent: -1, keys: new Set() }];
+	const keyPattern = /^(\s*)(-\s+)?([^:]+):(?:\s*(.*))?$/;
+
+	for (const [index, line] of source.split(/\r?\n/).entries()) {
+		if (!line.trim() || line.trimStart().startsWith('#')) continue;
+		const match = line.match(keyPattern);
+		if (!match) continue;
+
+		const indent = match[1].length;
+		while (stack.length > 1 && indent <= stack.at(-1).indent) {
+			stack.pop();
+		}
+
+		const scope = match[2] ? { indent, keys: new Set() } : stack.at(-1);
+		if (match[2]) {
+			stack.push(scope);
+		}
+		const key = match[3].trim().replace(/^['"]|['"]$/g, '');
+		if (scope.keys.has(key)) {
+			duplicates.push(`${key} at line ${index + 1}`);
+		}
+		scope.keys.add(key);
+		if (!match[4]?.trim()) {
+			stack.push({ indent, keys: new Set() });
+		}
+	}
+
+	return duplicates;
+}
