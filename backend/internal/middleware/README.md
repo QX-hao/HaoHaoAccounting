@@ -2,19 +2,19 @@
 
 Gin middleware and auth token helpers.
 
-`RequestID` preserves a valid caller-provided `X-Request-ID` or generates one, returns it in the response header, and stores the same value in both Gin context and the standard request `context.Context` for downstream services.
+`RequestID` preserves a valid caller-provided `X-Request-ID` or generates one, returns it in the response header, and stores the same value in both Gin context and the standard request `context.Context` for downstream services. Caller IDs are trimmed and accepted only when they are bounded to 128 visible ASCII characters; invalid values are replaced everywhere to avoid unsafe log correlation values.
 
 `RequestTimeout` adds an optional deadline to the standard request `context.Context` so downstream database, cache, and external-service calls can stop work when a request exceeds the configured budget. A zero or negative timeout is treated as disabled.
 
-`Recovery` returns the structured internal-error response while logging the recovered panic with method, path, client IP, and request ID so production incidents can be correlated without exposing panic details to clients.
+`Recovery` returns the structured internal-error response while logging the recovered panic with method, path, client IP, and request ID so production incidents can be correlated without exposing panic details to clients. Broken pipe, connection reset, aborted handler, and already-written response cases are not overwritten with another error body.
 
-`SecurityHeaders` sets conservative browser security headers on API responses. `Strict-Transport-Security` is opt-in through HTTP config so local HTTP development and partial HTTPS rollouts do not accidentally persist HSTS in browsers.
+`SecurityHeaders` sets conservative browser security headers on API responses, including `Content-Security-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `Origin-Agent-Cluster`, `Referrer-Policy`, `Permissions-Policy`, `X-Content-Type-Options`, `X-DNS-Prefetch-Control`, `X-Download-Options`, `X-Frame-Options`, `X-Permitted-Cross-Domain-Policies`, and `X-XSS-Protection`. `Strict-Transport-Security` is opt-in through HTTP config so local HTTP development and partial HTTPS rollouts do not accidentally persist HSTS in browsers.
 
 `BodyLimit` rejects oversized requests before handlers run when `Content-Length` is known, and wraps streaming request bodies with `http.MaxBytesReader` so JSON and multipart handlers can map over-limit reads to the same structured payload-too-large response.
 
 `ContentType` enforces declared request media types on routes with bodies, including structured `application/*+json` variants for JSON endpoints and multipart form data for import endpoints.
 
-`Accept` enforces declared response media types for API routes, supports compatible media ranges and structured syntax suffixes, and appends `Vary: Accept` on negotiated routes.
+`Accept` enforces declared response media types for API routes, supports compatible media ranges and structured syntax suffixes, treats `q=0` media ranges as explicit exclusions, and appends `Vary: Accept` on negotiated routes.
 
 `NoStore` applies `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0` to API responses that should not be cached by browsers or intermediaries.
 

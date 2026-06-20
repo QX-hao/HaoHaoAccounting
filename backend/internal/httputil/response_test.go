@@ -76,6 +76,39 @@ func TestErrorDoesNotWriteAfterResponseStarted(t *testing.T) {
 	}
 }
 
+func TestReadmeDocumentsHTTPUtilityContracts(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"`Error`",
+		"`error`, `code`, and optional `requestId`",
+		"already-started response",
+		"`InternalError`",
+		"`context.DeadlineExceeded`",
+		"`context.Canceled`",
+		"`WWW-Authenticate` bearer challenges",
+		"`RateLimitedWithPolicy`",
+		"`Retry-After`",
+		"`RateLimit-Limit`",
+		"`RateLimit-Remaining`",
+		"`RateLimit-Reset`",
+		"non-negative integer seconds",
+		"`BindJSONBody`",
+		"`DisallowUnknownFields`",
+		"multiple JSON values",
+		"`X-Total-Count`",
+		"RFC 8288 `Link` headers",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("README.md is missing HTTP utility guidance %q", want)
+		}
+	}
+}
+
 func TestErrorCodesMatchOpenAPIEnum(t *testing.T) {
 	got := allErrorCodes()
 	want := openAPIErrorCodes(t)

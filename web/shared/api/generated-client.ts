@@ -257,20 +257,6 @@ export function createApiClient(runtime: ApiRuntime) {
         let path = "/io/import/text";
         return runtime.request<ImportResult>(path, { method: 'POST', body: JSON.stringify(body) });
       },
-      getIoExport: (params: {
-  format?: "csv" | "xlsx";
-  start?: string;
-  end?: string;
-} = {}) => {
-        let path = "/io/export";
-        const search = new URLSearchParams();
-        setQueryParam(search, 'format', params?.format);
-        setQueryParam(search, 'start', params?.start);
-        setQueryParam(search, 'end', params?.end);
-        const query = search.toString();
-        if (query) path += `?${query}`;
-        return runtime.request<unknown>(path);
-      },
     },
   };
 }

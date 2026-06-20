@@ -4,6 +4,7 @@ import { clearToken, getToken } from '@/shared/auth/token';
 
 type ApiErrorCode = ErrorResponse['code'] | 'network_error' | '';
 type ApiErrorBody = Partial<ErrorResponse>;
+const API_REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
   status: number;
@@ -25,8 +26,9 @@ export class ApiError extends Error {
     rateLimitRemaining: number | null = null,
     rateLimitResetSeconds: number | null = null,
     authenticateChallenge = '',
+    cause?: unknown,
   ) {
-    super(message);
+    super(message, { cause });
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
@@ -165,16 +167,39 @@ function isJSONContentType(contentType: string) {
 }
 
 async function fetchAPI(path: string, init: RequestInit = {}) {
+  const { signal, cleanup } = requestSignal(init.signal);
   try {
-    return await fetch(`${API_BASE}${path}`, init);
+    return await fetch(`${API_BASE}${path}`, { ...init, signal });
   } catch (err) {
     throw networkError(err);
+  } finally {
+    cleanup();
   }
+}
+
+function requestSignal(callerSignal?: AbortSignal | null) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  const abort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort();
+    } else {
+      callerSignal.addEventListener('abort', abort, { once: true });
+    }
+  }
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout);
+      callerSignal?.removeEventListener('abort', abort);
+    },
+  };
 }
 
 function networkError(err: unknown) {
   const message = err instanceof Error && err.message ? err.message : 'Network request failed';
-  return new ApiError(message, 0, 'network_error');
+  return new ApiError(message, 0, 'network_error', '', null, null, null, null, '', err);
 }
 
 function apiError(resp: Response, data: ApiErrorBody): ApiError {
@@ -203,10 +228,12 @@ function nonNegativeIntegerHeader(resp: Response, name: string): number | null {
 function retryAfterSeconds(resp: Response): number | null {
   const value = resp.headers.get('Retry-After')?.trim();
   if (!value) return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds)) {
-    if (seconds < 0) return null;
-    return Math.ceil(seconds);
+  if (/^\d+$/.test(value)) {
+    const seconds = Number(value);
+    return Number.isSafeInteger(seconds) ? seconds : null;
+  }
+  if (/^[+-]?\d/.test(value)) {
+    return null;
   }
   const retryAt = Date.parse(value);
   if (!Number.isFinite(retryAt)) return null;

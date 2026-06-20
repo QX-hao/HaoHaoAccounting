@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,33 @@ func TestHealthLivezReturnsOK(t *testing.T) {
 	}
 	if !strings.Contains(resp.Body.String(), `"status":"ok"`) {
 		t.Fatalf("body = %s", resp.Body.String())
+	}
+}
+
+func TestReadmeDocumentsRouteContracts(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"`/livez` only reports process liveness",
+		"`/readyz` and `/health` check the database and optional Redis cache",
+		"2 second dependency budget",
+		"Database failures return `503` with `status: unavailable`",
+		"Redis is reported as `disabled`",
+		"All `/api/v1` routes use `NoStore` cache headers",
+		"API fallback errors for missing routes and unsupported methods",
+		"shared structured error body with request IDs",
+		"`Cache-Control: no-store`",
+		"`Pragma: no-cache`",
+		"`Expires: 0`",
+		"Non-API health probe fallbacks remain cache-neutral",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("README.md is missing app route guidance %q", want)
+		}
 	}
 }
 

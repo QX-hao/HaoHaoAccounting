@@ -42,6 +42,15 @@ updates:
           - "*"
 
   - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      root-docker:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
     directory: /backend
     schedule:
       interval: weekly

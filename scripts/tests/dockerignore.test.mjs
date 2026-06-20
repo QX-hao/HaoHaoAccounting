@@ -11,6 +11,16 @@ const dockerignores = [
 const compose = readFileSync(new URL('../../docker-compose.yaml', import.meta.url), 'utf8');
 const localCompose = readFileSync(new URL('../../docker-compose.local.yaml', import.meta.url), 'utf8');
 const mobileNginx = readFileSync(new URL('../../mobile/nginx.conf', import.meta.url), 'utf8');
+const dependabot = readFileSync(new URL('../../.github/dependabot.yml', import.meta.url), 'utf8');
+const ciWorkflow = readFileSync(new URL('../../.github/workflows/ci.yaml', import.meta.url), 'utf8');
+const dockerfiles = [
+	['backend', '../../backend/Dockerfile'],
+	['web', '../../web/Dockerfile'],
+	['mobile', '../../mobile/Dockerfile'],
+	['postgres', '../../Dockerfile.postgres'],
+	['redis', '../../Dockerfile.redis'],
+	['mysql', '../../Dockerfile.mysql'],
+].map(([name, path]) => [name, readFileSync(new URL(path, import.meta.url), 'utf8')]);
 
 test('docker build contexts exclude local secrets and dependency caches', () => {
 	for (const [name, patterns] of dockerignores) {
@@ -49,12 +59,60 @@ test('application runtime images declare a non-root user', () => {
 	}
 });
 
+test('Dockerfiles pin explicit base image versions', () => {
+	for (const [name, dockerfile] of dockerfiles) {
+		assert.doesNotMatch(dockerfile, /^FROM\s+\S+:latest(?:\s|$)/im, `${name} Dockerfile must not use latest base images`);
+	}
+	assert.match(dockerfileSource('backend'), /^FROM golang:1\.23-bookworm AS builder$/m);
+	assert.match(dockerfileSource('backend'), /^FROM alpine:3\.21$/m);
+	assert.match(dockerfileSource('web'), /^FROM node:22-bookworm-slim AS deps$/m);
+	assert.match(dockerfileSource('web'), /^FROM node:22-bookworm-slim AS runner$/m);
+	assert.match(dockerfileSource('mobile'), /^FROM nginxinc\/nginx-unprivileged:1\.27-alpine$/m);
+	assert.match(dockerfileSource('postgres'), /^FROM postgres:16$/m);
+	assert.match(dockerfileSource('redis'), /^FROM redis:7$/m);
+	assert.match(dockerfileSource('mysql'), /^FROM mysql:8\.4$/m);
+});
+
 test('backend runtime image includes the migration command and SQL migrations', () => {
 	const dockerfile = readFileSync(new URL('../../backend/Dockerfile', import.meta.url), 'utf8');
 
 	assert.match(dockerfile, /go build[\s\S]+-o \/out\/dbmigrate[\s\S]+\.\/cmd\/dbmigrate/);
 	assert.match(dockerfile, /COPY --from=builder \/out\/dbmigrate \/app\/dbmigrate/);
 	assert.match(dockerfile, /COPY --from=builder \/src\/migrations \/app\/migrations/);
+});
+
+test('dependabot watches every Dockerfile directory', () => {
+	for (const directory of ['/', '/backend', '/web', '/mobile']) {
+		assert.match(dependabot, new RegExp(`package-ecosystem: docker\\n\\s+directory: ${escapeRegExp(directory)}`));
+	}
+});
+
+test('CI workflow runs the same verification commands documented for local checks', () => {
+	for (const [job, command] of [
+		['deployment-config', 'npm run verify:compose'],
+		['api-contract', 'npm run verify:api-contract'],
+		['backend', 'npm run verify:backend'],
+		['web', 'npm run verify:web'],
+		['web', 'npm run verify:web:e2e'],
+		['mobile', 'npm run verify:mobile'],
+	]) {
+		assert.match(ciWorkflow, new RegExp(`^  ${job}:\\n[\\s\\S]+?- run: ${escapeRegExp(command)}`, 'm'));
+	}
+	assert.match(ciWorkflow, /permissions:\n\s+contents: read/);
+	assert.match(ciWorkflow, /concurrency:\n\s+group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n\s+cancel-in-progress: true/);
+	assert.match(ciWorkflow, /actions\/setup-node@v4/);
+	assert.match(ciWorkflow, /actions\/setup-go@v5/);
+});
+
+test('migration job stays internal and one-shot', () => {
+	const dbmigrate = composeServiceBlock('dbmigrate');
+	assert.match(dbmigrate, /restart: "no"/);
+	assert.match(dbmigrate, /entrypoint: \["\/app\/dbmigrate"\]/);
+	assert.match(dbmigrate, /postgres:\n\s+condition: service_healthy/);
+	assert.match(dbmigrate, /networks:\n\s+- internal/);
+	assert.doesNotMatch(dbmigrate, /ports:/);
+	assert.doesNotMatch(dbmigrate, /expose:/);
+	assert.doesNotMatch(dbmigrate, /healthcheck:/);
 });
 
 test('stateful compose services keep privilege escalation disabled without read-only roots', () => {
@@ -145,6 +203,12 @@ function runtimeStageHasNonRootUser(dockerfile) {
 		.some((line) => /^USER\s+/i.test(line) && !/^USER\s+(?:0|root)(?=$|\s)/i.test(line));
 }
 
+function dockerfileSource(name) {
+	const dockerfile = dockerfiles.find(([candidate]) => candidate === name)?.[1];
+	assert.ok(dockerfile, `missing ${name} Dockerfile source`);
+	return dockerfile;
+}
+
 function composeServiceBlock(service, source = compose) {
 	const match = source.match(new RegExp(`^  ${service}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|^volumes:)`, 'm'));
 	assert.ok(match, `missing compose service ${service}`);
@@ -155,4 +219,8 @@ function redisComposeCommandBlock(redis) {
 	const match = redis.match(/^\s+command:\n([\s\S]*?)(?=^\s+environment:)/m);
 	assert.ok(match, 'missing redis command');
 	return match[0];
+}
+
+function escapeRegExp(value) {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

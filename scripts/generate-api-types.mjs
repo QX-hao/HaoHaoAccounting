@@ -311,6 +311,10 @@ function validateResponseComponents(openapi) {
   if (!methodNotAllowed.includes('Allow:')) {
     throw new Error('components.responses.MethodNotAllowed is missing Allow header');
   }
+  const allow = componentHeaderBlock(openapi, 'Allow');
+  if (!allow.includes('Comma-separated HTTP methods supported') || !allow.includes('example: GET, POST')) {
+    throw new Error('components.headers.Allow must document comma-separated supported methods with an example');
+  }
 
   const unauthorized = openapi.match(/^    Unauthorized:\n(?:      .+\n)+/m)?.[0] || '';
   if (!unauthorized.includes('WWW-Authenticate:')) {
@@ -340,8 +344,8 @@ function validateResponseComponents(openapi) {
     }
   }
   const retryAfter = componentHeaderBlock(openapi, 'RetryAfter');
-  if (!retryAfter.includes('Remaining wait time') || !retryAfter.includes('HTTP-date') || !retryAfter.includes('delay-seconds') || !retryAfter.includes('type: string')) {
-    throw new Error('components.headers.RetryAfter must document remaining wait time as HTTP-date or delay-seconds');
+  if (!retryAfter.includes('Remaining wait time') || !retryAfter.includes('HTTP-date') || !retryAfter.includes('non-negative integer delay-seconds') || !retryAfter.includes('type: string')) {
+    throw new Error('components.headers.RetryAfter must document remaining wait time as HTTP-date or non-negative integer delay-seconds');
   }
   validateRateLimitHeader(openapi, 'RateLimitLimit', 'Maximum number of failed login attempts');
   validateRateLimitHeader(openapi, 'RateLimitRemaining', 'Remaining failed login attempts');
@@ -623,6 +627,7 @@ function parseEndpoints(openapi) {
       const methodBlock = pathBlock.slice(methodStart, methodEnd);
       const operationId = methodBlock.match(/operationId:\s+([A-Za-z][A-Za-z0-9]*)/)?.[1] || '';
       const summary = operationSummary(methodBlock);
+      const description = operationDescription(methodBlock);
       const tags = operationTags(methodBlock);
       const responseStatuses = operationResponseStatuses(methodBlock);
       const parameters = [...pathParameters, ...parseOperationParameters(methodBlock)];
@@ -631,6 +636,9 @@ function parseEndpoints(openapi) {
       }
       if (!summary) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing summary`);
+      }
+      if (!description) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} is missing description`);
       }
       if (operationIds.has(operationId)) {
         throw new Error(`${operationId} is used by both ${operationIds.get(operationId)} and ${method.toUpperCase()} ${apiPath}`);
@@ -659,6 +667,7 @@ function parseEndpoints(openapi) {
       if (operationHasSuccessContent(methodBlock, source) && !responseStatuses.has('406')) {
         throw new Error(`${method.toUpperCase()} ${apiPath} returns a response body but is missing 406 response`);
       }
+      const jsonClientEndpoint = operationHasJSONSuccessContent(methodBlock, source);
       validateNegotiatedResponseHeaders(method, apiPath, methodBlock, responseStatuses, source);
       validateAuthOperationContract(method, apiPath, methodBlock, responseStatuses);
       validatePathParameters(method, apiPath, parameters);
@@ -666,6 +675,7 @@ function parseEndpoints(openapi) {
       validateSuccessResponseCacheHeaders(method, apiPath, methodBlock, source);
       validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses);
       if (operationHasRequestBody(methodBlock)) {
+        validateRequestBodyContract(method, apiPath, methodBlock);
         if (!responseStatuses.has('400')) {
           throw new Error(`${method.toUpperCase()} ${apiPath} is missing 400 response`);
         }
@@ -685,14 +695,41 @@ function parseEndpoints(openapi) {
         responseSchema: responseSchema(methodBlock),
         multipart: methodBlock.includes('multipart/form-data'),
         parameters,
+        jsonClientEndpoint,
       });
     }
   }
-  return result;
+  return result.filter((endpoint) => endpoint.jsonClientEndpoint);
+}
+
+function validateRequestBodyContract(method, apiPath, methodBlock) {
+  const requestBlock = nestedBlock(methodBlock, 'requestBody:');
+  if (!requestBlock.match(/^\s+description:\s+\S.+$/m)) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} requestBody is missing description`);
+  }
+  if (!requestBlock.includes('required: true')) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} requestBody must be required`);
+  }
+
+  const hasJSON = requestBlock.includes('application/json:');
+  const hasMultipart = requestBlock.includes('multipart/form-data:');
+  if (!hasJSON && !hasMultipart) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} requestBody must use application/json or multipart/form-data`);
+  }
+  if (hasJSON && hasMultipart) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} requestBody must not mix JSON and multipart content`);
+  }
+  if (!requestSchema(methodBlock)) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} requestBody is missing a component schema reference`);
+  }
 }
 
 function operationSummary(block) {
   return block.match(/^\s+summary:\s+(.+)$/m)?.[1]?.trim() || '';
+}
+
+function operationDescription(block) {
+  return block.match(/^\s+description:\s+(.+)$/m)?.[1]?.trim() || '';
 }
 
 function validateAuthOperationContract(method, apiPath, methodBlock, responseStatuses) {
@@ -727,6 +764,9 @@ function validatePathParameters(method, apiPath, parameters) {
   for (const param of parameters.filter((item) => item.in === 'path')) {
     if (!templateParamSet.has(param.name)) {
       throw new Error(`${method.toUpperCase()} ${apiPath} declares path parameter ${param.name} that is not present in path template`);
+    }
+    if (!param.required) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} path parameter ${param.name} must be required`);
     }
   }
 }
@@ -783,8 +823,14 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
     requireParameterText(method, apiPath, methodBlock, 'pageSize', 'example: 20');
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
+    requireParameterText(method, apiPath, methodBlock, 'type', 'Transaction type filter');
+    requireParameterText(method, apiPath, methodBlock, 'type', 'example: expense');
     requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'Category id filter');
+    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'example: 1');
     requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'accountId', 'Account id filter');
+    requireParameterText(method, apiPath, methodBlock, 'accountId', 'example: 1');
     requireParameterText(method, apiPath, methodBlock, 'q', 'matched against transaction notes and tags');
     requireParameterText(method, apiPath, methodBlock, 'q', 'example: lunch');
   }
@@ -797,13 +843,19 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
   if (apiPath === '/categories' && method === 'get') {
     require400Response(method, apiPath, responseStatuses);
     requireParameterText(method, apiPath, methodBlock, 'type', "$ref: '#/components/schemas/TransactionType'");
+    requireParameterText(method, apiPath, methodBlock, 'type', 'Transaction type filter');
+    requireParameterText(method, apiPath, methodBlock, 'type', 'example: expense');
   }
   if (apiPath === '/reports/summary' && method === 'get') {
     require400Response(method, apiPath, responseStatuses);
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
     requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'Category id filter');
+    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'example: 1');
     requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
+    requireParameterText(method, apiPath, methodBlock, 'accountId', 'Account id filter');
+    requireParameterText(method, apiPath, methodBlock, 'accountId', 'example: 1');
     requireParameterText(method, apiPath, methodBlock, 'trend', 'enum: [day, week, month]');
     requireParameterText(method, apiPath, methodBlock, 'trend', 'default: month');
     requireParameterText(method, apiPath, methodBlock, 'trend', 'Defaults to month when omitted');
@@ -864,6 +916,19 @@ function operationHasSuccessContent(block, openapi) {
     const componentName = response.block.match(/\$ref:\s+'#\/components\/responses\/([^']+)'/)?.[1] || '';
     return componentName ? responseComponentBlock(openapi, componentName).includes('content:') : false;
   });
+}
+
+function operationHasJSONSuccessContent(block, openapi) {
+  return operationResponseBlocks(block).some((response) => {
+    if (!/^2\d\d$/.test(response.status)) return false;
+    const responseBlock = resolvedResponseBlock(response.block, openapi);
+    return responseBlock.includes('application/json:');
+  });
+}
+
+function resolvedResponseBlock(block, openapi) {
+  const componentName = block.match(/\$ref:\s+'#\/components\/responses\/([^']+)'/)?.[1] || '';
+  return componentName ? responseComponentBlock(openapi, componentName) : block;
 }
 
 function responseComponentBlock(openapi, componentName) {
@@ -956,7 +1021,7 @@ function parseOperationParameters(block) {
   const paramBlocks = parametersBlock.split(/\n(?=\s+- name:|\s+- \$ref:)/).map((item) => item.trim()).filter(Boolean);
   return paramBlocks.map((paramBlock) => {
     if (paramBlock.includes("$ref: '#/components/parameters/Id'")) {
-      return { name: 'id', in: 'path', type: 'integer' };
+      return { name: 'id', in: 'path', type: 'integer', required: true };
     }
     return {
       name: paramBlock.match(/name:\s+([A-Za-z][A-Za-z0-9]*)/)?.[1] || '',

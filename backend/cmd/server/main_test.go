@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"syscall"
@@ -59,6 +60,27 @@ func TestRequestLogFormatterDropsQueryString(t *testing.T) {
 	}
 }
 
+func TestRequestLogFormatterIncludesProtocolAndUserAgent(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+	req.Header.Set("User-Agent", "HaoHaoMobile/1.0")
+
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:    req,
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts",
+	})
+
+	for _, want := range []string{`proto="HTTP/1.1"`, `user_agent="HaoHaoMobile/1.0"`} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("log line = %q, missing %s", line, want)
+		}
+	}
+}
+
 func TestNewHTTPServerAppliesRuntimeConfig(t *testing.T) {
 	cfg := config.Config{
 		Port: "19090",
@@ -84,6 +106,34 @@ func TestNewHTTPServerAppliesRuntimeConfig(t *testing.T) {
 		server.IdleTimeout != 44*time.Second ||
 		server.MaxHeaderBytes != 32768 {
 		t.Fatalf("server timeouts = %#v", server)
+	}
+}
+
+func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"`LoadStrict`",
+		"`validateStartupConfig`",
+		"`CORS_ALLOW_ORIGINS`",
+		"explicit `http` or `https` origins",
+		"wildcards",
+		"credentials disabled",
+		"`gin-contrib/cors`",
+		"`TRUSTED_PROXIES`",
+		"`RequestID` -> `RequestTimeout` -> logger -> `Recovery` -> `SecurityHeaders` -> CORS -> `BodyLimit` -> `ContentType` -> `Accept`",
+		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
+		"early rejections",
+		"`X-Request-ID`",
+		"`HTTP_*`",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("README.md is missing server guidance %q", want)
+		}
 	}
 }
 

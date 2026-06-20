@@ -7,10 +7,13 @@ const openapi = readFileSync(new URL('../../backend/api/openapi.yaml', import.me
 const generatedClient = readFileSync(new URL('../../web/shared/api/generated-client.ts', import.meta.url), 'utf8');
 const generatedTypes = readFileSync(new URL('../../web/shared/types/api.ts', import.meta.url), 'utf8');
 const webApiClient = readFileSync(new URL('../../web/shared/api/client.ts', import.meta.url), 'utf8');
+const webApiReadme = readFileSync(new URL('../../web/shared/api/README.md', import.meta.url), 'utf8');
 const webConfig = readFileSync(new URL('../../web/lib/config.ts', import.meta.url), 'utf8');
 const webDataioApi = readFileSync(new URL('../../web/features/dataio/api.ts', import.meta.url), 'utf8');
 const webEnvExample = readFileSync(new URL('../../web/.env.example', import.meta.url), 'utf8');
 const mobileApiClient = readFileSync(new URL('../../mobile/src/shared/api/client.ts', import.meta.url), 'utf8');
+const mobileApiReadme = readFileSync(new URL('../../mobile/src/shared/api/README.md', import.meta.url), 'utf8');
+const mobileConfig = readFileSync(new URL('../../mobile/src/shared/config.ts', import.meta.url), 'utf8');
 const mobileDataioApi = readFileSync(new URL('../../mobile/src/features/dataio/api.ts', import.meta.url), 'utf8');
 const mobileEnvExample = readFileSync(new URL('../../mobile/.env.example', import.meta.url), 'utf8');
 
@@ -110,6 +113,8 @@ test('generated error codes stay available to API clients', () => {
 	assert.match(webApiClient, /WWW-Authenticate/);
 	assert.match(webApiClient, /network_error/);
 	assert.match(webApiClient, /function networkError\(err: unknown\)/);
+	assert.match(webApiClient, /super\(message, \{ cause \}\)/);
+	assert.match(webApiClient, /new ApiError\(message, 0, 'network_error', '', null, null, null, null, '', err\)/);
 	assert.match(mobileApiClient, /ErrorResponse\['code'\]/);
 	assert.match(mobileApiClient, /Retry-After/);
 	assert.match(mobileApiClient, /rateLimitLimit/);
@@ -119,6 +124,8 @@ test('generated error codes stay available to API clients', () => {
 	assert.match(mobileApiClient, /WWW-Authenticate/);
 	assert.match(mobileApiClient, /network_error/);
 	assert.match(mobileApiClient, /function networkError\(err: unknown\)/);
+	assert.match(mobileApiClient, /super\(message, \{ cause \}\)/);
+	assert.match(mobileApiClient, /new ApiError\(message, 0, 'network_error', '', null, null, null, null, '', err\)/);
 });
 
 test('OpenAPI documents CORS allowlist rejection behavior', () => {
@@ -171,7 +178,7 @@ test('API clients send explicit Accept headers for negotiated responses', () => 
 });
 
 test('public API base env values are validated before client requests', () => {
-	for (const source of [webConfig, mobileApiClient]) {
+	for (const source of [webConfig, mobileConfig]) {
 		assert.match(source, /function normalizePublicApiBase\(value: string \| undefined, fallback: string, name: string\)/);
 		assert.match(source, /new URL\(raw\)/);
 		assert.match(source, /absolute http\(s\) URL/);
@@ -181,8 +188,10 @@ test('public API base env values are validated before client requests', () => {
 	}
 	assert.match(webConfig, /process\.env\.NEXT_PUBLIC_API_BASE/);
 	assert.match(webConfig, /DEFAULT_API_BASE = 'http:\/\/localhost:8080\/api\/v1'/);
-	assert.match(mobileApiClient, /process\.env\.EXPO_PUBLIC_API_BASE/);
-	assert.match(mobileApiClient, /DEFAULT_API_BASE = 'http:\/\/127\.0\.0\.1:8080\/api\/v1'/);
+	assert.match(mobileConfig, /process\.env\.EXPO_PUBLIC_API_BASE/);
+	assert.match(mobileConfig, /DEFAULT_API_BASE = 'http:\/\/127\.0\.0\.1:8080\/api\/v1'/);
+	assert.match(mobileApiClient, /import \{ API_BASE \} from '\.\.\/config';/);
+	assert.doesNotMatch(mobileApiClient, /process\.env\.EXPO_PUBLIC_API_BASE/);
 });
 
 test('public API base env examples document client exposure and URL shape', () => {
@@ -248,10 +257,47 @@ test('API clients route logout through shared network error handling', () => {
 	assert.doesNotMatch(mobileApiClient, /fetch\(`\$\{API_BASE\}\/auth\/logout/);
 });
 
+test('API clients bound fetch calls with timeout and preserve caller abort signals', () => {
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /const API_REQUEST_TIMEOUT_MS = 30_000;/);
+		assert.match(source, /function requestSignal\(callerSignal\?: AbortSignal \| null\)/);
+		assert.match(source, /const controller = new AbortController\(\);/);
+		assert.match(source, /setTimeout\(\(\) => controller\.abort\(\), API_REQUEST_TIMEOUT_MS\)/);
+		assert.match(source, /callerSignal\.addEventListener\('abort', abort, \{ once: true \}\)/);
+		assert.match(source, /return await fetch\(`\$\{API_BASE\}\$\{path\}`, \{ \.\.\.init, signal \}\);/);
+		assert.match(source, /finally \{\n\s+cleanup\(\);\n\s+\}/);
+	}
+});
+
+test('API client READMEs document shared runtime contracts', () => {
+	for (const source of [webApiReadme, mobileApiReadme]) {
+		for (const text of [
+			'`fetchAPI`',
+			'`X-Request-ID`',
+			'`Content-Type: application/json` only when the body is not `FormData`',
+			'30 second `AbortController` timeout',
+			'`RequestInit.signal`',
+			'`application/*+json`',
+			'`Retry-After`',
+			'`RateLimit-*`',
+			'`WWW-Authenticate`',
+			'`Content-Disposition` `filename*`',
+		]) {
+			assert.match(source, new RegExp(escapeRegExp(text)));
+		}
+	}
+});
+
 test('API clients support Retry-After delay seconds and HTTP-date values', () => {
 	const expected = /const retryAt = Date\.parse\(value\);[\s\S]+return Math\.max\(0, Math\.ceil\(\(retryAt - Date\.now\(\)\) \/ 1000\)\);/;
 	assert.match(webApiClient, expected);
 	assert.match(mobileApiClient, expected);
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /\/\^\\d\+\$\/\.test\(value\)/);
+		assert.match(source, /Number\.isSafeInteger\(seconds\)/);
+		assert.match(source, /\/\^\[\+-\]\?\\d\/\.test\(value\)/);
+		assert.doesNotMatch(source, /Math\.ceil\(seconds\)/);
+	}
 });
 
 test('API clients expose rate limit response headers on errors', () => {
@@ -278,6 +324,18 @@ test('generator requires human-readable operation summaries', () => {
 		const blockEnd = nextOperation === -1 ? openapi.indexOf('\ncomponents:', operationId.index) : nextOperation;
 		const block = openapi.slice(blockStart, blockEnd);
 		assert.match(block, /^\s+summary:\s+\S.+$/m, `${operationId[1]} is missing summary`);
+	}
+});
+
+test('generator requires human-readable operation descriptions', () => {
+	assert.match(generator, /operationDescription\(methodBlock\)/);
+	assert.match(generator, /is missing description/);
+	for (const operationId of openapi.matchAll(/operationId:\s+([A-Za-z][A-Za-z0-9]*)/g)) {
+		const blockStart = openapi.lastIndexOf('\n    ', operationId.index);
+		const nextOperation = openapi.indexOf('\n      operationId:', operationId.index + 1);
+		const blockEnd = nextOperation === -1 ? openapi.indexOf('\ncomponents:', operationId.index) : nextOperation;
+		const block = openapi.slice(blockStart, blockEnd);
+		assert.match(block, /^\s+description:\s+\S.+$/m, `${operationId[1]} is missing description`);
 	}
 });
 
@@ -330,6 +388,8 @@ test('generator requires a 2xx success response for every operation', () => {
 test('generator requires declared path parameters for templated paths', () => {
 	assert.match(generator, /validatePathParameters/);
 	assert.match(generator, /missing path parameter declaration/);
+	assert.match(generator, /path parameter \$\{param\.name\} must be required/);
+	assert.match(openapi, /Id:\n\s+name: id\n\s+in: path\n\s+required: true\n\s+description: Positive resource identifier\.[\s\S]+example: 1/);
 });
 
 test('generator requires X-Request-ID on success responses', () => {
@@ -475,8 +535,28 @@ test('generator requires body error responses for every request body operation',
 	);
 });
 
+test('OpenAPI request bodies match generated client assumptions', () => {
+	assert.match(generator, /function validateRequestBodyContract\(method, apiPath, methodBlock\)/);
+	assert.match(generator, /requestBody is missing description/);
+	assert.match(generator, /requestBody must be required/);
+	assert.match(generator, /requestBody must use application\/json or multipart\/form-data/);
+	assert.match(generator, /requestBody must not mix JSON and multipart content/);
+	assert.match(generator, /requestBody is missing a component schema reference/);
+
+	const requestBodies = [...openapi.matchAll(/\n      requestBody:\n([\s\S]*?)(?=\n      responses:)/g)];
+	assert.ok(requestBodies.length > 0, 'OpenAPI should contain request bodies');
+	for (const [, requestBody] of requestBodies) {
+		assert.match(requestBody, /^\s+description:\s+\S.+$/m);
+		assert.match(requestBody, /required: true/);
+		assert.match(requestBody, /(application\/json|multipart\/form-data):/);
+		assert.match(requestBody, /\$ref: '#\/components\/schemas\/[A-Za-z][A-Za-z0-9]*'/);
+	}
+});
+
 test('generator requires Allow header on method-not-allowed response', () => {
 	assert.match(generator, /components\.responses\.MethodNotAllowed is missing Allow header/);
+	assert.match(generator, /components\.headers\.Allow must document comma-separated supported methods with an example/);
+	assert.match(openapi, /Allow:[\s\S]+Comma-separated HTTP methods supported by the target route\./);
 	assert.match(openapi, /Allow:[\s\S]+example: GET, POST/);
 });
 
@@ -492,9 +572,9 @@ test('generator requires WWW-Authenticate header on unauthorized response', () =
 test('generator requires Retry-After header on rate-limited response', () => {
 	assert.match(generator, /components\.responses\.RateLimited is missing Retry-After header/);
 	assert.match(generator, /components\.responses\.RateLimited is missing \$\{headerName\} header/);
-	assert.match(generator, /components\.headers\.RetryAfter must document remaining wait time as HTTP-date or delay-seconds/);
+	assert.match(generator, /components\.headers\.RetryAfter must document remaining wait time as HTTP-date or non-negative integer delay-seconds/);
 	assert.match(generator, /components\.headers\.\$\{componentName\} must document a bounded integer rate-limit value/);
-	assert.match(openapi, /RetryAfter:[\s\S]+Remaining wait time before retrying/);
+	assert.match(openapi, /RetryAfter:[\s\S]+HTTP-date or non-negative integer delay-seconds/);
 	assert.match(openapi, /RetryAfter:[\s\S]+example: '60'/);
 	assert.match(openapi, /RateLimitLimit:[\s\S]+Maximum number of failed login attempts/);
 	assert.match(openapi, /RateLimited:[\s\S]+RateLimit-Limit:[\s\S]+RateLimit-Remaining:[\s\S]+RateLimit-Reset:/);
@@ -526,6 +606,10 @@ test('generator requires documented accepted datetime query formats', () => {
 	assert.match(openapi, /name: end[\s\S]+example: '2026-06-30'/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'trend', 'default: month'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'trend', 'example: month'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'Category id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'Account id filter'\)/);
+	assert.match(openapi, /name: categoryId\n\s+in: query\n\s+description: Category id filter\.[\s\S]+example: 1/);
+	assert.match(openapi, /name: accountId\n\s+in: query\n\s+description: Account id filter\.[\s\S]+example: 1/);
 	assert.match(openapi, /name: trend\n\s+in: query\n\s+description: Trend aggregation granularity\. Defaults to month when omitted\.[\s\S]+default: month/);
 	assert.match(openapi, /name: trend[\s\S]+example: month/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'month', 'Budget month in YYYY-MM format'\)/);
@@ -536,6 +620,8 @@ test('generator requires documented accepted datetime query formats', () => {
 
 test('generator requires documented download filename headers', () => {
 	assert.match(generator, /GET \/io\/export is missing Content-Disposition response header/);
+	assert.match(generator, /operationHasJSONSuccessContent\(methodBlock, source\)/);
+	assert.match(generator, /result\.filter\(\(endpoint\) => endpoint\.jsonClientEndpoint\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'format', 'default: csv'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'format', 'Defaults to csv when omitted'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'format', 'example: csv'\)/);
@@ -543,6 +629,9 @@ test('generator requires documented download filename headers', () => {
 	assert.match(openapi, /name: format[\s\S]+example: csv/);
 	assert.match(generator, /components\.headers\.ContentDisposition is missing filename\* guidance/);
 	assert.match(openapi, /ContentDisposition:[\s\S]+example: attachment; filename="transactions\.csv"; filename\*=UTF-8''transactions\.csv/);
+	assert.doesNotMatch(generatedClient, /getIoExport/);
+	assert.match(webDataioApi, /download\(`\/io\/export\?format=\$\{format\}`, exportAccept\(format\)\)/);
+	assert.match(mobileDataioApi, /download\(`\/io\/export\?format=\$\{format\}`, exportAccept\(format\)\)/);
 	for (const source of [webApiClient, mobileApiClient]) {
 		assert.match(source, /function contentDispositionParams\(disposition: string\)/);
 		assert.match(source, /function splitHeaderParameters\(value: string\)/);
@@ -570,12 +659,23 @@ test('generator requires bounded pagination response schema', () => {
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'page', 'example: 1'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'pageSize', 'default: 20'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'pageSize', 'example: 20'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'type', 'Transaction type filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'type', 'example: expense'\)/);
+	assert.match(generator, /apiPath === '\/categories'[\s\S]+requireParameterText\(method, apiPath, methodBlock, 'type', 'Transaction type filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'Category id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'example: 1'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'Account id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'example: 1'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'matched against transaction notes and tags'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'example: lunch'\)/);
 	assert.match(openapi, /name: page\n\s+in: query\n\s+description: Page number\. Defaults to 1 when omitted\.[\s\S]+default: 1/);
 	assert.match(openapi, /name: page[\s\S]+example: 1/);
 	assert.match(openapi, /name: pageSize\n\s+in: query\n\s+description: Number of items per page\. Defaults to 20 when omitted\.[\s\S]+default: 20/);
 	assert.match(openapi, /name: pageSize[\s\S]+example: 20/);
+	assert.match(openapi, /name: type\n\s+in: query\n\s+description: Transaction type filter\.[\s\S]+\$ref: '#\/components\/schemas\/TransactionType'[\s\S]+example: expense/);
+	assert.match(openapi, /\/categories:[\s\S]+name: type\n\s+in: query\n\s+description: Transaction type filter\.[\s\S]+\$ref: '#\/components\/schemas\/TransactionType'[\s\S]+example: expense/);
+	assert.match(openapi, /name: categoryId\n\s+in: query\n\s+description: Category id filter\.[\s\S]+example: 1/);
+	assert.match(openapi, /name: accountId\n\s+in: query\n\s+description: Account id filter\.[\s\S]+example: 1/);
 	assert.match(openapi, /name: q\n\s+in: query\n\s+description: Keyword filter matched against transaction notes and tags\./);
 	assert.match(openapi, /name: q[\s\S]+example: lunch/);
 	assert.match(openapi, /Link:[\s\S]+example: <\/api\/v1\/transactions\?page=2&pageSize=20>; rel="next"/);
@@ -628,4 +728,8 @@ function duplicateYamlMappingKeys(source) {
 	}
 
 	return duplicates;
+}
+
+function escapeRegExp(value) {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

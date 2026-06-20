@@ -5,6 +5,7 @@
 ## Contents
 
 - `api`: HTTP client and token persistence.
+- `config`: public runtime configuration such as the API base URL.
 - `types`: API DTOs shared across screens.
 - `ui`: shared presentational components.
 - `utils`: formatting helpers.

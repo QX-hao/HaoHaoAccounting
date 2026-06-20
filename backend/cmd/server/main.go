@@ -262,17 +262,37 @@ func requestLogFormatter(param gin.LogFormatterParams) string {
 	}
 
 	return fmt.Sprintf(
-		"time=%q status=%d latency=%q client_ip=%q method=%q path=%q request_id=%q bytes=%d error=%q\n",
+		"time=%q status=%d latency=%q client_ip=%q method=%q path=%q proto=%q user_agent=%q request_id=%q bytes=%d error=%q\n",
 		param.TimeStamp.Format(time.RFC3339),
 		param.StatusCode,
 		param.Latency.String(),
 		param.ClientIP,
 		param.Method,
 		logPath(param.Path),
+		logProto(param.Request),
+		logUserAgent(param.Request),
 		requestID,
 		param.BodySize,
 		param.ErrorMessage,
 	)
+}
+
+func logProto(request *http.Request) string {
+	if request == nil || request.Proto == "" {
+		return "-"
+	}
+	return request.Proto
+}
+
+func logUserAgent(request *http.Request) string {
+	if request == nil {
+		return "-"
+	}
+	userAgent := strings.TrimSpace(request.UserAgent())
+	if userAgent == "" {
+		return "-"
+	}
+	return userAgent
 }
 
 func logPath(path string) string {

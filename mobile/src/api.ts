@@ -1,1 +1,2 @@
-export { API_BASE, clearToken, getToken, request, setToken } from './shared/api/client';
+export { API_BASE } from './shared/config';
+export { clearToken, getToken, request, setToken } from './shared/api/client';

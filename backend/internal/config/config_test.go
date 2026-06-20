@@ -636,6 +636,24 @@ func TestEnvExampleDocumentsExplicitCORSOrigins(t *testing.T) {
 	}
 }
 
+func TestEnvExampleLoadsStrictly(t *testing.T) {
+	unsetConfigEnv(t)
+
+	if err := LoadDotEnv(filepath.Join("..", "..", ".env.example")); err != nil {
+		t.Fatalf("LoadDotEnv backend/.env.example: %v", err)
+	}
+	cfg, err := LoadStrict()
+	if err != nil {
+		t.Fatalf("LoadStrict with backend/.env.example: %v", err)
+	}
+	if cfg.JWT.Secret == "" {
+		t.Fatal("backend/.env.example must provide a development JWT_SECRET")
+	}
+	if cfg.Admin.Password == "" {
+		t.Fatal("backend/.env.example must provide a development ADMIN_PASSWORD")
+	}
+}
+
 func TestComposeBackendEnvironmentCoversConfigKeys(t *testing.T) {
 	sourceKeys := configSourceEnvKeys(t)
 
@@ -649,6 +667,24 @@ func TestComposeBackendEnvironmentCoversConfigKeys(t *testing.T) {
 				t.Fatalf("docker-compose.yaml %s environment has unknown config keys: %v", service, unexpected)
 			}
 		})
+	}
+}
+
+func TestProductionComposeReusesBackendEnvironmentAnchor(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yaml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yaml: %v", err)
+	}
+	source := string(data)
+
+	if !strings.Contains(source, "x-backend-env: &backend-env") {
+		t.Fatal("docker-compose.yaml must define x-backend-env anchor")
+	}
+	for _, service := range []string{"backend", "dbmigrate"} {
+		block := composeServiceBlock(source, service)
+		if !strings.Contains(block, "environment: *backend-env") {
+			t.Fatalf("%s service must reuse backend environment anchor:\n%s", service, block)
+		}
 	}
 }
 
@@ -851,9 +887,11 @@ func composeServiceEnvironmentKeys(t *testing.T, service string) []string {
 	}
 
 	keys := map[string]bool{}
+	source := string(data)
+	anchorKeys := composeBackendEnvAnchorKeys(source)
 	inBackend, inEnvironment := false, false
 	serviceMarker := "  " + service + ":"
-	for _, line := range strings.Split(string(data), "\n") {
+	for _, line := range strings.Split(source, "\n") {
 		if line == serviceMarker {
 			inBackend = true
 			inEnvironment = false
@@ -866,6 +904,12 @@ func composeServiceEnvironmentKeys(t *testing.T, service string) []string {
 			continue
 		}
 		if strings.HasPrefix(line, "    environment:") {
+			if strings.Contains(line, "*backend-env") {
+				for _, key := range anchorKeys {
+					keys[key] = true
+				}
+				return sortedKeys(keys)
+			}
 			inEnvironment = true
 			continue
 		}
@@ -873,6 +917,29 @@ func composeServiceEnvironmentKeys(t *testing.T, service string) []string {
 			break
 		}
 		if !inEnvironment {
+			continue
+		}
+		clean := strings.TrimSpace(line)
+		key, _, ok := strings.Cut(clean, ":")
+		if ok && isEnvKey(key) {
+			keys[key] = true
+		}
+	}
+	return sortedKeys(keys)
+}
+
+func composeBackendEnvAnchorKeys(data string) []string {
+	keys := map[string]bool{}
+	inAnchor := false
+	for _, line := range strings.Split(data, "\n") {
+		if line == "x-backend-env: &backend-env" {
+			inAnchor = true
+			continue
+		}
+		if inAnchor && line != "" && !strings.HasPrefix(line, "  ") {
+			break
+		}
+		if !inAnchor {
 			continue
 		}
 		clean := strings.TrimSpace(line)
@@ -964,7 +1031,23 @@ func sortedKeys(values map[string]bool) []string {
 
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{
+	for _, key := range configEnvKeys() {
+		t.Setenv(key, "")
+	}
+}
+
+func unsetConfigEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range configEnvKeys() {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+	}
+}
+
+func configEnvKeys() []string {
+	return []string{
 		"PORT",
 		"DB_DRIVER",
 		"DB_DSN",
@@ -999,8 +1082,6 @@ func clearConfigEnv(t *testing.T) {
 		"JWT_CLOCK_SKEW",
 		"JWT_ISSUER",
 		"JWT_AUDIENCE",
-	} {
-		t.Setenv(key, "")
 	}
 }
 

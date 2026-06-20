@@ -1,17 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { API_BASE } from '../config';
 import type { ErrorResponse } from '../types/api';
 
 const TOKEN_KEY = 'haohao_token';
-const DEFAULT_API_BASE = 'http://127.0.0.1:8080/api/v1';
-export const API_BASE = normalizePublicApiBase(
-  process.env.EXPO_PUBLIC_API_BASE,
-  DEFAULT_API_BASE,
-  'EXPO_PUBLIC_API_BASE',
-);
 
 type ApiErrorCode = ErrorResponse['code'] | 'network_error' | '';
 type ApiErrorBody = Partial<ErrorResponse>;
+const API_REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
   status: number;
@@ -33,8 +29,9 @@ export class ApiError extends Error {
     rateLimitRemaining: number | null = null,
     rateLimitResetSeconds: number | null = null,
     authenticateChallenge = '',
+    cause?: unknown,
   ) {
-    super(message);
+    super(message, { cause });
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
@@ -164,23 +161,6 @@ function newRequestId() {
   return `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function normalizePublicApiBase(value: string | undefined, fallback: string, name: string) {
-  const raw = value?.trim() || fallback;
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error(`${name} must be an absolute http(s) URL`);
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error(`${name} must use http or https`);
-  }
-  if (url.username || url.password || url.search || url.hash) {
-    throw new Error(`${name} must not include credentials, query strings, or fragments`);
-  }
-  return url.toString().replace(/\/+$/, '');
-}
-
 async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
   const contentType = resp.headers.get('Content-Type') || '';
   if (isJSONContentType(contentType)) {
@@ -196,16 +176,39 @@ function isJSONContentType(contentType: string) {
 }
 
 async function fetchAPI(path: string, init: RequestInit = {}) {
+  const { signal, cleanup } = requestSignal(init.signal);
   try {
-    return await fetch(`${API_BASE}${path}`, init);
+    return await fetch(`${API_BASE}${path}`, { ...init, signal });
   } catch (err) {
     throw networkError(err);
+  } finally {
+    cleanup();
   }
+}
+
+function requestSignal(callerSignal?: AbortSignal | null) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  const abort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort();
+    } else {
+      callerSignal.addEventListener('abort', abort, { once: true });
+    }
+  }
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout);
+      callerSignal?.removeEventListener('abort', abort);
+    },
+  };
 }
 
 function networkError(err: unknown) {
   const message = err instanceof Error && err.message ? err.message : '网络请求失败';
-  return new ApiError(message, 0, 'network_error');
+  return new ApiError(message, 0, 'network_error', '', null, null, null, null, '', err);
 }
 
 function apiError(resp: Response, data: ApiErrorBody): ApiError {
@@ -234,10 +237,12 @@ function nonNegativeIntegerHeader(resp: Response, name: string): number | null {
 function retryAfterSeconds(resp: Response): number | null {
   const value = resp.headers.get('Retry-After')?.trim();
   if (!value) return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds)) {
-    if (seconds < 0) return null;
-    return Math.ceil(seconds);
+  if (/^\d+$/.test(value)) {
+    const seconds = Number(value);
+    return Number.isSafeInteger(seconds) ? seconds : null;
+  }
+  if (/^[+-]?\d/.test(value)) {
+    return null;
   }
   const retryAt = Date.parse(value);
   if (!Number.isFinite(retryAt)) return null;

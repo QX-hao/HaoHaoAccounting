@@ -36,8 +36,10 @@ paths:
       tags: [auth]
       operationId: postAuthLogin
       summary: Log in with username and password
+      description: Verifies the configured admin credentials and returns a bearer token plus the current user profile.
       security: []
       requestBody:
+        description: Username and password credentials for starting an authenticated session.
         required: true
         content:
           application/json:
@@ -95,6 +97,7 @@ paths:
       tags: [auth]
       operationId: postAuthRefresh
       summary: Refresh the current access token
+      description: Issues a fresh token for the authenticated user without changing the user profile.
       responses:
         '200':
           description: Refreshed token
@@ -132,6 +135,7 @@ paths:
       tags: [auth]
       operationId: postAuthLogout
       summary: Log out the current user
+      description: Revokes the presented bearer token so it cannot be used for later authenticated requests.
       responses:
         '200':
           $ref: '#/components/responses/Ok'
@@ -152,6 +156,7 @@ paths:
       tags: [auth]
       operationId: getMe
       summary: Get the current user profile
+      description: Returns the profile associated with the authenticated bearer token.
       responses:
         '200':
           description: Current user
@@ -189,6 +194,7 @@ paths:
       tags: [accounts]
       operationId: getAccounts
       summary: List accounts
+      description: Returns all accounts available to the authenticated user.
       responses:
         '200':
           description: Account list
@@ -223,7 +229,9 @@ paths:
       tags: [accounts]
       operationId: postAccounts
       summary: Create an account
+      description: Creates a new account with its opening balance and metadata.
       requestBody:
+        description: Account details to create.
         required: true
         content:
           application/json:
@@ -270,9 +278,11 @@ paths:
       tags: [accounts]
       operationId: putAccountsById
       summary: Update an account
+      description: Replaces an existing account with the supplied account details.
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
+        description: Complete account details to replace the existing account.
         required: true
         content:
           application/json:
@@ -318,6 +328,7 @@ paths:
       tags: [accounts]
       operationId: deleteAccountsById
       summary: Delete an account
+      description: Deletes the selected account when it is not blocked by related ledger data.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -342,6 +353,7 @@ paths:
       tags: [budgets]
       operationId: getBudgets
       summary: List budgets
+      description: Returns budgets, optionally filtered to a specific YYYY-MM month.
       parameters:
         - name: month
           in: query
@@ -386,7 +398,9 @@ paths:
       tags: [budgets]
       operationId: postBudgets
       summary: Create a budget
+      description: Creates a monthly budget for a category.
       requestBody:
+        description: Monthly category budget details to create.
         required: true
         content:
           application/json:
@@ -435,9 +449,11 @@ paths:
       tags: [budgets]
       operationId: putBudgetsById
       summary: Update a budget
+      description: Replaces an existing monthly budget with the supplied budget details.
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
+        description: Complete monthly budget details to replace the existing budget.
         required: true
         content:
           application/json:
@@ -483,6 +499,7 @@ paths:
       tags: [budgets]
       operationId: deleteBudgetsById
       summary: Delete a budget
+      description: Deletes the selected monthly budget.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -509,11 +526,14 @@ paths:
       tags: [categories]
       operationId: getCategories
       summary: List categories
+      description: Returns categories, optionally filtered by transaction type.
       parameters:
         - name: type
           in: query
+          description: Transaction type filter.
           schema:
             $ref: '#/components/schemas/TransactionType'
+          example: expense
       responses:
         '200':
           description: Category list
@@ -550,7 +570,9 @@ paths:
       tags: [categories]
       operationId: postCategories
       summary: Create a category
+      description: Creates a category for classifying income or expense transactions.
       requestBody:
+        description: Category details to create.
         required: true
         content:
           application/json:
@@ -597,9 +619,11 @@ paths:
       tags: [categories]
       operationId: putCategoriesById
       summary: Update a category
+      description: Replaces an existing category with the supplied category details.
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
+        description: Complete category details to replace the existing category.
         required: true
         content:
           application/json:
@@ -647,6 +671,7 @@ paths:
       tags: [categories]
       operationId: deleteCategoriesById
       summary: Delete a category
+      description: Deletes the selected category when it is not blocked by related ledger data.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -675,6 +700,7 @@ paths:
       tags: [transactions]
       operationId: getTransactions
       summary: List transactions
+      description: Returns paginated transactions filtered by date range, type, category, account, or keyword.
       parameters:
         - name: page
           in: query
@@ -709,18 +735,24 @@ paths:
           example: '2026-06-30'
         - name: type
           in: query
+          description: Transaction type filter.
           schema:
             $ref: '#/components/schemas/TransactionType'
+          example: expense
         - name: categoryId
           in: query
+          description: Category id filter.
           schema:
             type: integer
             minimum: 1
+          example: 1
         - name: accountId
           in: query
+          description: Account id filter.
           schema:
             type: integer
             minimum: 1
+          example: 1
         - name: q
           in: query
           description: Keyword filter matched against transaction notes and tags.
@@ -765,7 +797,9 @@ paths:
       tags: [transactions]
       operationId: postTransactions
       summary: Create a transaction
+      description: Creates a ledger transaction and returns the saved record.
       requestBody:
+        description: Transaction details to create.
         required: true
         content:
           application/json:
@@ -812,9 +846,11 @@ paths:
       tags: [transactions]
       operationId: putTransactionsById
       summary: Update a transaction
+      description: Replaces an existing ledger transaction with the supplied transaction details.
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
+        description: Complete transaction details to replace the existing transaction.
         required: true
         content:
           application/json:
@@ -860,6 +896,7 @@ paths:
       tags: [transactions]
       operationId: deleteTransactionsById
       summary: Delete a transaction
+      description: Deletes the selected ledger transaction.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -884,7 +921,9 @@ paths:
       tags: [ai]
       operationId: postAiParse
       summary: Parse ledger text with AI
+      description: Parses natural-language ledger text into structured transaction fields.
       requestBody:
+        description: Natural-language ledger text to parse into transaction fields.
         required: true
         content:
           application/json:
@@ -927,6 +966,7 @@ paths:
       tags: [reports]
       operationId: getReportsSummary
       summary: Get report summary
+      description: Returns summary totals, category breakdowns, account balances, and trends for the selected range.
       parameters:
         - name: start
           in: query
@@ -944,14 +984,18 @@ paths:
           example: '2026-06-30'
         - name: categoryId
           in: query
+          description: Category id filter.
           schema:
             type: integer
             minimum: 1
+          example: 1
         - name: accountId
           in: query
+          description: Account id filter.
           schema:
             type: integer
             minimum: 1
+          example: 1
         - name: trend
           in: query
           description: Trend aggregation granularity. Defaults to month when omitted.
@@ -997,7 +1041,9 @@ paths:
       tags: [dataio]
       operationId: postIoImportPreview
       summary: Preview an uploaded import file
+      description: Parses an uploaded CSV or XLSX file and returns the import preview without saving rows.
       requestBody:
+        description: CSV or XLSX ledger file to parse without saving records.
         required: true
         content:
           multipart/form-data:
@@ -1040,7 +1086,9 @@ paths:
       tags: [dataio]
       operationId: postIoImport
       summary: Import an uploaded file
+      description: Parses an uploaded CSV or XLSX file and saves valid rows.
       requestBody:
+        description: CSV or XLSX ledger file to parse and save records.
         required: true
         content:
           multipart/form-data:
@@ -1083,6 +1131,7 @@ paths:
       tags: [dataio]
       operationId: getIoImportJobs
       summary: List import jobs
+      description: Returns recent asynchronous import jobs.
       responses:
         '200':
           description: Import job history
@@ -1117,7 +1166,9 @@ paths:
       tags: [dataio]
       operationId: postIoImportJobs
       summary: Queue an import job
+      description: Queues an uploaded CSV or XLSX file for asynchronous import.
       requestBody:
+        description: CSV or XLSX ledger file to import asynchronously.
         required: true
         content:
           multipart/form-data:
@@ -1160,6 +1211,7 @@ paths:
       tags: [dataio]
       operationId: getIoImportJobsById
       summary: Get import job status
+      description: Returns the current status and result metadata for a queued import job.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -1195,7 +1247,9 @@ paths:
       tags: [dataio]
       operationId: postIoImportTextPreview
       summary: Preview pasted import text
+      description: Parses pasted ledger text and returns the import preview without saving rows.
       requestBody:
+        description: Raw ledger text to parse without saving records.
         required: true
         content:
           application/json:
@@ -1238,7 +1292,9 @@ paths:
       tags: [dataio]
       operationId: postIoImportText
       summary: Import pasted text
+      description: Parses pasted ledger text and saves valid rows.
       requestBody:
+        description: Raw ledger text to parse and save records.
         required: true
         content:
           application/json:
@@ -1281,6 +1337,7 @@ paths:
       tags: [dataio]
       operationId: getIoExport
       summary: Export transactions
+      description: Exports transactions as CSV or XLSX for the selected date range.
       parameters:
         - name: format
           in: query
@@ -1353,9 +1410,11 @@ components:
       name: id
       in: path
       required: true
+      description: Positive resource identifier.
       schema:
         type: integer
         minimum: 1
+      example: 1
     RequestID:
       name: X-Request-ID
       in: header
@@ -1416,7 +1475,7 @@ components:
         type: string
       example: Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers
     Allow:
-      description: HTTP methods supported by the target route.
+      description: Comma-separated HTTP methods supported by the target route.
       schema:
         type: string
       example: GET, POST
@@ -1426,7 +1485,7 @@ components:
         type: string
       example: Bearer realm="haohao-accounting-api", error="invalid_token", error_description="The access token is missing, expired, revoked, or invalid"
     RetryAfter:
-      description: Remaining wait time before retrying, as either HTTP-date or delay-seconds.
+      description: Remaining wait time before retrying, as either HTTP-date or non-negative integer delay-seconds.
       schema:
         type: string
       example: '60'
