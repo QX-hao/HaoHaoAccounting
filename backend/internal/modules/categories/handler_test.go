@@ -3,6 +3,7 @@ package categories
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
@@ -34,6 +35,32 @@ func TestListAcceptsDefaultQueryParameters(t *testing.T) {
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestCreateRejectsInvalidRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewHandler(NewService(testutil.NewStore(t), nil)).Register(router.Group(""))
+
+	for _, body := range []string{
+		`{}`,
+		`{"type":"income"}`,
+		`{"name":"Bonus"}`,
+		`{"name":"","type":"income"}`,
+		`{"name":"Bonus","type":""}`,
+		`{"name":"Bonus","type":"transfer"}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/categories", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+			}
+		})
 	}
 }
 

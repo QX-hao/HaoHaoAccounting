@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
 const (
@@ -156,6 +157,11 @@ func BindJSONBody(c *gin.Context, dst any) error {
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("request body must contain a single JSON value")
+	}
+	if binding.Validator != nil {
+		if err := binding.Validator.ValidateStruct(dst); err != nil {
+			return err
+		}
 	}
 	return nil
 }

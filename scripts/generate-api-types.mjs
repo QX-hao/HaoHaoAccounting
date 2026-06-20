@@ -85,6 +85,8 @@ function validateSchemaConstraints(allSchemas) {
     ['AccountRequest', 'minimum: 0'],
     ['AccountRequest', 'multipleOf: 0.01'],
     ['BudgetRequest', "pattern: '^\\d{4}-\\d{2}$'"],
+    ['BudgetRequest', 'required: [month, categoryId, amount]'],
+    ['BudgetRequest', 'minimum: 1'],
     ['BudgetRequest', 'minimum: 0'],
     ['BudgetRequest', 'multipleOf: 0.01'],
     ['CategoryRequest', 'minLength: 1'],
@@ -832,6 +834,8 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
     requireParameterText(method, apiPath, methodBlock, 'accountId', 'Account id filter');
     requireParameterText(method, apiPath, methodBlock, 'accountId', 'example: 1');
     requireParameterText(method, apiPath, methodBlock, 'q', 'matched against transaction notes and tags');
+    requireParameterText(method, apiPath, methodBlock, 'q', 'Maximum 100 characters');
+    requireParameterText(method, apiPath, methodBlock, 'q', 'maxLength: 100');
     requireParameterText(method, apiPath, methodBlock, 'q', 'example: lunch');
   }
   if (apiPath === '/budgets' && method === 'get') {

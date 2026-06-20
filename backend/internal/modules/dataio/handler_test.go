@@ -208,6 +208,35 @@ func TestGetImportJobRejectsInvalidPathID(t *testing.T) {
 	}
 }
 
+func TestImportTextRejectsInvalidRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	store := testutil.NewStore(t)
+	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group(""))
+
+	for _, path := range []string{
+		"/io/import/text/preview",
+		"/io/import/text",
+	} {
+		for _, body := range []string{
+			`{}`,
+			`{"content":""}`,
+			`{"content":"` + strings.Repeat("x", MaxImportFileBytes+1) + `"}`,
+		} {
+			t.Run(path+" "+body[:min(len(body), 32)], func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				resp := httptest.NewRecorder()
+				router.ServeHTTP(resp, req)
+
+				if resp.Code != http.StatusBadRequest {
+					t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+				}
+			})
+		}
+	}
+}
+
 func TestMultipartImportMapsStreamingBodyLimitToPayloadTooLarge(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

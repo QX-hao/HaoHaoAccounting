@@ -181,6 +181,30 @@ func TestLoginPreservesPasswordWhitespace(t *testing.T) {
 	}
 }
 
+func TestLoginRejectsMissingCredentialsAtBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	s := testutil.NewStore(t)
+	router := gin.New()
+	handler := &Handler{store: s, loginLimiter: newLoginLimiter(3, time.Minute), tokenService: testTokenService(t)}
+	handler.RegisterPublic(router.Group("/api/v1"))
+
+	for _, body := range []string{
+		`{}`,
+		`{"username":"admin"}`,
+		`{"password":"secret-password"}`,
+		`{"username":"","password":"secret-password"}`,
+		`{"username":"admin","password":""}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			resp := postLogin(t, router, body)
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+			}
+		})
+	}
+}
+
 func TestLoginRateLimiterPrunesExpiredAttempts(t *testing.T) {
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 	limiter := newLoginLimiter(2, time.Minute)

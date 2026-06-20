@@ -24,7 +24,7 @@ func TestBudgetCreateUpdateDelete(t *testing.T) {
 
 	service := NewService(s, nil)
 	ctx := context.Background()
-	budget, err := service.Create(ctx, user.ID, budgetRequest{Month: "2026-06", CategoryID: category.ID, Amount: 1200})
+	budget, err := service.Create(ctx, user.ID, budgetRequest{Month: "2026-06", CategoryID: category.ID, Amount: floatPtr(1200)})
 	if err != nil {
 		t.Fatalf("create budget: %v", err)
 	}
@@ -32,11 +32,11 @@ func TestBudgetCreateUpdateDelete(t *testing.T) {
 		t.Fatalf("amount cents = %d", budget.AmountCents)
 	}
 
-	updated, err := service.Update(ctx, user.ID, budget.ID, budgetRequest{Month: "2026-06", CategoryID: 0, Amount: 2000})
+	updated, err := service.Update(ctx, user.ID, budget.ID, budgetRequest{Month: "2026-06", CategoryID: category.ID, Amount: floatPtr(2000)})
 	if err != nil {
 		t.Fatalf("update budget: %v", err)
 	}
-	if updated.CategoryID != 0 || updated.AmountCents != 200000 {
+	if updated.CategoryID != category.ID || updated.AmountCents != 200000 {
 		t.Fatalf("updated budget = %#v", updated)
 	}
 
@@ -71,7 +71,7 @@ func TestBudgetRejectsIncomeCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := NewService(s, nil).Create(context.Background(), user.ID, budgetRequest{Month: "2026-06", CategoryID: category.ID, Amount: 1000})
+	_, err := NewService(s, nil).Create(context.Background(), user.ID, budgetRequest{Month: "2026-06", CategoryID: category.ID, Amount: floatPtr(1000)})
 	if err == nil || err.Error() != "budget category must be expense" {
 		t.Fatalf("err = %v", err)
 	}
@@ -80,7 +80,7 @@ func TestBudgetRejectsIncomeCategory(t *testing.T) {
 func TestBudgetRejectsAmountsWithMoreThanTwoFractionDigits(t *testing.T) {
 	s := testutil.NewStore(t)
 
-	_, err := NewService(s, nil).Create(context.Background(), 1, budgetRequest{Month: "2026-06", Amount: 1.234})
+	_, err := NewService(s, nil).Create(context.Background(), 1, budgetRequest{Month: "2026-06", Amount: floatPtr(1.234)})
 	if err == nil {
 		t.Fatal("expected invalid amount precision error")
 	}
@@ -111,4 +111,8 @@ func TestBudgetServicePassesContextToGORMQueries(t *testing.T) {
 	if got != "request-context" {
 		t.Fatalf("gorm context value = %#v", got)
 	}
+}
+
+func floatPtr(value float64) *float64 {
+	return &value
 }

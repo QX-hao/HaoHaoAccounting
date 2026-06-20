@@ -37,6 +37,11 @@ func TestCreateRejectsInvalidBalanceAmounts(t *testing.T) {
 	NewHandler(NewService(testutil.NewStore(t), nil)).Register(router.Group(""))
 
 	for _, body := range []string{
+		`{}`,
+		`{"type":"cash","balance":0}`,
+		`{"name":"Cash","balance":0}`,
+		`{"name":"","type":"cash","balance":0}`,
+		`{"name":"Cash","type":"","balance":0}`,
 		`{"name":"Cash","type":"cash","balance":-1}`,
 		`{"name":"Cash","type":"cash","balance":1.234}`,
 	} {

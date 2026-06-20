@@ -85,8 +85,8 @@ func (h *Handler) list(c *gin.Context) {
 
 func (h *Handler) create(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	var req Request
-	if err := httputil.BindJSONBody(c, &req); err != nil {
+	var body transactionRequestBody
+	if err := httputil.BindJSONBody(c, &body); err != nil {
 		if middleware.HandleBodyReadError(c, err) {
 			return
 		}
@@ -94,7 +94,7 @@ func (h *Handler) create(c *gin.Context) {
 		return
 	}
 
-	tx, err := h.service.Create(c.Request.Context(), uid, req)
+	tx, err := h.service.Create(c.Request.Context(), uid, body.serviceRequest())
 	if err != nil {
 		if isClientError(err) {
 			httputil.BadRequest(c, err.Error())
@@ -114,8 +114,8 @@ func (h *Handler) update(c *gin.Context) {
 		return
 	}
 
-	var req Request
-	if err := httputil.BindJSONBody(c, &req); err != nil {
+	var body transactionRequestBody
+	if err := httputil.BindJSONBody(c, &body); err != nil {
 		if middleware.HandleBodyReadError(c, err) {
 			return
 		}
@@ -123,7 +123,7 @@ func (h *Handler) update(c *gin.Context) {
 		return
 	}
 
-	tx, err := h.service.Update(c.Request.Context(), uid, id, req)
+	tx, err := h.service.Update(c.Request.Context(), uid, id, body.serviceRequest())
 	if err != nil {
 		if err.Error() == "transaction not found" {
 			httputil.NotFound(c, err.Error())

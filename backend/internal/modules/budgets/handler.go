@@ -101,7 +101,7 @@ func writeBudgetError(c *gin.Context, err error) {
 	switch err.Error() {
 	case "budget not found", "category not found":
 		httputil.NotFound(c, err.Error())
-	case "month must be YYYY-MM", "amount must be >= 0", "amount must be a non-negative number with at most two decimal places", "budget category must be expense", "category not accessible":
+	case "month must be YYYY-MM", "amount is required", "amount must be >= 0", "amount must be a non-negative number with at most two decimal places", "budget category must be expense", "category not accessible":
 		httputil.BadRequest(c, err.Error())
 	default:
 		httputil.InternalError(c, err)

@@ -100,6 +100,8 @@ func TestReadmeDocumentsHTTPUtilityContracts(t *testing.T) {
 		"`BindJSONBody`",
 		"`DisallowUnknownFields`",
 		"multiple JSON values",
+		"Gin `binding` tag validation",
+		"documented request schema",
 		"`X-Total-Count`",
 		"RFC 8288 `Link` headers",
 	} {
@@ -265,6 +267,19 @@ func TestBindJSONBodyDecodesValidBody(t *testing.T) {
 	}
 	if body.Name != "cash" {
 		t.Fatalf("name = %q", body.Name)
+	}
+}
+
+func TestBindJSONBodyValidatesBindingTags(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var body struct {
+		Name string `json:"name" binding:"required,min=1"`
+	}
+	c := testContextWithBody(`{"name":""}`)
+
+	if err := BindJSONBody(c, &body); err == nil {
+		t.Fatal("expected binding validation error")
 	}
 }
 

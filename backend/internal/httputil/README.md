@@ -10,6 +10,6 @@ Shared response helpers for Gin handlers.
 
 `RateLimitedWithPolicy` emits `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` headers alongside the shared rate-limited error body. Retry delays are serialized as non-negative integer seconds.
 
-`BindJSONBody` uses a JSON decoder with `DisallowUnknownFields` and rejects multiple JSON values so request handlers accept only one closed request object.
+`BindJSONBody` uses a JSON decoder with `DisallowUnknownFields`, rejects multiple JSON values, and runs Gin `binding` tag validation so request handlers accept only one closed request object that matches the documented request schema.
 
 `SetPaginationHeaders` emits `X-Total-Count` and RFC 8288 `Link` headers for paginated list responses when additional pages exist.

@@ -755,9 +755,10 @@ paths:
           example: 1
         - name: q
           in: query
-          description: Keyword filter matched against transaction notes and tags.
+          description: Keyword filter matched against transaction notes and tags. Maximum 100 characters.
           schema:
             type: string
+            maxLength: 100
           example: lunch
       responses:
         '200':
@@ -1884,7 +1885,7 @@ components:
     BudgetRequest:
       type: object
       additionalProperties: false
-      required: [month, amount]
+      required: [month, categoryId, amount]
       properties:
         month:
           type: string

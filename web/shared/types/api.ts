@@ -49,7 +49,7 @@ export type Budget = {
 
 export type BudgetRequest = {
   month: string;
-  categoryId?: number;
+  categoryId: number;
   amount: number;
 };
 

@@ -42,7 +42,7 @@ type ImportJobResponse struct {
 
 type ImportTextRequest struct {
 	Filename       string `json:"filename"`
-	Content        string `json:"content"`
+	Content        string `json:"content" binding:"required,min=1,max=5242880"`
 	SkipDuplicates *bool  `json:"skipDuplicates"`
 }
 

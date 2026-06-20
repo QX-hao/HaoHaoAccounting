@@ -16,6 +16,15 @@ const mobileApiReadme = readFileSync(new URL('../../mobile/src/shared/api/README
 const mobileConfig = readFileSync(new URL('../../mobile/src/shared/config.ts', import.meta.url), 'utf8');
 const mobileDataioApi = readFileSync(new URL('../../mobile/src/features/dataio/api.ts', import.meta.url), 'utf8');
 const mobileEnvExample = readFileSync(new URL('../../mobile/.env.example', import.meta.url), 'utf8');
+const goRequestDTOs = new Map([
+	['auth', readFileSync(new URL('../../backend/internal/modules/auth/dto.go', import.meta.url), 'utf8')],
+	['accounts', readFileSync(new URL('../../backend/internal/modules/accounts/dto.go', import.meta.url), 'utf8')],
+	['budgets', readFileSync(new URL('../../backend/internal/modules/budgets/dto.go', import.meta.url), 'utf8')],
+	['categories', readFileSync(new URL('../../backend/internal/modules/categories/dto.go', import.meta.url), 'utf8')],
+	['transactions', readFileSync(new URL('../../backend/internal/modules/transactions/dto.go', import.meta.url), 'utf8')],
+	['ai', readFileSync(new URL('../../backend/internal/modules/ai/dto.go', import.meta.url), 'utf8')],
+	['dataio', readFileSync(new URL('../../backend/internal/modules/dataio/dto.go', import.meta.url), 'utf8')],
+]);
 
 function openapiSchema(schemaName) {
 	const schemasStart = openapi.indexOf('  schemas:');
@@ -514,9 +523,12 @@ test('generator requires AI parse confidence in the response schema', () => {
 
 test('generator requires request money fields to document cent precision', () => {
 	assert.match(generator, /\['AccountRequest', 'multipleOf: 0\.01'\]/);
+	assert.match(generator, /\['BudgetRequest', 'required: \[month, categoryId, amount\]'\]/);
+	assert.match(generator, /\['BudgetRequest', 'minimum: 1'\]/);
 	assert.match(generator, /\['BudgetRequest', 'multipleOf: 0\.01'\]/);
 	assert.match(generator, /\['TransactionRequest', 'multipleOf: 0\.01'\]/);
 	assert.match(openapi, /balance:\n\s+type: number\n\s+minimum: 0\n\s+multipleOf: 0\.01/);
+	assert.match(openapi, /BudgetRequest:\n\s+type: object\n\s+additionalProperties: false\n\s+required: \[month, categoryId, amount\]/);
 	assert.match(openapi, /amount:\n\s+type: number\n\s+exclusiveMinimum: 0\n\s+multipleOf: 0\.01/);
 });
 
@@ -550,6 +562,31 @@ test('OpenAPI request bodies match generated client assumptions', () => {
 		assert.match(requestBody, /required: true/);
 		assert.match(requestBody, /(application\/json|multipart\/form-data):/);
 		assert.match(requestBody, /\$ref: '#\/components\/schemas\/[A-Za-z][A-Za-z0-9]*'/);
+	}
+});
+
+test('Go request DTOs enforce OpenAPI request schema constraints at binding', () => {
+	const expectations = [
+		['auth', /Username string `json:"username" binding:"required,min=1"`/],
+		['auth', /Password string `json:"password" binding:"required,min=1"`/],
+		['accounts', /Name\s+string\s+`json:"name" binding:"required,min=1"`/],
+		['accounts', /Type\s+string\s+`json:"type" binding:"required,min=1"`/],
+		['accounts', /Balance\s+float64\s+`json:"balance" binding:"omitempty,min=0"`/],
+		['budgets', /Month\s+string\s+`json:"month" binding:"required,datetime=2006-01"`/],
+		['budgets', /CategoryID\s+uint\s+`json:"categoryId" binding:"required,min=1"`/],
+		['budgets', /Amount\s+\*float64\s+`json:"amount" binding:"required,min=0"`/],
+		['categories', /Name string `json:"name" binding:"required,min=1"`/],
+		['categories', /Type string `json:"type" binding:"required,oneof=income expense"`/],
+		['transactions', /Type\s+string\s+`json:"type" binding:"required,oneof=income expense"`/],
+		['transactions', /Amount\s+float64\s+`json:"amount" binding:"required,gt=0"`/],
+		['transactions', /CategoryID\s+uint\s+`json:"categoryId" binding:"required,min=1"`/],
+		['transactions', /AccountID\s+uint\s+`json:"accountId" binding:"required,min=1"`/],
+		['transactions', /Note\s+string\s+`json:"note" binding:"required,min=1"`/],
+		['ai', /Text string `json:"text" binding:"required,min=1"`/],
+		['dataio', /Content\s+string\s+`json:"content" binding:"required,min=1,max=5242880"`/],
+	];
+	for (const [moduleName, pattern] of expectations) {
+		assert.match(goRequestDTOs.get(moduleName), pattern, `${moduleName} request DTO is missing ${pattern}`);
 	}
 });
 
@@ -667,6 +704,8 @@ test('generator requires bounded pagination response schema', () => {
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'Account id filter'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'example: 1'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'matched against transaction notes and tags'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'Maximum 100 characters'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'maxLength: 100'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'example: lunch'\)/);
 	assert.match(openapi, /name: page\n\s+in: query\n\s+description: Page number\. Defaults to 1 when omitted\.[\s\S]+default: 1/);
 	assert.match(openapi, /name: page[\s\S]+example: 1/);
@@ -676,7 +715,7 @@ test('generator requires bounded pagination response schema', () => {
 	assert.match(openapi, /\/categories:[\s\S]+name: type\n\s+in: query\n\s+description: Transaction type filter\.[\s\S]+\$ref: '#\/components\/schemas\/TransactionType'[\s\S]+example: expense/);
 	assert.match(openapi, /name: categoryId\n\s+in: query\n\s+description: Category id filter\.[\s\S]+example: 1/);
 	assert.match(openapi, /name: accountId\n\s+in: query\n\s+description: Account id filter\.[\s\S]+example: 1/);
-	assert.match(openapi, /name: q\n\s+in: query\n\s+description: Keyword filter matched against transaction notes and tags\./);
+	assert.match(openapi, /name: q\n\s+in: query\n\s+description: Keyword filter matched against transaction notes and tags\. Maximum 100 characters\.[\s\S]+maxLength: 100/);
 	assert.match(openapi, /name: q[\s\S]+example: lunch/);
 	assert.match(openapi, /Link:[\s\S]+example: <\/api\/v1\/transactions\?page=2&pageSize=20>; rel="next"/);
 	assert.match(openapi, /TotalCount:[\s\S]+example: 95/);
