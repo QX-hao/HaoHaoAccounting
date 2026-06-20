@@ -1,10 +1,13 @@
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import type { ExportFormat } from './api';
 import type { ImportPreview } from '../../shared/types/accounting';
 import { styles } from '../../theme/styles';
 
 type Props = {
   csvText: string;
   exportText: string;
+  exportFormat: ExportFormat;
+  exportFileReady: boolean;
   selectedImportFile: string;
   preview: ImportPreview | null;
   onCSVTextChange: (value: string) => void;
@@ -12,13 +15,17 @@ type Props = {
   onPreview: () => void;
   onImport: () => void;
   onExport: () => void;
+  onExportFormatChange: (format: ExportFormat) => void;
   onCopyExport: () => void;
   onShareExport: () => void;
+  onShareExportFile: () => void;
 };
 
 export function DataIOScreen({
   csvText,
   exportText,
+  exportFormat,
+  exportFileReady,
   selectedImportFile,
   preview,
   onCSVTextChange,
@@ -26,8 +33,10 @@ export function DataIOScreen({
   onPreview,
   onImport,
   onExport,
+  onExportFormatChange,
   onCopyExport,
   onShareExport,
+  onShareExportFile,
 }: Props) {
   return (
     <View style={styles.card}>
@@ -63,11 +72,24 @@ export function DataIOScreen({
         </View>
       ) : null}
 
-      <Text style={styles.sectionTitle}>导出 CSV</Text>
+      <Text style={styles.sectionTitle}>导出 CSV/XLSX</Text>
+      <View style={styles.row}>
+        {(['csv', 'xlsx'] as ExportFormat[]).map((format) => (
+          <TouchableOpacity
+            key={format}
+            style={exportFormat === format ? styles.primaryBtnCompact : styles.secondaryBtnCompact}
+            onPress={() => onExportFormatChange(format)}
+          >
+            <Text style={exportFormat === format ? styles.primaryBtnText : styles.secondaryBtnText}>
+              {format === 'csv' ? 'CSV' : 'XLSX'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <TouchableOpacity style={styles.secondaryBtn} onPress={onExport}>
-        <Text style={styles.secondaryBtnText}>生成导出文本</Text>
+        <Text style={styles.secondaryBtnText}>{exportFormat === 'csv' ? '生成导出文本' : '生成导出文件'}</Text>
       </TouchableOpacity>
-      {exportText ? (
+      {exportFormat === 'csv' && exportText ? (
         <>
           <View style={styles.row}>
             <TouchableOpacity style={styles.secondaryBtnCompact} onPress={onCopyExport}>
@@ -79,6 +101,11 @@ export function DataIOScreen({
           </View>
           <TextInput style={[styles.input, { minHeight: 160 }]} multiline value={exportText} onChangeText={() => undefined} />
         </>
+      ) : null}
+      {exportFormat === 'xlsx' && exportFileReady ? (
+        <TouchableOpacity style={styles.primaryBtnCompact} onPress={onShareExportFile}>
+          <Text style={styles.primaryBtnText}>分享/保存 XLSX</Text>
+        </TouchableOpacity>
       ) : null}
     </View>
   );

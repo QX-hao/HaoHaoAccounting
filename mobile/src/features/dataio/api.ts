@@ -1,5 +1,5 @@
 import { api } from '../../shared/api';
-import { downloadText, request } from '../../shared/api/client';
+import { download, downloadText } from '../../shared/api/client';
 import type { ImportJob, ImportPreview, ImportResult } from '../../shared/types/accounting';
 
 export type ImportFileAsset = {
@@ -7,6 +7,8 @@ export type ImportFileAsset = {
   name: string;
   mimeType?: string | null;
 };
+
+export type ExportFormat = 'csv' | 'xlsx';
 
 export function previewImportText(content: string) {
   return api.dataio.postIoImportTextPreview({ filename: 'mobile-import.csv', content });
@@ -26,6 +28,17 @@ export function startImportFileJob(asset: ImportFileAsset) {
 
 export function exportCSVText() {
   return downloadText('/io/export?format=csv', 'text/csv');
+}
+
+export function exportTransactionsFile(format: ExportFormat) {
+  return download(`/io/export?format=${format}`, exportAccept(format));
+}
+
+function exportAccept(format: ExportFormat) {
+  if (format === 'xlsx') {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  }
+  return 'text/csv';
 }
 
 function importFileFormData(asset: ImportFileAsset) {

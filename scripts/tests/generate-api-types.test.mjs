@@ -97,9 +97,13 @@ test('API clients only default JSON Content-Type when a non-FormData body is pre
 });
 
 test('mobile CSV export uses shared text download error handling', () => {
+	assert.match(mobileApiClient, /export async function download\(path: string, accept = '\*\/\*'\): Promise<DownloadResult>/);
 	assert.match(mobileApiClient, /export async function downloadText/);
+	assert.match(mobileApiClient, /filenameFromDisposition\(resp\.headers\.get\('Content-Disposition'\)\)/);
 	assert.match(mobileApiClient, /const data = await parseErrorBody\(resp\);/);
 	assert.match(mobileDataioApi, /return downloadText\('\/io\/export\?format=csv', 'text\/csv'\)/);
+	assert.match(mobileDataioApi, /export function exportTransactionsFile\(format: ExportFormat\)/);
+	assert.match(mobileDataioApi, /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/);
 	assert.doesNotMatch(mobileDataioApi, /fetch\(`\$\{API_BASE\}\/io\/export/);
 });
 

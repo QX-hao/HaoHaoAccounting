@@ -10,7 +10,9 @@ import { useSession } from './src/features/auth/useSession';
 import { useDashboardData } from './src/features/dashboard/useDashboardData';
 import { DataIOScreen } from './src/features/dataio/DataIOScreen';
 import {
+  type ExportFormat,
   exportCSVText,
+  exportTransactionsFile,
   importText,
   previewImportFile,
   previewImportText,
@@ -58,9 +60,11 @@ export default function App() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [csvText, setCsvText] = useState('');
   const [exportText, setExportText] = useState('');
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('csv');
   const [selectedImportFile, setSelectedImportFile] = useState('');
   const [selectedImportAsset, setSelectedImportAsset] = useState<ImportFileAsset | null>(null);
   const [exportFileUri, setExportFileUri] = useState('');
+  const [exportFileMimeType, setExportFileMimeType] = useState('text/csv');
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [appNotice, setAppNotice] = useState('');
   const session = useSession();
@@ -327,9 +331,20 @@ export default function App() {
   async function exportCSV() {
     try {
       setAppNotice('');
+      setExportText('');
+      setExportFileUri('');
+      if (exportFormat === 'xlsx') {
+        const file = await exportTransactionsFile(exportFormat);
+        const fileUri = await writeExportFile(file.filename || exportFilename(exportFormat), file.bytes);
+        setExportFileUri(fileUri);
+        setExportFileMimeType(file.contentType || exportMimeType(exportFormat));
+        dashboard.setError('');
+        setAppNotice('导出文件已生成');
+        return;
+      }
       const text = await exportCSVText();
       setExportText(text);
-      setExportFileUri('');
+      setExportFileMimeType(exportMimeType('csv'));
       dashboard.setError('');
       setAppNotice('导出文本已生成');
     } catch (err) {
@@ -344,7 +359,7 @@ export default function App() {
   }
 
   async function shareExportCSV() {
-    if (!exportText) return;
+    if (!exportText && !exportFileUri) return;
     try {
       const file = exportFileUri
         ? new FileSystem.File(exportFileUri)
@@ -359,9 +374,28 @@ export default function App() {
         return;
       }
       await Sharing.shareAsync(file.uri, {
-        mimeType: 'text/csv',
+        mimeType: exportFileMimeType,
         dialogTitle: '分享好好记账 CSV',
         UTI: 'public.comma-separated-values-text',
+      });
+      setAppNotice('已打开系统分享');
+    } catch (err) {
+      dashboard.setError(err instanceof Error ? err.message : '分享失败');
+    }
+  }
+
+  async function shareExportFile() {
+    if (!exportFileUri) return;
+    try {
+      const available = await Sharing.isAvailableAsync();
+      if (!available) {
+        dashboard.setError('当前设备不支持系统分享');
+        return;
+      }
+      await Sharing.shareAsync(exportFileUri, {
+        mimeType: exportFileMimeType,
+        dialogTitle: '分享好好记账导出文件',
+        UTI: exportFormat === 'xlsx' ? 'org.openxmlformats.spreadsheetml.sheet' : 'public.comma-separated-values-text',
       });
       setAppNotice('已打开系统分享');
     } catch (err) {
@@ -481,6 +515,8 @@ export default function App() {
           <DataIOScreen
             csvText={csvText}
             exportText={exportText}
+            exportFormat={exportFormat}
+            exportFileReady={Boolean(exportFileUri)}
             selectedImportFile={selectedImportFile}
             preview={importPreview}
             onCSVTextChange={(value) => {
@@ -493,8 +529,15 @@ export default function App() {
             onPreview={previewCSV}
             onImport={importCSV}
             onExport={exportCSV}
+            onExportFormatChange={(format) => {
+              setExportFormat(format);
+              setExportText('');
+              setExportFileUri('');
+              setExportFileMimeType(exportMimeType(format));
+            }}
             onCopyExport={copyExportText}
             onShareExport={shareExportCSV}
+            onShareExportFile={shareExportFile}
           />
         )}
         {tab === 'reports' && <ReportsScreen summary={dashboard.summary} />}
@@ -510,6 +553,24 @@ export default function App() {
       <TabBar activeTab={tab} onTabChange={setTab} />
     </SafeAreaView>
   );
+}
+
+async function writeExportFile(filename: string, bytes: Uint8Array) {
+  const safeName = filename.replace(/[\\/:*?"<>|]+/g, '_') || `haohao-transactions-${Date.now()}`;
+  const file = new FileSystem.File(FileSystem.Paths.cache, safeName);
+  file.write(bytes);
+  return file.uri;
+}
+
+function exportFilename(format: ExportFormat) {
+  return `haohao-transactions-${Date.now()}.${format}`;
+}
+
+function exportMimeType(format: ExportFormat) {
+  if (format === 'xlsx') {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  }
+  return 'text/csv';
 }
 
 function isTextImportFile(name: string, mimeType?: string) {

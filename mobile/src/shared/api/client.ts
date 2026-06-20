@@ -33,6 +33,12 @@ export class ApiError extends Error {
   }
 }
 
+export type DownloadResult = {
+  bytes: Uint8Array;
+  filename: string;
+  contentType: string;
+};
+
 export async function getToken() {
   return (await AsyncStorage.getItem(TOKEN_KEY)) || '';
 }
@@ -82,6 +88,20 @@ export function upload<T>(path: string, formData: FormData) {
 }
 
 export async function downloadText(path: string, accept = 'text/plain'): Promise<string> {
+  const resp = await downloadResponse(path, accept);
+  return resp.text();
+}
+
+export async function download(path: string, accept = '*/*'): Promise<DownloadResult> {
+  const resp = await downloadResponse(path, accept);
+  return {
+    bytes: new Uint8Array(await resp.arrayBuffer()),
+    filename: filenameFromDisposition(resp.headers.get('Content-Disposition')),
+    contentType: resp.headers.get('Content-Type') || accept,
+  };
+}
+
+async function downloadResponse(path: string, accept: string) {
   const headers = new Headers();
   ensureRequestId(headers);
   headers.set('Accept', accept);
@@ -101,7 +121,7 @@ export async function downloadText(path: string, accept = 'text/plain'): Promise
     const data = await parseErrorBody(resp);
     throw apiError(resp, data);
   }
-  return resp.text();
+  return resp;
 }
 
 export async function logout() {
@@ -175,4 +195,23 @@ function retryAfterSeconds(resp: Response): number | null {
   const retryAt = Date.parse(value);
   if (!Number.isFinite(retryAt)) return null;
   return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
+}
+
+function filenameFromDisposition(disposition: string | null) {
+  if (!disposition) return '';
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    const filename = safeDecodeURIComponent(utf8Match[1]);
+    if (filename) return filename;
+  }
+  const asciiMatch = disposition.match(/filename="?([^";]+)"?/i);
+  return asciiMatch?.[1] || '';
+}
+
+function safeDecodeURIComponent(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return '';
+  }
 }
