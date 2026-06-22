@@ -134,7 +134,10 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`HTTP_REQUEST_TIMEOUT` defaults to `60s`",
 		"`0s`",
 		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
+		"`HTTP_METRICS_ENABLED=true`",
+		"`HTTP_METRICS_TOKEN`",
 		"`/metrics`",
+		"Keep it disabled unless the backend port is protected",
 		"method, Gin route pattern, and status",
 		"early rejections",
 		"`X-Request-ID`",
@@ -152,11 +155,10 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	t.Cleanup(func() { gin.SetMode(previousMode) })
 
 	router := gin.New()
-	registry := newMetricsRegistry()
-	registerMetricsRoute(router, registry)
+	metrics := installMetrics(router, config.Config{HTTP: config.HTTPConfig{MetricsEnabled: true}})
 	applyGlobalMiddleware(router, config.Config{HTTP: config.HTTPConfig{
 		CORSAllowOrigins: []string{"https://app.example.com"},
-	}}, middleware.NewHTTPMetrics(registry))
+	}}, metrics)
 	router.GET("/api/v1/accounts/:id", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
@@ -175,12 +177,19 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	if metricsResp.Code != http.StatusOK {
 		t.Fatalf("metrics status = %d, body = %s", metricsResp.Code, metricsResp.Body.String())
 	}
-	body := metricsResp.Body.String()
+	secondMetricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	secondMetricsResp := httptest.NewRecorder()
+	router.ServeHTTP(secondMetricsResp, secondMetricsReq)
+	if secondMetricsResp.Code != http.StatusOK {
+		t.Fatalf("second metrics status = %d, body = %s", secondMetricsResp.Code, secondMetricsResp.Body.String())
+	}
+	body := secondMetricsResp.Body.String()
 	for _, want := range []string{
 		`haohao_http_requests_total{method="GET",route="/api/v1/accounts/:id",status="204"} 1`,
 		`haohao_http_request_duration_seconds_bucket{method="GET",route="/api/v1/accounts/:id",status="204"`,
 		`go_goroutines `,
 		`process_cpu_seconds_total `,
+		`promhttp_metric_handler_requests_total{code="200"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q: %s", want, body)
@@ -188,6 +197,63 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	}
 	if strings.Contains(body, "/api/v1/accounts/42") || strings.Contains(body, "token=secret") {
 		t.Fatalf("metrics leaked raw URL data: %s", body)
+	}
+}
+
+func TestMetricsEndpointCanRequireBearerToken(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	router := gin.New()
+	installMetrics(router, config.Config{HTTP: config.HTTPConfig{
+		MetricsEnabled: true,
+		MetricsToken:   "scrape-secret",
+	}})
+
+	for _, tc := range []struct {
+		name   string
+		header string
+		status int
+	}{
+		{name: "missing", status: http.StatusUnauthorized},
+		{name: "wrong", header: "Bearer wrong-secret", status: http.StatusUnauthorized},
+		{name: "malformed", header: "Basic scrape-secret", status: http.StatusUnauthorized},
+		{name: "valid", header: "Bearer scrape-secret", status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+			if resp.Code != tc.status {
+				t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+			}
+		})
+	}
+}
+
+func TestMetricsEndpointIsRegisteredOnlyWhenEnabled(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	disabledRouter := gin.New()
+	installMetrics(disabledRouter, config.Config{})
+	disabledResp := httptest.NewRecorder()
+	disabledRouter.ServeHTTP(disabledResp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if disabledResp.Code != http.StatusNotFound {
+		t.Fatalf("disabled metrics status = %d, body = %s", disabledResp.Code, disabledResp.Body.String())
+	}
+
+	enabledRouter := gin.New()
+	installMetrics(enabledRouter, config.Config{HTTP: config.HTTPConfig{MetricsEnabled: true}})
+	enabledResp := httptest.NewRecorder()
+	enabledRouter.ServeHTTP(enabledResp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if enabledResp.Code != http.StatusOK {
+		t.Fatalf("enabled metrics status = %d, body = %s", enabledResp.Code, enabledResp.Body.String())
 	}
 }
 

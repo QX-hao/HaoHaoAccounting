@@ -380,6 +380,7 @@ func TestBearerTokenParsesRFC6750Credentials(t *testing.T) {
 		{name: "tab separator", header: "Bearer\ttoken", wantOK: false},
 		{name: "newline separator", header: "Bearer\ntoken", wantOK: false},
 		{name: "invalid character", header: "Bearer token,part", wantOK: false},
+		{name: "padding only", header: "Bearer ==", wantOK: false},
 		{name: "padding before token char", header: "Bearer abc=def", wantOK: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

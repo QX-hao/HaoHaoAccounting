@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// Service 封装账户的业务规则：账户始终归属当前用户，余额变化后需要同步失效报表缓存。
 type Service struct {
 	store       *store.Store
 	invalidator transactions.CacheInvalidator
@@ -22,12 +23,14 @@ func NewService(s *store.Store, invalidator transactions.CacheInvalidator) *Serv
 	return &Service{store: s, invalidator: invalidator}
 }
 
+// List 只返回当前用户的账户，所有账户查询都必须带 userID，避免跨用户读取。
 func (s *Service) List(ctx context.Context, userID uint) ([]models.Account, error) {
 	var accounts []models.Account
 	err := s.db(ctx).Where("user_id = ?", userID).Order("id asc").Find(&accounts).Error
 	return accounts, err
 }
 
+// Create 创建账户时把余额转换成“分”保存，避免浮点金额直接落库带来精度误差。
 func (s *Service) Create(ctx context.Context, userID uint, req accountRequest) (models.Account, error) {
 	balanceCents, err := money.ToCentsExact(req.Balance)
 	if err != nil {
@@ -49,6 +52,7 @@ func (s *Service) Create(ctx context.Context, userID uint, req accountRequest) (
 	return account, nil
 }
 
+// Update 只允许修改当前用户的账户；名称/类型为空时保持原值，余额按请求显式覆盖。
 func (s *Service) Update(ctx context.Context, userID, id uint, req accountRequest) (models.Account, error) {
 	var account models.Account
 	if err := s.db(ctx).Where("id = ? AND user_id = ?", id, userID).First(&account).Error; err != nil {
@@ -74,6 +78,7 @@ func (s *Service) Update(ctx context.Context, userID, id uint, req accountReques
 	return account, nil
 }
 
+// Delete 删除账户前先检查交易引用，避免历史账单指向一个已经不存在的账户。
 func (s *Service) Delete(ctx context.Context, userID, id uint) error {
 	var count int64
 	if err := s.db(ctx).Model(&models.Transaction{}).Where("user_id = ? AND account_id = ?", userID, id).Count(&count).Error; err != nil {
@@ -97,6 +102,7 @@ func (s *Service) db(ctx context.Context) *gorm.DB {
 	return s.store.DB.WithContext(ctx)
 }
 
+// invalidateUser 清理报表缓存；即使请求已取消，也尽量完成这类写后清理动作。
 func (s *Service) invalidateUser(ctx context.Context, userID uint) {
 	if s.invalidator != nil {
 		if ctx == nil {

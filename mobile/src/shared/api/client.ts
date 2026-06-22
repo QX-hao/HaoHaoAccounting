@@ -79,6 +79,7 @@ export async function requestWithResponse<T>(path: string, init: RequestInit = {
   ensureRequestId(headers);
   headers.set('Accept', headers.get('Accept') || 'application/json');
   if (init.body !== undefined && init.body !== null && !(init.body instanceof FormData)) {
+    // FormData 上传需要运行时自动生成 multipart boundary，手动设置会破坏上传体。
     headers.set('Content-Type', headers.get('Content-Type') || 'application/json');
   }
   if (token) {
@@ -92,6 +93,7 @@ export async function requestWithResponse<T>(path: string, init: RequestInit = {
 
   if (!resp.ok) {
     if (resp.status === 401) {
+      // 移动端没有统一路由守卫，收到 401 时先清 token，让页面回到未登录态。
       await clearToken();
     }
     const data = await parseErrorBody(resp);
@@ -189,6 +191,7 @@ async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
 
 function isJSONContentType(contentType: string) {
   const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase() || '';
+  // 兼容 application/*+json，确保结构化错误体能被解析出 code/requestId。
   return mediaType === 'application/json' || mediaType.startsWith('application/') && mediaType.endsWith('+json');
 }
 
@@ -217,6 +220,7 @@ function requestSignal(callerSignal?: AbortSignal | null) {
   return {
     signal: controller.signal,
     cleanup: () => {
+      // 清理定时器和外部 signal 监听，避免频繁请求后残留回调。
       clearTimeout(timeout);
       callerSignal?.removeEventListener('abort', abort);
     },
@@ -259,6 +263,7 @@ function retryAfterSeconds(resp: Response): number | null {
     return Number.isSafeInteger(seconds) ? seconds : null;
   }
   if (/^[+-]?\d/.test(value)) {
+    // 非整数秒数不符合 Retry-After 语义，也不要让 Date.parse 猜测。
     return null;
   }
   const retryAt = Date.parse(value);

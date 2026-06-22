@@ -226,6 +226,8 @@ Web 端使用 Next.js standalone 输出。`NEXT_PUBLIC_API_BASE` 会在构建时
 - `HTTP_READ_TIMEOUT`、`HTTP_READ_HEADER_TIMEOUT`、`HTTP_WRITE_TIMEOUT`、`HTTP_IDLE_TIMEOUT`、`HTTP_SHUTDOWN_TIMEOUT`、`HTTP_REQUEST_TIMEOUT`（可选，Go duration 格式）
 - `HTTP_MAX_HEADER_BYTES`（可选，默认 `1048576`，1 MiB）
 - `HTTP_MAX_BODY_BYTES`（可选，默认 `6291456`，约 6 MiB）
+- `HTTP_METRICS_ENABLED`（可选，默认 `false`；仅在 backend 端口受保护时开启 `/metrics`）
+- `HTTP_METRICS_TOKEN`（可选；设置后 `/metrics` 需要 `Authorization: Bearer <token>`）
 - `HTTP_HSTS_MAX_AGE_SECONDS`、`HTTP_HSTS_INCLUDE_SUBDOMAINS`、`HTTP_HSTS_PRELOAD`（可选，仅 HTTPS 部署启用）
 - `BACKEND_STOP_GRACE_PERIOD`（可选，Compose 停止 backend 容器的宽限期，默认 `30s`，应大于 `HTTP_SHUTDOWN_TIMEOUT`）
 - `MYSQL_ROOT_PASSWORD`（仅启用 MySQL profile 时需要）
@@ -262,6 +264,8 @@ HTTP_SHUTDOWN_TIMEOUT=10s
 HTTP_REQUEST_TIMEOUT=0s
 HTTP_MAX_HEADER_BYTES=1048576
 HTTP_MAX_BODY_BYTES=6291456
+HTTP_METRICS_ENABLED=false
+HTTP_METRICS_TOKEN=
 HTTP_HSTS_MAX_AGE_SECONDS=0
 HTTP_HSTS_INCLUDE_SUBDOMAINS=false
 HTTP_HSTS_PRELOAD=false
@@ -299,6 +303,8 @@ CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 
 `HTTP_MAX_BODY_BYTES` 是全局请求体上限，用于在 HTTP 层提前拒绝过大的 JSON 或 multipart 请求。默认约 6 MiB，略高于导入文件 5 MiB 的业务上限，用于容纳 multipart 边界和表单字段开销。
 该上限同时覆盖已声明 `Content-Length` 的请求和 chunked/未知长度的流式请求；超限时接口返回结构化 `413 payload_too_large` 错误。
+
+`HTTP_METRICS_ENABLED=false` 默认不暴露 `/metrics`。只有在 backend 端口位于可信内网、被反向代理认证保护，或采集器通过受控网络访问时再开启；设置 `HTTP_METRICS_TOKEN` 后采集器还必须发送 `Authorization: Bearer <token>`。该端点会包含 Go runtime、process 和低基数 HTTP 指标。
 
 Compose 对无状态的 `web` 和 `backend` 启用了只读根文件系统、`no-new-privileges`、`cap_drop: [ALL]` 和 `init: true`。临时写入只允许进入 `tmpfs`，数据库和 Redis 仍通过 volume 持久化数据。若迁移到不支持这些 Compose 选项的平台，需要用等价的安全上下文配置替代。
 

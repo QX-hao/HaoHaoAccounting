@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// Service 负责交易的增删改查，并把交易金额对账户余额的影响封装在同一层。
 type Service struct {
 	store       *store.Store
 	invalidator CacheInvalidator
@@ -25,6 +26,7 @@ func NewService(s *store.Store, invalidator CacheInvalidator) *Service {
 	return &Service{store: s, invalidator: invalidator}
 }
 
+// List 组装筛选、分页和预加载查询，total 用于前端分页器判断总页数。
 func (s *Service) List(ctx context.Context, userID uint, filter ListFilter) ([]models.Transaction, int64, error) {
 	page := filter.Page
 	pageSize := filter.PageSize
@@ -73,6 +75,7 @@ func (s *Service) List(ctx context.Context, userID uint, filter ListFilter) ([]m
 	return rows, total, nil
 }
 
+// Create 在一个数据库事务里写入交易并更新账户余额，保证账单和账户不会只成功一半。
 func (s *Service) Create(ctx context.Context, userID uint, req Request) (models.Transaction, error) {
 	var tx models.Transaction
 	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
@@ -91,6 +94,7 @@ func (s *Service) Create(ctx context.Context, userID uint, req Request) (models.
 	return tx, nil
 }
 
+// CreateMany 批量创建交易，主要用于导入场景；任意一条失败都会回滚整批数据。
 func (s *Service) CreateMany(ctx context.Context, userID uint, requests []Request) ([]models.Transaction, error) {
 	if len(requests) == 0 {
 		return nil, nil
@@ -119,6 +123,7 @@ func (s *Service) CreateMany(ctx context.Context, userID uint, requests []Reques
 	return created, nil
 }
 
+// CreateManyWithDB 复用外层事务，导入服务会先创建分类/账户，再在同一事务内写交易。
 func (s *Service) CreateManyWithDB(dbtx *gorm.DB, userID uint, requests []Request) ([]models.Transaction, error) {
 	created := make([]models.Transaction, 0, len(requests))
 	for _, req := range requests {
@@ -131,6 +136,7 @@ func (s *Service) CreateManyWithDB(dbtx *gorm.DB, userID uint, requests []Reques
 	return created, nil
 }
 
+// createWithDB 是交易写入的最小原子逻辑：校验归属、转换金额、写交易、调整账户余额。
 func (s *Service) createWithDB(dbtx *gorm.DB, userID uint, req Request) (models.Transaction, error) {
 	if err := validateRequest(req); err != nil {
 		return models.Transaction{}, err
@@ -170,6 +176,7 @@ func (s *Service) createWithDB(dbtx *gorm.DB, userID uint, req Request) (models.
 	return tx, nil
 }
 
+// Update 先回滚旧交易对账户余额的影响，再应用新交易，保证修改金额/账户/类型后余额仍一致。
 func (s *Service) Update(ctx context.Context, userID, id uint, req Request) (models.Transaction, error) {
 	var existing models.Transaction
 	if err := s.db(ctx).Where("id = ? AND user_id = ?", id, userID).First(&existing).Error; err != nil {
@@ -203,7 +210,7 @@ func (s *Service) Update(ctx context.Context, userID, id uint, req Request) (mod
 	updated.OccurredAt = req.OccurredAt
 	updated.Source = stringutil.FallbackName(req.Source, existing.Source)
 
-	// Balance must be reconciled around the old and new transaction values.
+	// 修改交易时要围绕“旧值”和“新值”重新对账，否则账户余额会重复累加或漏减。
 	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
 		if err := revertAccountDelta(dbtx, existing.AccountID, existing.Type, existing.AmountCents); err != nil {
 			return err
@@ -221,6 +228,7 @@ func (s *Service) Update(ctx context.Context, userID, id uint, req Request) (mod
 	return updated, nil
 }
 
+// Delete 删除交易时同步回滚账户余额，保持账户余额等于历史交易的净影响。
 func (s *Service) Delete(ctx context.Context, userID, id uint) error {
 	var tx models.Transaction
 	if err := s.db(ctx).Where("id = ? AND user_id = ?", id, userID).First(&tx).Error; err != nil {
@@ -240,6 +248,7 @@ func (s *Service) Delete(ctx context.Context, userID, id uint) error {
 	return nil
 }
 
+// ensureCategoryAndAccount 校验分类和账户都可被当前用户使用，防止请求伪造外部 ID。
 func (s *Service) ensureCategoryAndAccount(ctx context.Context, userID uint, txType string, categoryID, accountID uint) error {
 	return s.ensureCategoryAndAccountWithDB(s.db(ctx), userID, txType, categoryID, accountID)
 }
@@ -260,6 +269,7 @@ func (s *Service) invalidateUser(ctx context.Context, userID uint) {
 	s.invalidator.InvalidateUser(ctx, userID)
 }
 
+// ensureCategoryAndAccountWithDB 支持复用事务连接，导入和手工创建都走同一套归属校验。
 func (s *Service) ensureCategoryAndAccountWithDB(db *gorm.DB, userID uint, txType string, categoryID, accountID uint) error {
 	var category models.Category
 	if err := db.Where("id = ?", categoryID).First(&category).Error; err != nil {
@@ -281,6 +291,7 @@ func (s *Service) ensureCategoryAndAccountWithDB(db *gorm.DB, userID uint, txTyp
 	return nil
 }
 
+// validateRequest 只校验与交易本身有关的字段，金额精度和外键归属由上层流程继续检查。
 func validateRequest(req Request) error {
 	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
 	if req.Type != "income" && req.Type != "expense" {
@@ -301,6 +312,7 @@ func validateRequest(req Request) error {
 	return nil
 }
 
+// applyAccountDelta 把收入记为正向余额变化、支出记为负向余额变化。
 func applyAccountDelta(dbtx *gorm.DB, accountID uint, txType string, amountCents int64) error {
 	delta := amountCents
 	if txType == "expense" {
@@ -311,6 +323,7 @@ func applyAccountDelta(dbtx *gorm.DB, accountID uint, txType string, amountCents
 		Update("balance_cents", gorm.Expr("balance_cents + ?", delta)).Error
 }
 
+// revertAccountDelta 与 applyAccountDelta 成对使用，用于交易修改或删除时撤销旧影响。
 func revertAccountDelta(dbtx *gorm.DB, accountID uint, txType string, amountCents int64) error {
 	delta := amountCents
 	if txType == "expense" {

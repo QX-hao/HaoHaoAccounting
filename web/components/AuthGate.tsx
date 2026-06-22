@@ -20,6 +20,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       }
 
       try {
+        // 只信任服务端 /me 校验结果；本地 token 存在不代表仍未过期或未被撤销。
         await request('/me');
         if (active) {
           setReady(true);

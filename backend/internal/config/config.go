@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
 )
 
 const (
@@ -60,6 +62,8 @@ type HTTPConfig struct {
 	RequestTimeout        time.Duration
 	MaxHeaderBytes        int
 	MaxBodyBytes          int64
+	MetricsEnabled        bool
+	MetricsToken          string
 	HSTSMaxAgeSeconds     int
 	HSTSIncludeSubDomains bool
 	HSTSPreload           bool
@@ -95,6 +99,7 @@ func LoadDotEnv(path string) error {
 
 	for _, line := range strings.Split(string(data), "\n") {
 		clean := strings.TrimSpace(line)
+		// 兼容从 Windows/编辑器复制来的 UTF-8 BOM，避免第一个 key 被读成不可见字符开头。
 		clean = strings.TrimPrefix(clean, "\ufeff")
 		if clean == "" || strings.HasPrefix(clean, "#") {
 			continue
@@ -106,6 +111,7 @@ func LoadDotEnv(path string) error {
 		}
 		key = strings.TrimSpace(key)
 		value = parseDotEnvValue(value)
+		// 显式环境变量优先级高于 .env；即使值为空，也视为调用方主动设置。
 		if _, exists := os.LookupEnv(key); key == "" || exists {
 			continue
 		}
@@ -135,6 +141,7 @@ func parseDotEnvValue(value string) string {
 	if quote == '"' || quote == '\'' {
 		return parseQuotedDotEnvValue(value, quote)
 	}
+	// 未加引号时只把“空白 + #”当注释，保留 DSN 里常见的 URL fragment。
 	return strings.TrimSpace(stripDotEnvInlineComment(value))
 }
 
@@ -144,6 +151,7 @@ func parseQuotedDotEnvValue(value string, quote byte) string {
 	for i := 1; i < len(value); i++ {
 		char := value[i]
 		if quote == '"' && escaped {
+			// 只支持 dotenv 中常用的少量转义；未知转义按原样保留，避免误改密码/DSN。
 			switch char {
 			case 'n':
 				builder.WriteByte('\n')
@@ -215,6 +223,8 @@ func Load() Config {
 			RequestTimeout:        nonNegativeDurationEnv("HTTP_REQUEST_TIMEOUT", defaultHTTPRequestTimeout),
 			MaxHeaderBytes:        positiveIntEnv("HTTP_MAX_HEADER_BYTES", 1<<20),
 			MaxBodyBytes:          int64Env("HTTP_MAX_BODY_BYTES", 6*1024*1024),
+			MetricsEnabled:        boolEnv("HTTP_METRICS_ENABLED", false),
+			MetricsToken:          strings.TrimSpace(os.Getenv("HTTP_METRICS_TOKEN")),
 			HSTSMaxAgeSeconds:     nonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS", 0),
 			HSTSIncludeSubDomains: boolEnv("HTTP_HSTS_INCLUDE_SUBDOMAINS", false),
 			HSTSPreload:           boolEnv("HTTP_HSTS_PRELOAD", false),
@@ -307,6 +317,7 @@ func validateEnvValues() error {
 		validateNonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS"),
 		validateBoolEnv("HTTP_HSTS_INCLUDE_SUBDOMAINS"),
 		validateBoolEnv("HTTP_HSTS_PRELOAD"),
+		validateBoolEnv("HTTP_METRICS_ENABLED"),
 		validatePositiveIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES"),
 		validatePositiveDurationEnv("LOGIN_RATE_LIMIT_WINDOW"),
 		validatePositiveDurationEnv("JWT_TTL"),
@@ -526,6 +537,9 @@ func (c HTTPConfig) Validate() error {
 	}
 	if c.RequestTimeout < 0 {
 		errs = append(errs, errors.New("HTTP_REQUEST_TIMEOUT must be non-negative"))
+	}
+	if c.MetricsToken != "" && !middleware.ValidBearerTokenValue(c.MetricsToken) {
+		errs = append(errs, errors.New("HTTP_METRICS_TOKEN must contain only RFC 6750 bearer token characters"))
 	}
 	if err := validateTrustedProxies(c.TrustedProxies); err != nil {
 		errs = append(errs, err)

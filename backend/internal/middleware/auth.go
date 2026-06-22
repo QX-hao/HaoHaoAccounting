@@ -196,7 +196,7 @@ func BearerToken(auth string) (string, bool) {
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		return "", false
 	}
-	if !validBearerTokenValue(token) {
+	if !ValidBearerTokenValue(token) {
 		return "", false
 	}
 	return token, true
@@ -208,6 +208,7 @@ func splitBearerCredentials(auth string) (string, string, bool) {
 		return "", "", false
 	}
 	separatorEnd := separatorStart
+	// 允许 scheme 和 token 之间有多个空格，但 token 内部不能再出现空格。
 	for separatorEnd < len(auth) && auth[separatorEnd] == ' ' {
 		separatorEnd++
 	}
@@ -217,13 +218,18 @@ func splitBearerCredentials(auth string) (string, string, bool) {
 	return auth[:separatorStart], auth[separatorEnd:], true
 }
 
-func validBearerTokenValue(token string) bool {
+func ValidBearerTokenValue(token string) bool {
 	if token == "" {
 		return false
 	}
 	paddingStarted := false
+	tokenStarted := false
 	for _, r := range token {
 		if r == '=' {
+			// RFC 6750 的 token68 允许尾部 padding，但不能只有 padding，也不能在中间插入 padding。
+			if !tokenStarted {
+				return false
+			}
 			paddingStarted = true
 			continue
 		}
@@ -233,8 +239,9 @@ func validBearerTokenValue(token string) bool {
 		if !isBearerTokenChar(r) {
 			return false
 		}
+		tokenStarted = true
 	}
-	return true
+	return tokenStarted
 }
 
 func isBearerTokenChar(r rune) bool {
