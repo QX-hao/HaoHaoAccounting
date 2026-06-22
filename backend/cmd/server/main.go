@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/app"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/cache"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"github.com/gin-contrib/cors"
@@ -71,9 +73,7 @@ func run(parent context.Context) error {
 	if err := r.SetTrustedProxies(cfg.HTTP.TrustedProxies); err != nil {
 		return fmt.Errorf("failed to set trusted proxies: %w", err)
 	}
-	metricsRegistry := newMetricsRegistry()
-	registerMetricsRoute(r, metricsRegistry)
-	applyGlobalMiddleware(r, cfg, middleware.NewHTTPMetrics(metricsRegistry))
+	applyGlobalMiddleware(r, cfg, installMetrics(r, cfg))
 
 	if err := app.RegisterRoutesWithConfig(r, s, redisCache, cfg); err != nil {
 		return fmt.Errorf("failed to register routes: %w", err)
@@ -105,6 +105,8 @@ func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
 }
 
 func applyGlobalMiddleware(router *gin.Engine, cfg config.Config, metrics *middleware.HTTPMetrics) {
+	// 中间件顺序会影响错误响应能否带上 request id、安全头、CORS 和 no-store。
+	// 先放 RequestID 和指标采集，后面的早期拒绝也能被追踪和统计。
 	router.Use(middleware.RequestID())
 	if metrics != nil {
 		router.Use(metrics.Middleware())
@@ -119,8 +121,24 @@ func applyGlobalMiddleware(router *gin.Engine, cfg config.Config, metrics *middl
 	router.Use(middleware.Accept(middleware.APIAcceptRules()))
 }
 
-func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry) {
-	router.GET("/metrics", gin.WrapH(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
+func installMetrics(router *gin.Engine, cfg config.Config) *middleware.HTTPMetrics {
+	if !cfg.HTTP.MetricsEnabled {
+		return nil
+	}
+	metricsRegistry := newMetricsRegistry()
+	// /metrics 在全局中间件挂载前注册，避免应用 API 的 Accept/Content-Type 规则影响 Prometheus 抓取。
+	registerMetricsRoute(router, metricsRegistry, cfg.HTTP.MetricsToken)
+	return middleware.NewHTTPMetrics(metricsRegistry)
+}
+
+func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry, token string) {
+	// InstrumentMetricHandler 会给抓取动作本身补 promhttp_* 指标，方便发现采集失败。
+	handler := gin.WrapH(promhttp.InstrumentMetricHandler(registry, promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
+	if token == "" {
+		router.GET("/metrics", handler)
+		return
+	}
+	router.GET("/metrics", requireMetricsToken(token), handler)
 }
 
 func newMetricsRegistry() *prometheus.Registry {
@@ -128,6 +146,19 @@ func newMetricsRegistry() *prometheus.Registry {
 	registry.MustRegister(prometheus.NewGoCollector())
 	registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	return registry
+}
+
+func requireMetricsToken(want string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token, ok := middleware.BearerToken(c.GetHeader("Authorization"))
+		// 指标 token 属于长期运维凭据，用常量时间比较避免长度相同情况下的时序侧信道。
+		if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(want)) != 1 {
+			httputil.Unauthorized(c, "invalid metrics token")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 func validateStartupConfig(cfg config.Config) error {

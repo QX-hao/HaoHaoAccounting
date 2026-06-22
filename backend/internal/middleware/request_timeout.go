@@ -21,6 +21,8 @@ func RequestTimeout(timeout time.Duration) gin.HandlerFunc {
 
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
+		// handler 如果尊重 request.Context()，这里会在尚未写响应时统一转成结构化 504。
+		// 已写出的响应不再覆盖，避免把流式/部分成功响应改坏。
 		if ctx.Err() == context.DeadlineExceeded && !c.Writer.Written() {
 			httputil.GatewayTimeout(c, "request timed out")
 			c.Abort()

@@ -26,11 +26,13 @@ func (r *redisInvalidator) InvalidateUser(ctx context.Context, userID uint) {
 	if ctx == nil {
 		ctx = context.Background()
 	} else {
+		// 事务写入已经成功后，即使客户端断开，也应尽量清理该用户的报表缓存。
 		ctx = context.WithoutCancel(ctx)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	// 缓存失效失败不影响主写入路径；下一次 TTL 到期后仍会自动恢复一致。
 	_ = r.cache.DeleteByPrefix(ctx, cache.UserReportPrefix(userID))
 }
 

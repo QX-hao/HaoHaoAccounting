@@ -56,6 +56,7 @@ export async function requestWithResponse<T>(path: string, init: RequestInit = {
   ensureRequestId(headers);
   headers.set('Accept', headers.get('Accept') || 'application/json');
   if (init.body !== undefined && init.body !== null && !(init.body instanceof FormData)) {
+    // FormData 让浏览器自己补 boundary；普通 JSON 请求才设置 Content-Type。
     headers.set('Content-Type', headers.get('Content-Type') || 'application/json');
   }
 
@@ -161,6 +162,7 @@ function newRequestId() {
 
 function handleUnauthorized(status: number) {
   if (status !== 401 || typeof window === 'undefined') return;
+  // 任意接口确认 token 失效后，前端立即清本地 token，避免后续请求继续带过期凭据。
   clearToken();
   if (window.location.pathname !== '/login') {
     window.location.assign('/login');
@@ -178,6 +180,7 @@ async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
 
 function isJSONContentType(contentType: string) {
   const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase() || '';
+  // 后端可能返回 application/problem+json 一类结构化 JSON，不能只认 application/json。
   return mediaType === 'application/json' || mediaType.startsWith('application/') && mediaType.endsWith('+json');
 }
 
@@ -206,6 +209,7 @@ function requestSignal(callerSignal?: AbortSignal | null) {
   return {
     signal: controller.signal,
     cleanup: () => {
+      // 每次请求结束都移除监听和定时器，避免页面长时间使用后积累无效 abort 回调。
       clearTimeout(timeout);
       callerSignal?.removeEventListener('abort', abort);
     },
@@ -248,6 +252,7 @@ function retryAfterSeconds(resp: Response): number | null {
     return Number.isSafeInteger(seconds) ? seconds : null;
   }
   if (/^[+-]?\d/.test(value)) {
+    // RFC 允许 HTTP-date；带符号或小数的数字既不是合法秒数，也不要交给 Date.parse 误判。
     return null;
   }
   const retryAt = Date.parse(value);
@@ -302,6 +307,7 @@ function splitHeaderParameters(value: string) {
       quoted = !quoted;
     }
     if (char === ';' && !quoted) {
+      // Content-Disposition 的 filename 可能包含引号内分号，只能在非引号状态切分。
       parts.push(current.trim());
       current = '';
       continue;
@@ -332,6 +338,7 @@ function decodeExtendedFilename(value: string) {
     return safeDecodeURIComponent(value);
   }
   if (match[1] && match[1].toLowerCase() !== 'utf-8') {
+    // 只接受 UTF-8 的 RFC 5987 filename*，避免错误字符集解码出乱码文件名。
     return '';
   }
   return safeDecodeURIComponent(match[2]);

@@ -10,6 +10,6 @@ Startup loads `.env` first, then runs `LoadStrict` and `validateStartupConfig` b
 
 The access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`. Query strings are omitted from `path` so tokens and filters do not enter logs by default.
 
-`/metrics` exposes Prometheus text metrics from the server entrypoint, including Go runtime, process, and HTTP request metrics. HTTP request metrics use low-cardinality labels: method, Gin route pattern, and status.
+When `HTTP_METRICS_ENABLED=true`, `/metrics` exposes Prometheus text metrics from the server entrypoint, including Go runtime, process, and HTTP request metrics. Keep it disabled unless the backend port is protected; set `HTTP_METRICS_TOKEN` to require `Authorization: Bearer <token>` from scrapers. HTTP request metrics use low-cardinality labels: method, Gin route pattern, and status.
 
 Keep business logic out of this package. Add business routes through `internal/app` and module handlers.

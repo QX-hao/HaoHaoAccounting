@@ -20,6 +20,7 @@ import { TrendChart } from './components/TrendChart';
 type Preset = 'current' | 'previous' | 'custom';
 type TrendGranularity = 'day' | 'week' | 'month';
 
+// 统计页集中管理报表筛选和预算编辑状态，图表组件只负责渲染传入的数据。
 export default function ReportsFeaturePage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -39,6 +40,7 @@ export default function ReportsFeaturePage() {
   const [editingBudgetId, setEditingBudgetId] = useState(0);
 
   useEffect(() => {
+    // 报表、账户、分类、预算一起加载，保证筛选下拉和图表数据保持同一时间点的状态。
     async function load() {
       setLoading(true);
       setError('');
@@ -62,6 +64,7 @@ export default function ReportsFeaturePage() {
     load();
   }, [start, end, categoryId, accountId, trend, budgetMonth]);
 
+  // 预算变更后只刷新报表和预算列表，不重新拉账户/分类这些低频数据。
   async function refreshReports() {
     const [nextSummary, nextBudgets] = await Promise.all([
       getReportSummary({ start, end, categoryId, accountId, trend }),
@@ -71,6 +74,7 @@ export default function ReportsFeaturePage() {
     setBudgets(nextBudgets);
   }
 
+  // 预设范围只修改起止日期；选择自定义时保留用户当前输入。
   function selectPreset(nextPreset: Preset) {
     setPreset(nextPreset);
     if (nextPreset === 'custom') return;
@@ -83,6 +87,7 @@ export default function ReportsFeaturePage() {
     setEnd(range.end);
   }
 
+  // 预算的 categoryId=0 表示全月总预算，后端报表会按同一个约定计算执行率。
   async function saveBudget() {
     try {
       setError('');
@@ -220,6 +225,7 @@ export default function ReportsFeaturePage() {
   );
 }
 
+// monthRange 返回适配 <input type="date"> 的本月起止日期字符串。
 function monthRange(date: Date) {
   const start = new Date(date.getFullYear(), date.getMonth(), 1);
   const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
@@ -229,6 +235,7 @@ function monthRange(date: Date) {
   };
 }
 
+// formatDateInput 避免 toISOString 按 UTC 转换导致本地日期前后偏一天。
 function formatDateInput(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -236,6 +243,7 @@ function formatDateInput(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+// monthValue 生成预算接口使用的 yyyy-MM 月份键。
 function monthValue(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');

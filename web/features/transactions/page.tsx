@@ -10,6 +10,7 @@ import { createTransaction, deleteTransaction, listAccounts, listCategories, lis
 
 const defaultPageSize = 20;
 
+// 交易页负责把账户、分类、账单列表、筛选条件和编辑表单放在同一个状态闭环里。
 export default function TransactionsFeaturePage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -36,8 +37,10 @@ export default function TransactionsFeaturePage() {
   const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 16));
   const [aiText, setAiText] = useState('今天午饭35');
 
+  // 分类选项跟随当前收支类型变化，避免把收入账单保存到支出分类下。
   const filteredCategories = useMemo(() => categories.filter((c) => c.type === type), [categories, type]);
 
+  // 首次加载会同时取账户、分类和账单，并为表单填入默认账户/分类。
   const loadData = useCallback(async () => {
     setError('');
     try {
@@ -61,6 +64,7 @@ export default function TransactionsFeaturePage() {
     }
   }, [filters, type]);
 
+  // 保存、删除后只刷新账单列表，避免不必要地重置账户/分类和当前表单状态。
   async function reloadTransactions() {
     try {
       const t = await listTransactions(filters);
@@ -87,6 +91,7 @@ export default function TransactionsFeaturePage() {
     }
   }, [categories, categoryId, type]);
 
+  // submit 同时处理新增和编辑，后端会负责交易写入和账户余额联动。
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
@@ -144,6 +149,7 @@ export default function TransactionsFeaturePage() {
     }
   }
 
+  // 筛选条件先存在草稿里，点击查询时再真正刷新列表，避免输入过程中频繁请求接口。
   function applyFilters(e: FormEvent) {
     e.preventDefault();
     setFilters({
@@ -163,10 +169,12 @@ export default function TransactionsFeaturePage() {
     setFilters({ page: 1, pageSize: defaultPageSize, type: '' });
   }
 
+  // 分页只改变 filters.page，列表刷新由 loadData 的依赖变化统一触发。
   function changePage(page: number) {
     setFilters((current) => ({ ...current, page }));
   }
 
+  // 编辑时把列表行回填到表单，保留原始分类/账户 ID，避免只依赖预加载对象。
   function startEdit(row: Transaction) {
     setEditing(row);
     setType(row.type);
@@ -207,6 +215,7 @@ export default function TransactionsFeaturePage() {
     setOccurredAt(new Date().toISOString().slice(0, 16));
   }
 
+  // AI 解析只负责预填表单，仍需用户确认后才会真正保存账单。
   async function runAIParse() {
     if (parsing) return;
     setError('');

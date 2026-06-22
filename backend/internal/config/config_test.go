@@ -149,6 +149,8 @@ func TestLoadDefaultsForLocalDevelopment(t *testing.T) {
 		cfg.HTTP.RequestTimeout != defaultHTTPRequestTimeout ||
 		cfg.HTTP.MaxHeaderBytes != 1<<20 ||
 		cfg.HTTP.MaxBodyBytes != 6*1024*1024 ||
+		cfg.HTTP.MetricsEnabled ||
+		cfg.HTTP.MetricsToken != "" ||
 		cfg.HTTP.HSTSMaxAgeSeconds != 0 ||
 		cfg.HTTP.HSTSIncludeSubDomains ||
 		cfg.HTTP.HSTSPreload {
@@ -193,6 +195,8 @@ func TestLoadParsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("HTTP_REQUEST_TIMEOUT", "9s")
 	t.Setenv("HTTP_MAX_HEADER_BYTES", "32768")
 	t.Setenv("HTTP_MAX_BODY_BYTES", "123456")
+	t.Setenv("HTTP_METRICS_ENABLED", "true")
+	t.Setenv("HTTP_METRICS_TOKEN", " scrape-secret ")
 	t.Setenv("HTTP_HSTS_MAX_AGE_SECONDS", "31536000")
 	t.Setenv("HTTP_HSTS_INCLUDE_SUBDOMAINS", "true")
 	t.Setenv("HTTP_HSTS_PRELOAD", "true")
@@ -244,6 +248,8 @@ func TestLoadParsesEnvironmentOverrides(t *testing.T) {
 		cfg.HTTP.RequestTimeout != 9*time.Second ||
 		cfg.HTTP.MaxHeaderBytes != 32768 ||
 		cfg.HTTP.MaxBodyBytes != 123456 ||
+		!cfg.HTTP.MetricsEnabled ||
+		cfg.HTTP.MetricsToken != "scrape-secret" ||
 		cfg.HTTP.HSTSMaxAgeSeconds != 31536000 ||
 		!cfg.HTTP.HSTSIncludeSubDomains ||
 		!cfg.HTTP.HSTSPreload {
@@ -278,6 +284,7 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 	t.Setenv("DB_MAX_OPEN_CONNS", "0")
 	t.Setenv("HTTP_READ_TIMEOUT", "not-a-duration")
 	t.Setenv("HTTP_REQUEST_TIMEOUT", "-1s")
+	t.Setenv("HTTP_METRICS_ENABLED", "not-a-bool")
 	t.Setenv("HTTP_HSTS_INCLUDE_SUBDOMAINS", "not-a-bool")
 	t.Setenv("JWT_TTL", "0s")
 
@@ -291,6 +298,7 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 		"DB_MAX_OPEN_CONNS",
 		"HTTP_READ_TIMEOUT",
 		"HTTP_REQUEST_TIMEOUT",
+		"HTTP_METRICS_ENABLED",
 		"HTTP_HSTS_INCLUDE_SUBDOMAINS",
 		"JWT_TTL",
 	} {
@@ -404,6 +412,16 @@ func TestHTTPConfigValidate(t *testing.T) {
 	invalidRequestTimeout.RequestTimeout = -time.Second
 	if err := invalidRequestTimeout.Validate(); err == nil {
 		t.Fatal("expected negative request timeout error")
+	}
+	invalidMetricsToken := valid
+	invalidMetricsToken.MetricsToken = "contains space"
+	if err := invalidMetricsToken.Validate(); err == nil {
+		t.Fatal("expected invalid metrics token error")
+	}
+	paddingOnlyMetricsToken := valid
+	paddingOnlyMetricsToken.MetricsToken = "=="
+	if err := paddingOnlyMetricsToken.Validate(); err == nil {
+		t.Fatal("expected padding-only metrics token error")
 	}
 	invalidHSTSDirective := valid
 	invalidHSTSDirective.HSTSIncludeSubDomains = true
@@ -654,6 +672,25 @@ func TestEnvExampleDocumentsDefaultRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestEnvExampleDocumentsMetricsExposure(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".env.example"))
+	if err != nil {
+		t.Fatalf("read backend/.env.example: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"Exposes /metrics on the backend port",
+		"Keep disabled unless the port is protected",
+		"HTTP_METRICS_ENABLED=false",
+		"HTTP_METRICS_TOKEN=",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("backend/.env.example is missing metrics guidance %q", want)
+		}
+	}
+}
+
 func TestEnvExampleLoadsStrictly(t *testing.T) {
 	unsetConfigEnv(t)
 
@@ -715,6 +752,40 @@ func TestProductionComposeDefaultsRequestTimeout(t *testing.T) {
 
 	if !strings.Contains(source, "HTTP_REQUEST_TIMEOUT: ${HTTP_REQUEST_TIMEOUT:-60s}") {
 		t.Fatal("docker-compose.yaml must default HTTP_REQUEST_TIMEOUT to 60s")
+	}
+}
+
+func TestProductionComposeDisablesMetricsByDefault(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yaml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yaml: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"HTTP_METRICS_ENABLED: ${HTTP_METRICS_ENABLED:-false}",
+		"HTTP_METRICS_TOKEN: ${HTTP_METRICS_TOKEN:-}",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("docker-compose.yaml must include metrics default %q", want)
+		}
+	}
+}
+
+func TestProductionComposeDocumentsMetricsToken(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "readme.md"))
+	if err != nil {
+		t.Fatalf("read readme.md: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"HTTP_METRICS_TOKEN",
+		"Authorization: Bearer",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("readme.md is missing metrics token guidance %q", want)
+		}
 	}
 }
 
@@ -1110,6 +1181,8 @@ func configEnvKeys() []string {
 		"HTTP_REQUEST_TIMEOUT",
 		"HTTP_MAX_HEADER_BYTES",
 		"HTTP_MAX_BODY_BYTES",
+		"HTTP_METRICS_ENABLED",
+		"HTTP_METRICS_TOKEN",
 		"HTTP_HSTS_MAX_AGE_SECONDS",
 		"HTTP_HSTS_INCLUDE_SUBDOMAINS",
 		"HTTP_HSTS_PRELOAD",

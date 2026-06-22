@@ -31,6 +31,7 @@ func readImportRows(file *multipart.FileHeader) ([][]string, error) {
 	defer f.Close()
 
 	if ext == ".xlsx" {
+		// excelize 需要可回读的 reader；先用 LimitReader 控制内存和文件大小，再交给解析器。
 		tmp, err := io.ReadAll(io.LimitReader(f, MaxImportFileBytes+1))
 		if err != nil {
 			return nil, err
@@ -75,6 +76,7 @@ func readImportRows(file *multipart.FileHeader) ([][]string, error) {
 
 func readCSVDataRows(r io.Reader) ([][]string, error) {
 	reader := csv.NewReader(r)
+	// 用户导出的 CSV 可能少填末尾空列，允许变长记录，字段级校验交给后续解析。
 	reader.FieldsPerRecord = -1
 	rows := make([][]string, 0)
 	line := 0
@@ -98,6 +100,7 @@ func readCSVDataRows(r io.Reader) ([][]string, error) {
 		if !isEmptyImportRow(row) {
 			dataRows++
 		}
+		// 限制有效数据行数量，不把空白行计入额度，方便用户保留表格尾部空行。
 		if dataRows > MaxImportRows {
 			return nil, fmt.Errorf("too many rows: max %d", MaxImportRows)
 		}
@@ -173,6 +176,7 @@ func validateImportHeader(row []string) error {
 func normalizedImportHeader(value string, index int) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	if index == 0 {
+		// Excel/部分编辑器会在 UTF-8 CSV 第一列写入 BOM，只在表头第一列剥离。
 		value = strings.TrimPrefix(value, "\ufeff")
 	}
 	return value
@@ -203,10 +207,11 @@ func parseImportRecord(row []string) (importRecord, error) {
 		OccurredAt: occurredAt,
 		Type:       typeVal,
 		Amount:     money.FromCents(amountCents),
-		Category:   stringutil.FallbackName(get(3), "餐饮"),
-		Account:    stringutil.FallbackName(get(4), "现金"),
-		Note:       get(5),
-		Tags:       get(6),
+		// 分类和账户允许留空，导入时落到默认值，避免一行空名称导致整批失败。
+		Category: stringutil.FallbackName(get(3), "餐饮"),
+		Account:  stringutil.FallbackName(get(4), "现金"),
+		Note:     get(5),
+		Tags:     get(6),
 	}, nil
 }
 

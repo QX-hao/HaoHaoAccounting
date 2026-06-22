@@ -28,6 +28,7 @@ func (s *Service) Summary(ctx context.Context, userID uint, filter SummaryFilter
 	filter.Trend = normalizeTrend(filter.Trend)
 	cacheKey := cache.UserReportKey(userID, filter.Start, filter.End) + filter.CacheSuffix()
 	if s.cache != nil && s.cache.Enabled() {
+		// 报表由多组聚合查询组成，先读短 TTL 缓存，避免仪表盘反复切页时打满数据库。
 		cacheCtx, cancel := context.WithTimeout(requestContext(ctx), time.Second)
 		defer cancel()
 		var cached map[string]any
@@ -76,6 +77,7 @@ func (s *Service) Summary(ctx context.Context, userID uint, filter SummaryFilter
 
 	summary := gin.H{"start": filter.Start, "end": filter.End}
 
+	// 同长度的上一周期用于前端环比展示；结束点减 1 秒，避免和当前周期边界重叠。
 	prevStart := filter.Start.Add(-filter.End.Sub(filter.Start) - time.Second)
 	prevEnd := filter.Start.Add(-time.Second)
 	prevIncomeCents, prevExpenseCents, err := s.sumIncomeExpense(ctx, userID, SummaryFilter{
@@ -107,6 +109,7 @@ func (s *Service) Summary(ctx context.Context, userID uint, filter SummaryFilter
 	}
 
 	if s.cache != nil && s.cache.Enabled() {
+		// 写缓存不继承客户端取消，避免用户关闭页面时已经算好的结果白白丢掉。
 		cacheCtx, cancel := context.WithTimeout(cacheWriteContext(ctx), time.Second)
 		defer cancel()
 		_ = s.cache.SetJSON(cacheCtx, cacheKey, summary, 2*time.Minute)
@@ -370,6 +373,7 @@ func (s *Service) accountBalanceTrend(ctx context.Context, userID uint, filter S
 		}
 		netByKey[key] += delta
 	}
+	// 先按账户分组排序再累计，才能得到每个账户自己的运行余额，而不是全局余额。
 	sort.Slice(keys, func(i, j int) bool {
 		if keys[i].accountID == keys[j].accountID {
 			return keys[i].period < keys[j].period
@@ -428,6 +432,7 @@ func (s *Service) budgetExecution(ctx context.Context, userID uint, filter Summa
 	for _, budget := range budgets {
 		expenseCents := int64(0)
 		if budget.CategoryID == 0 {
+			// category_id=0 表示“整月总预算”，和具体分类预算分开计算。
 			expenseCents = expenses[budget.Month][0]
 		} else {
 			expenseCents = expenses[budget.Month][budget.CategoryID]
@@ -462,6 +467,7 @@ func (s *Service) refreshSummaryTables(ctx context.Context, userID uint, filter 
 	}
 
 	snapshotFilter := SummaryFilter{Start: filter.Start, End: filter.End, Trend: filter.Trend}
+	// 返回值要尊重用户筛选；落库快照只按时间范围保存，供后续报表复用和离线检查。
 	snapshotDaily, err := s.summaryTableRows(ctx, userID, snapshotFilter, "day")
 	if err != nil {
 		return nil, nil, err
@@ -661,6 +667,7 @@ func (s *Service) expenseByMonthCategory(ctx context.Context, userID uint, filte
 		if _, ok := result[row.Month]; !ok {
 			result[row.Month] = map[uint]int64{0: 0}
 		}
+		// 0 号分类是总支出的哨兵 key，用于整月预算执行率。
 		result[row.Month][row.CategoryID] += row.AmountCents
 		result[row.Month][0] += row.AmountCents
 	}
