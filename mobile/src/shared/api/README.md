@@ -7,6 +7,7 @@ React Native API helper layer.
 - Persist bearer tokens in AsyncStorage.
 - Attach bearer tokens to authenticated requests.
 - Route JSON requests, uploads, downloads, and logout through the shared `fetchAPI` helper.
+- Expose `requestWithResponse` and `uploadWithResponse` for screens that need successful response headers such as `Location` and `Link`.
 - Send `Accept: application/json`, attach a bounded `X-Request-ID`, and add `Content-Type: application/json` only when the body is not `FormData`.
 - Bound requests with a 30 second `AbortController` timeout while still honoring a caller-provided `RequestInit.signal`.
 - Parse backend JSON and structured `application/*+json` error payloads into `ApiError` values, with plain text fallback for non-JSON bodies.

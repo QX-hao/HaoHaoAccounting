@@ -9,6 +9,11 @@ type ApiErrorCode = ErrorResponse['code'] | 'network_error' | '';
 type ApiErrorBody = Partial<ErrorResponse>;
 const API_REQUEST_TIMEOUT_MS = 30_000;
 
+export type ApiResponse<T> = {
+  data: T;
+  headers: Headers;
+};
+
 export class ApiError extends Error {
   status: number;
   code: ApiErrorCode;
@@ -63,6 +68,11 @@ export async function clearToken() {
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await requestWithResponse<T>(path, init);
+  return response.data;
+}
+
+export async function requestWithResponse<T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> {
   const headers = new Headers(init.headers || {});
   const token = await getToken();
 
@@ -88,11 +98,18 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     throw apiError(resp, data);
   }
   const data = await resp.json().catch(() => ({}));
-  return data as T;
+  return { data: data as T, headers: resp.headers };
 }
 
 export function upload<T>(path: string, formData: FormData) {
   return request<T>(path, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export function uploadWithResponse<T>(path: string, formData: FormData) {
+  return requestWithResponse<T>(path, {
     method: 'POST',
     body: formData,
   });

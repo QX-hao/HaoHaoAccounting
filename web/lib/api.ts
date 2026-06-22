@@ -1,1 +1,1 @@
-export { download, request, upload } from '@/shared/api/client';
+export { download, request, requestWithResponse, upload, uploadWithResponse } from '@/shared/api/client';

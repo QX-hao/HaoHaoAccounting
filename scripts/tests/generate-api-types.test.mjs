@@ -320,6 +320,20 @@ test('API clients expose rate limit response headers on errors', () => {
 	}
 });
 
+test('API clients expose successful response headers with parsed data', () => {
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /export type ApiResponse<T> = \{\n\s+data: T;\n\s+headers: Headers;\n\};/);
+		assert.match(source, /export async function request<T>\(path: string, init: RequestInit = \{\}\): Promise<T> \{\n\s+const response = await requestWithResponse<T>\(path, init\);\n\s+return response\.data;\n\}/);
+		assert.match(source, /return \{ data: data as T, headers: resp\.headers \};/);
+	}
+	assert.match(webApiClient, /export async function requestWithResponse<T>\(path: string, init: RequestInit = \{\}\): Promise<ApiResponse<T>>/);
+	assert.match(webApiClient, /export async function uploadWithResponse<T>\(path: string, formData: FormData\): Promise<ApiResponse<T>>/);
+	assert.match(mobileApiClient, /export async function requestWithResponse<T>\(path: string, init: RequestInit = \{\}\): Promise<ApiResponse<T>>/);
+	assert.match(mobileApiClient, /export function uploadWithResponse<T>\(path: string, formData: FormData\)/);
+	assert.match(webApiReadme, /successful response headers such as `Location` and `Link`/);
+	assert.match(mobileApiReadme, /successful response headers such as `Location` and `Link`/);
+});
+
 test('generator rejects duplicate OpenAPI operationId values', () => {
 	assert.match(generator, /operationIds\.has\(operationId\)/);
 	assert.match(generator, /is used by both/);

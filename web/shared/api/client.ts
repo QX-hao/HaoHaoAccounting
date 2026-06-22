@@ -6,6 +6,11 @@ type ApiErrorCode = ErrorResponse['code'] | 'network_error' | '';
 type ApiErrorBody = Partial<ErrorResponse>;
 const API_REQUEST_TIMEOUT_MS = 30_000;
 
+export type ApiResponse<T> = {
+  data: T;
+  headers: Headers;
+};
+
 export class ApiError extends Error {
   status: number;
   code: ApiErrorCode;
@@ -42,6 +47,11 @@ export class ApiError extends Error {
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await requestWithResponse<T>(path, init);
+  return response.data;
+}
+
+export async function requestWithResponse<T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> {
   const headers = new Headers(init.headers || {});
   ensureRequestId(headers);
   headers.set('Accept', headers.get('Accept') || 'application/json');
@@ -65,10 +75,15 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     throw apiError(resp, data);
   }
   const data = await resp.json().catch(() => ({}));
-  return data as T;
+  return { data: data as T, headers: resp.headers };
 }
 
 export async function upload<T>(path: string, formData: FormData): Promise<T> {
+  const response = await uploadWithResponse<T>(path, formData);
+  return response.data;
+}
+
+export async function uploadWithResponse<T>(path: string, formData: FormData): Promise<ApiResponse<T>> {
   const headers = new Headers();
   ensureRequestId(headers);
   headers.set('Accept', 'application/json');
@@ -88,7 +103,7 @@ export async function upload<T>(path: string, formData: FormData): Promise<T> {
     throw apiError(resp, data);
   }
   const data = await resp.json().catch(() => ({}));
-  return data as T;
+  return { data: data as T, headers: resp.headers };
 }
 
 export type DownloadResult = {
