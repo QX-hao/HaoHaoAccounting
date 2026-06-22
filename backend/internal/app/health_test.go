@@ -61,6 +61,7 @@ func TestReadmeDocumentsRouteContracts(t *testing.T) {
 	for _, want := range []string{
 		"`/livez` only reports process liveness",
 		"`/readyz` and `/health` check the database and optional Redis cache",
+		"`/metrics` owned by the server entrypoint",
 		"2 second dependency budget",
 		"Database failures return `503` with `status: unavailable`",
 		"Redis is reported as `disabled`",

@@ -21,6 +21,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestRequestLogFormatterIncludesRequestID(t *testing.T) {
@@ -126,12 +127,15 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`gin-contrib/cors`",
 		"queued resource locations",
 		"`TRUSTED_PROXIES`",
-		"`RequestID` -> `RequestTimeout` -> logger -> `Recovery` -> `SecurityHeaders` -> CORS -> `NoStoreAPI` -> `BodyLimit` -> `ContentType` -> `Accept`",
+		"`RequestID` -> `HTTPMetrics` -> `RequestTimeout` -> logger -> `Recovery` -> `SecurityHeaders` -> CORS -> `NoStoreAPI` -> `BodyLimit` -> `ContentType` -> `Accept`",
 		"no-store API cache headers",
+		"being counted by request metrics",
 		"per-request",
 		"`HTTP_REQUEST_TIMEOUT` defaults to `60s`",
 		"`0s`",
 		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
+		"`/metrics`",
+		"method, Gin route pattern, and status",
 		"early rejections",
 		"`X-Request-ID`",
 		"`HTTP_*`",
@@ -139,6 +143,49 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		if !strings.Contains(source, want) {
 			t.Fatalf("README.md is missing server guidance %q", want)
 		}
+	}
+}
+
+func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	router := gin.New()
+	registry := prometheus.NewRegistry()
+	registerMetricsRoute(router, registry)
+	applyGlobalMiddleware(router, config.Config{HTTP: config.HTTPConfig{
+		CORSAllowOrigins: []string{"https://app.example.com"},
+	}}, middleware.NewHTTPMetrics(registry))
+	router.GET("/api/v1/accounts/:id", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts/42?token=secret", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResp := httptest.NewRecorder()
+	router.ServeHTTP(metricsResp, metricsReq)
+
+	if metricsResp.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, body = %s", metricsResp.Code, metricsResp.Body.String())
+	}
+	body := metricsResp.Body.String()
+	for _, want := range []string{
+		`haohao_http_requests_total{method="GET",route="/api/v1/accounts/:id",status="204"} 1`,
+		`haohao_http_request_duration_seconds_bucket{method="GET",route="/api/v1/accounts/:id",status="204"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics body missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "/api/v1/accounts/42") || strings.Contains(body, "token=secret") {
+		t.Fatalf("metrics leaked raw URL data: %s", body)
 	}
 }
 
@@ -470,7 +517,7 @@ func TestEarlyRejectedRequestsKeepGlobalHeaders(t *testing.T) {
 		},
 	}
 	router := gin.New()
-	applyGlobalMiddleware(router, cfg)
+	applyGlobalMiddleware(router, cfg, middleware.NewHTTPMetrics(prometheus.NewRegistry()))
 	router.POST("/api/v1/auth/login", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
@@ -751,7 +798,7 @@ func newCORSMiddlewareTestRouter(t *testing.T) *gin.Engine {
 		},
 	}
 	router := gin.New()
-	applyGlobalMiddleware(router, cfg)
+	applyGlobalMiddleware(router, cfg, middleware.NewHTTPMetrics(prometheus.NewRegistry()))
 	return router
 }
 
@@ -779,7 +826,7 @@ func TestFallbackResponsesKeepGlobalMiddlewareHeaders(t *testing.T) {
 		JWT:            config.JWTConfig{Secret: "test-jwt-secret-with-at-least-32-chars", TTL: time.Hour, Issuer: "issuer", Audience: "api"},
 	}
 	router := gin.New()
-	applyGlobalMiddleware(router, cfg)
+	applyGlobalMiddleware(router, cfg, middleware.NewHTTPMetrics(prometheus.NewRegistry()))
 	if err := app.RegisterRoutesWithConfig(router, testutil.NewStore(t), nil, cfg); err != nil {
 		t.Fatalf("register routes: %v", err)
 	}

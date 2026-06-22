@@ -18,6 +18,8 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -69,7 +71,9 @@ func run(parent context.Context) error {
 	if err := r.SetTrustedProxies(cfg.HTTP.TrustedProxies); err != nil {
 		return fmt.Errorf("failed to set trusted proxies: %w", err)
 	}
-	applyGlobalMiddleware(r, cfg)
+	metricsRegistry := prometheus.NewRegistry()
+	registerMetricsRoute(r, metricsRegistry)
+	applyGlobalMiddleware(r, cfg, middleware.NewHTTPMetrics(metricsRegistry))
 
 	if err := app.RegisterRoutesWithConfig(r, s, redisCache, cfg); err != nil {
 		return fmt.Errorf("failed to register routes: %w", err)
@@ -100,8 +104,11 @@ func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
 	}
 }
 
-func applyGlobalMiddleware(router *gin.Engine, cfg config.Config) {
+func applyGlobalMiddleware(router *gin.Engine, cfg config.Config, metrics *middleware.HTTPMetrics) {
 	router.Use(middleware.RequestID())
+	if metrics != nil {
+		router.Use(metrics.Middleware())
+	}
 	router.Use(middleware.RequestTimeout(cfg.HTTP.RequestTimeout))
 	router.Use(gin.LoggerWithConfig(newLoggerConfig()), middleware.Recovery())
 	router.Use(middleware.SecurityHeaders(securityHeadersConfig(cfg)))
@@ -110,6 +117,10 @@ func applyGlobalMiddleware(router *gin.Engine, cfg config.Config) {
 	router.Use(middleware.BodyLimit(cfg.HTTP.MaxBodyBytes))
 	router.Use(middleware.ContentType(middleware.APIMediaTypeRules()))
 	router.Use(middleware.Accept(middleware.APIAcceptRules()))
+}
+
+func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry) {
+	router.GET("/metrics", gin.WrapH(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
 }
 
 func validateStartupConfig(cfg config.Config) error {
