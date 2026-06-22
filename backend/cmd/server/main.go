@@ -158,6 +158,7 @@ func newCORSConfig(cfg config.Config) cors.Config {
 			"Allow",
 			"Content-Disposition",
 			"Link",
+			"Location",
 			"RateLimit-Limit",
 			"RateLimit-Remaining",
 			"RateLimit-Reset",

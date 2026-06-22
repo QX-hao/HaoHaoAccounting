@@ -124,6 +124,7 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"wildcards",
 		"credentials disabled",
 		"`gin-contrib/cors`",
+		"queued resource locations",
 		"`TRUSTED_PROXIES`",
 		"`RequestID` -> `RequestTimeout` -> logger -> `Recovery` -> `SecurityHeaders` -> CORS -> `NoStoreAPI` -> `BodyLimit` -> `ContentType` -> `Accept`",
 		"no-store API cache headers",
@@ -243,6 +244,9 @@ func TestNewCORSConfigIncludesRequestIDHeader(t *testing.T) {
 	}
 	if !slices.Contains(corsConfig.ExposeHeaders, "Allow") {
 		t.Fatalf("ExposeHeaders = %#v, missing Allow", corsConfig.ExposeHeaders)
+	}
+	if !slices.Contains(corsConfig.ExposeHeaders, "Location") {
+		t.Fatalf("ExposeHeaders = %#v, missing Location", corsConfig.ExposeHeaders)
 	}
 }
 
@@ -601,7 +605,7 @@ func TestCORSAllowedOriginExposesClientHeaders(t *testing.T) {
 		t.Fatalf("Access-Control-Allow-Credentials = %q, want empty", got)
 	}
 	exposeHeaders := resp.Header().Get("Access-Control-Expose-Headers")
-	for _, header := range []string{"Allow", "Content-Disposition", "Link", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "WWW-Authenticate", "Retry-After", "X-Total-Count", middleware.RequestIDHeader} {
+	for _, header := range []string{"Allow", "Content-Disposition", "Link", "Location", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "WWW-Authenticate", "Retry-After", "X-Total-Count", middleware.RequestIDHeader} {
 		if !headerHasToken(exposeHeaders, header) {
 			t.Fatalf("Access-Control-Expose-Headers = %q, missing %s", exposeHeaders, header)
 		}
