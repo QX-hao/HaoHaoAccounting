@@ -71,7 +71,7 @@ func run(parent context.Context) error {
 	if err := r.SetTrustedProxies(cfg.HTTP.TrustedProxies); err != nil {
 		return fmt.Errorf("failed to set trusted proxies: %w", err)
 	}
-	metricsRegistry := prometheus.NewRegistry()
+	metricsRegistry := newMetricsRegistry()
 	registerMetricsRoute(r, metricsRegistry)
 	applyGlobalMiddleware(r, cfg, middleware.NewHTTPMetrics(metricsRegistry))
 
@@ -121,6 +121,13 @@ func applyGlobalMiddleware(router *gin.Engine, cfg config.Config, metrics *middl
 
 func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry) {
 	router.GET("/metrics", gin.WrapH(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
+}
+
+func newMetricsRegistry() *prometheus.Registry {
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(prometheus.NewGoCollector())
+	registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	return registry
 }
 
 func validateStartupConfig(cfg config.Config) error {

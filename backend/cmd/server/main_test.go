@@ -152,7 +152,7 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	t.Cleanup(func() { gin.SetMode(previousMode) })
 
 	router := gin.New()
-	registry := prometheus.NewRegistry()
+	registry := newMetricsRegistry()
 	registerMetricsRoute(router, registry)
 	applyGlobalMiddleware(router, config.Config{HTTP: config.HTTPConfig{
 		CORSAllowOrigins: []string{"https://app.example.com"},
@@ -179,6 +179,8 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	for _, want := range []string{
 		`haohao_http_requests_total{method="GET",route="/api/v1/accounts/:id",status="204"} 1`,
 		`haohao_http_request_duration_seconds_bucket{method="GET",route="/api/v1/accounts/:id",status="204"`,
+		`go_goroutines `,
+		`process_cpu_seconds_total `,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q: %s", want, body)
