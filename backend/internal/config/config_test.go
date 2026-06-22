@@ -146,7 +146,7 @@ func TestLoadDefaultsForLocalDevelopment(t *testing.T) {
 		cfg.HTTP.WriteTimeout != 30*time.Second ||
 		cfg.HTTP.IdleTimeout != 60*time.Second ||
 		cfg.HTTP.ShutdownTimeout != 10*time.Second ||
-		cfg.HTTP.RequestTimeout != 0 ||
+		cfg.HTTP.RequestTimeout != defaultHTTPRequestTimeout ||
 		cfg.HTTP.MaxHeaderBytes != 1<<20 ||
 		cfg.HTTP.MaxBodyBytes != 6*1024*1024 ||
 		cfg.HTTP.HSTSMaxAgeSeconds != 0 ||
@@ -636,6 +636,24 @@ func TestEnvExampleDocumentsExplicitCORSOrigins(t *testing.T) {
 	}
 }
 
+func TestEnvExampleDocumentsDefaultRequestTimeout(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".env.example"))
+	if err != nil {
+		t.Fatalf("read backend/.env.example: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"Per-request context deadline",
+		"Use 0s to disable",
+		"HTTP_REQUEST_TIMEOUT=60s",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("backend/.env.example is missing request timeout guidance %q", want)
+		}
+	}
+}
+
 func TestEnvExampleLoadsStrictly(t *testing.T) {
 	unsetConfigEnv(t)
 
@@ -685,6 +703,18 @@ func TestProductionComposeReusesBackendEnvironmentAnchor(t *testing.T) {
 		if !strings.Contains(block, "environment: *backend-env") {
 			t.Fatalf("%s service must reuse backend environment anchor:\n%s", service, block)
 		}
+	}
+}
+
+func TestProductionComposeDefaultsRequestTimeout(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yaml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yaml: %v", err)
+	}
+	source := string(data)
+
+	if !strings.Contains(source, "HTTP_REQUEST_TIMEOUT: ${HTTP_REQUEST_TIMEOUT:-60s}") {
+		t.Fatal("docker-compose.yaml must default HTTP_REQUEST_TIMEOUT to 60s")
 	}
 }
 
@@ -786,7 +816,7 @@ func TestLoadFallsBackWhenNumericValuesAreInvalid(t *testing.T) {
 	if cfg.HTTP.ReadTimeout != 15*time.Second {
 		t.Fatalf("HTTP.ReadTimeout = %s", cfg.HTTP.ReadTimeout)
 	}
-	if cfg.HTTP.RequestTimeout != 0 {
+	if cfg.HTTP.RequestTimeout != defaultHTTPRequestTimeout {
 		t.Fatalf("HTTP.RequestTimeout = %s", cfg.HTTP.RequestTimeout)
 	}
 	if cfg.HTTP.MaxHeaderBytes != 1<<20 {
@@ -803,6 +833,17 @@ func TestLoadFallsBackWhenNumericValuesAreInvalid(t *testing.T) {
 	}
 	if cfg.JWT.ClockSkew != 30*time.Second {
 		t.Fatalf("JWT.ClockSkew = %s", cfg.JWT.ClockSkew)
+	}
+}
+
+func TestLoadAllowsDisablingRequestTimeout(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("HTTP_REQUEST_TIMEOUT", "0s")
+
+	cfg := Load()
+
+	if cfg.HTTP.RequestTimeout != 0 {
+		t.Fatalf("HTTP.RequestTimeout = %s, want disabled", cfg.HTTP.RequestTimeout)
 	}
 }
 
@@ -824,7 +865,7 @@ func validHTTPConfig() HTTPConfig {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		ShutdownTimeout:   10 * time.Second,
-		RequestTimeout:    0,
+		RequestTimeout:    defaultHTTPRequestTimeout,
 		MaxHeaderBytes:    1 << 20,
 		MaxBodyBytes:      6 * 1024 * 1024,
 	}

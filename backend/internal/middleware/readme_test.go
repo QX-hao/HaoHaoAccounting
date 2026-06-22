@@ -16,6 +16,7 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 	for _, want := range []string{
 		"`RequestID`",
 		"`RequestTimeout`",
+		"structured `504` timeout response",
 		"`Recovery`",
 		"`SecurityHeaders`",
 		"`BodyLimit`",

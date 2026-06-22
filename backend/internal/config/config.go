@@ -12,14 +12,15 @@ import (
 )
 
 const (
-	defaultPostgresDSN       = "host=127.0.0.1 user=postgres password=haohao123 dbname=haohaoaccounting port=55432 sslmode=disable TimeZone=Asia/Shanghai"
-	defaultMySQLDSN          = "root:root@tcp(127.0.0.1:53306)/haohaoaccounting?charset=utf8mb4&parseTime=True&loc=Local"
-	defaultDBMaxOpenConns    = 25
-	defaultDBMaxIdleConns    = 10
-	defaultDBConnMaxLifetime = time.Hour
-	defaultDBConnMaxIdleTime = 30 * time.Minute
-	minJWTSecretLength       = 32
-	hstsPreloadMinMaxAge     = 31536000
+	defaultPostgresDSN        = "host=127.0.0.1 user=postgres password=haohao123 dbname=haohaoaccounting port=55432 sslmode=disable TimeZone=Asia/Shanghai"
+	defaultMySQLDSN           = "root:root@tcp(127.0.0.1:53306)/haohaoaccounting?charset=utf8mb4&parseTime=True&loc=Local"
+	defaultDBMaxOpenConns     = 25
+	defaultDBMaxIdleConns     = 10
+	defaultDBConnMaxLifetime  = time.Hour
+	defaultDBConnMaxIdleTime  = 30 * time.Minute
+	defaultHTTPRequestTimeout = 60 * time.Second
+	minJWTSecretLength        = 32
+	hstsPreloadMinMaxAge      = 31536000
 )
 
 type Config struct {
@@ -211,7 +212,7 @@ func Load() Config {
 			WriteTimeout:          durationEnv("HTTP_WRITE_TIMEOUT", 30*time.Second),
 			IdleTimeout:           durationEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
 			ShutdownTimeout:       durationEnv("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
-			RequestTimeout:        nonNegativeDurationEnv("HTTP_REQUEST_TIMEOUT", 0),
+			RequestTimeout:        nonNegativeDurationEnv("HTTP_REQUEST_TIMEOUT", defaultHTTPRequestTimeout),
 			MaxHeaderBytes:        positiveIntEnv("HTTP_MAX_HEADER_BYTES", 1<<20),
 			MaxBodyBytes:          int64Env("HTTP_MAX_BODY_BYTES", 6*1024*1024),
 			HSTSMaxAgeSeconds:     nonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS", 0),

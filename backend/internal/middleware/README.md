@@ -4,7 +4,7 @@ Gin middleware and auth token helpers.
 
 `RequestID` preserves a valid caller-provided `X-Request-ID` or generates one, returns it in the response header, and stores the same value in both Gin context and the standard request `context.Context` for downstream services. Caller IDs are trimmed and accepted only when they are bounded to 128 visible ASCII characters; invalid values are replaced everywhere to avoid unsafe log correlation values.
 
-`RequestTimeout` adds an optional deadline to the standard request `context.Context` so downstream database, cache, and external-service calls can stop work when a request exceeds the configured budget. A zero or negative timeout is treated as disabled.
+`RequestTimeout` adds a deadline to the standard request `context.Context` so downstream database, cache, and external-service calls can stop work when a request exceeds the configured budget. If the handler returns without writing after the deadline, the middleware writes the structured `504` timeout response. A zero or negative timeout is treated as disabled.
 
 `Recovery` returns the structured internal-error response while logging the recovered panic with method, path, client IP, and request ID so production incidents can be correlated without exposing panic details to clients. Broken pipe, connection reset, aborted handler, and already-written response cases are not overwritten with another error body.
 
