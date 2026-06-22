@@ -1,11 +1,14 @@
 package transactions
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/models"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
 )
@@ -54,6 +57,43 @@ func TestListAcceptsDefaultQueryParameters(t *testing.T) {
 	}
 	if got := resp.Header().Get("X-Total-Count"); got != "0" {
 		t.Fatalf("X-Total-Count = %q, want 0", got)
+	}
+}
+
+func TestCreateReturnsLocationHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := testutil.NewStore(t)
+	account := models.Account{UserID: 0, Name: "现金", Type: "cash"}
+	category := models.Category{Name: "餐饮", Type: "expense", IsSystem: true}
+	if err := store.DB.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DB.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	NewHandler(NewService(store, nil)).Register(router.Group(""))
+
+	body := `{"type":"expense","amount":12.34,"categoryId":` + strconv.FormatUint(uint64(category.ID), 10) + `,"accountId":` + strconv.FormatUint(uint64(account.ID), 10) + `,"note":"lunch","occurredAt":"2026-06-01T12:30:00+08:00"}`
+	req := httptest.NewRequest(http.MethodPost, "/transactions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body = %s", resp.Code, resp.Body.String())
+	}
+	var transaction struct {
+		ID uint `json:"id"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &transaction); err != nil {
+		t.Fatalf("decode transaction: %v", err)
+	}
+	if transaction.ID == 0 {
+		t.Fatal("transaction id = 0")
+	}
+	if got := resp.Header().Get("Location"); got != "/transactions/"+strconv.FormatUint(uint64(transaction.ID), 10) {
+		t.Fatalf("Location = %q", got)
 	}
 }
 

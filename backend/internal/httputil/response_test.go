@@ -477,6 +477,40 @@ func TestSetPaginationHeadersHandlesLargeTotals(t *testing.T) {
 	}
 }
 
+func TestSetCreatedLocation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.POST("/accounts", func(c *gin.Context) {
+		SetCreatedLocation(c, 42)
+		c.Status(http.StatusCreated)
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/accounts", nil))
+
+	if got := resp.Header().Get("Location"); got != "/accounts/42" {
+		t.Fatalf("Location = %q, want /accounts/42", got)
+	}
+}
+
+func TestSetCreatedLocationIgnoresZeroID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.POST("/accounts", func(c *gin.Context) {
+		SetCreatedLocation(c, 0)
+		c.Status(http.StatusCreated)
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/accounts", nil))
+
+	if got := resp.Header().Get("Location"); got != "" {
+		t.Fatalf("Location = %q, want empty", got)
+	}
+}
+
 func allErrorCodes() []string {
 	codes := []string{
 		CodeBadRequest,

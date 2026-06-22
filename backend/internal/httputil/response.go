@@ -177,6 +177,13 @@ func SetPaginationHeaders(c *gin.Context, total int64, page, pageSize int) {
 	}
 }
 
+func SetCreatedLocation(c *gin.Context, id uint) {
+	if id == 0 {
+		return
+	}
+	c.Header("Location", strings.TrimRight(c.Request.URL.Path, "/")+"/"+strconv.FormatUint(uint64(id), 10))
+}
+
 func paginationLinkHeader(requestURL *url.URL, total int64, page, pageSize int) string {
 	totalPages := ((total - 1) / int64(pageSize)) + 1
 	if requestURL == nil || totalPages <= 1 {

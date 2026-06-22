@@ -247,6 +247,8 @@ paths:
               $ref: '#/components/headers/Pragma'
             Expires:
               $ref: '#/components/headers/Expires'
+            Location:
+              $ref: '#/components/headers/Location'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -416,6 +418,8 @@ paths:
               $ref: '#/components/headers/Pragma'
             Expires:
               $ref: '#/components/headers/Expires'
+            Location:
+              $ref: '#/components/headers/Location'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -588,6 +592,8 @@ paths:
               $ref: '#/components/headers/Pragma'
             Expires:
               $ref: '#/components/headers/Expires'
+            Location:
+              $ref: '#/components/headers/Location'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -816,6 +822,8 @@ paths:
               $ref: '#/components/headers/Pragma'
             Expires:
               $ref: '#/components/headers/Expires'
+            Location:
+              $ref: '#/components/headers/Location'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:

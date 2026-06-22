@@ -55,6 +55,7 @@ func (h *Handler) create(c *gin.Context) {
 		writeBudgetError(c, err)
 		return
 	}
+	httputil.SetCreatedLocation(c, budget.ID)
 	c.JSON(http.StatusCreated, budget)
 }
 

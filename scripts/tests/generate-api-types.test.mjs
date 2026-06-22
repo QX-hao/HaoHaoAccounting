@@ -641,6 +641,14 @@ test('generator requires Location header on accepted import jobs', () => {
 	assert.match(openapi, /postIoImportJobs[\s\S]+'202':[\s\S]+Location:[\s\S]+\$ref: '#\/components\/headers\/Location'/);
 });
 
+test('generator requires Location header on created resources', () => {
+	assert.match(generator, /validateCreatedResponseHeaders/);
+	assert.match(generator, /\$\{method\.toUpperCase\(\)\} \$\{apiPath\} 201 response is missing Location header/);
+	for (const operationId of ['postAccounts', 'postBudgets', 'postCategories', 'postTransactions']) {
+		assert.match(openapi, new RegExp(`${operationId}[\\s\\S]+'201':[\\s\\S]+Location:[\\s\\S]+\\$ref: '#/components/headers/Location'`));
+	}
+});
+
 test('generator requires not-acceptable responses for operations with response bodies', () => {
 	assert.match(generator, /returns a response body but is missing 406 response/);
 	assert.match(generator, /components\.responses\.NotAcceptable is missing application\/json error response/);

@@ -60,6 +60,7 @@ func (h *Handler) create(c *gin.Context) {
 		httputil.InternalError(c, err)
 		return
 	}
+	httputil.SetCreatedLocation(c, category.ID)
 	c.JSON(http.StatusCreated, category)
 }
 

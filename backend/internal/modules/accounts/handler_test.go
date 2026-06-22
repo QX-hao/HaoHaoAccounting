@@ -1,8 +1,10 @@
 package accounts
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -28,6 +30,33 @@ func TestRejectsInvalidPathID(t *testing.T) {
 				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
 			}
 		})
+	}
+}
+
+func TestCreateReturnsLocationHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewHandler(NewService(testutil.NewStore(t), nil)).Register(router.Group(""))
+
+	req := httptest.NewRequest(http.MethodPost, "/accounts", strings.NewReader(`{"name":"Cash","type":"cash","balance":0}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body = %s", resp.Code, resp.Body.String())
+	}
+	var account struct {
+		ID uint `json:"id"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &account); err != nil {
+		t.Fatalf("decode account: %v", err)
+	}
+	if account.ID == 0 {
+		t.Fatal("account id = 0")
+	}
+	if got := resp.Header().Get("Location"); got != "/accounts/"+strconv.FormatUint(uint64(account.ID), 10) {
+		t.Fatalf("Location = %q", got)
 	}
 }
 

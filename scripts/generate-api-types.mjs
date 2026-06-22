@@ -692,6 +692,7 @@ function parseEndpoints(openapi) {
       validateAuthOperationContract(method, apiPath, methodBlock, responseStatuses);
       validatePathParameters(method, apiPath, parameters);
       validateSuccessResponseHeaders(method, apiPath, methodBlock);
+      validateCreatedResponseHeaders(method, apiPath, methodBlock);
       validateSuccessResponseCacheHeaders(method, apiPath, methodBlock, source);
       validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses);
       if (operationHasRequestBody(methodBlock)) {
@@ -797,6 +798,14 @@ function validateSuccessResponseHeaders(method, apiPath, methodBlock) {
     if (response.block.includes("$ref: '#/components/responses/Ok'")) continue;
     if (response.block.includes('X-Request-ID:')) continue;
     throw new Error(`${method.toUpperCase()} ${apiPath} ${response.status} response is missing X-Request-ID header`);
+  }
+}
+
+function validateCreatedResponseHeaders(method, apiPath, methodBlock) {
+  const createdResponses = operationResponseBlocks(methodBlock).filter((response) => response.status === '201');
+  for (const response of createdResponses) {
+    if (response.block.includes('Location:')) continue;
+    throw new Error(`${method.toUpperCase()} ${apiPath} 201 response is missing Location header`);
   }
 }
 
