@@ -126,6 +126,16 @@ test('CI workflow runs the same verification commands documented for local check
 	assert.match(ciWorkflow, /actions\/setup-go@v5/);
 });
 
+test('CI checkout steps avoid persisting write-capable credentials', () => {
+	assert.match(ciWorkflow, /permissions:\n\s+contents: read/);
+	const checkoutSteps = [...ciWorkflow.matchAll(/- uses: actions\/checkout@v4/g)];
+	assert.ok(checkoutSteps.length > 0, 'CI must use actions/checkout');
+	for (const match of checkoutSteps) {
+		const step = ciStepFrom(match.index);
+		assert.match(step, /with:\n\s+persist-credentials: false/);
+	}
+});
+
 test('CI npm installs use lockfiles tracked by Dependabot', () => {
 	const npmDependabotDirs = dependabotDirectories('npm');
 	assert.ok(ciNpmPackageDirs.length > 0, 'CI must install at least one npm package with npm ci');
@@ -283,6 +293,11 @@ function redisComposeCommandBlock(redis) {
 	const match = redis.match(/^\s+command:\n([\s\S]*?)(?=^\s+environment:)/m);
 	assert.ok(match, 'missing redis command');
 	return match[0];
+}
+
+function ciStepFrom(start) {
+	const nextStep = ciWorkflow.indexOf('\n      - ', start + 1);
+	return ciWorkflow.slice(start, nextStep === -1 ? undefined : nextStep);
 }
 
 function dependabotDirectories(ecosystem) {

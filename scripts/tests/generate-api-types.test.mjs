@@ -16,6 +16,7 @@ const mobileApiReadme = readFileSync(new URL('../../mobile/src/shared/api/README
 const mobileConfig = readFileSync(new URL('../../mobile/src/shared/config.ts', import.meta.url), 'utf8');
 const mobileDataioApi = readFileSync(new URL('../../mobile/src/features/dataio/api.ts', import.meta.url), 'utf8');
 const mobileEnvExample = readFileSync(new URL('../../mobile/.env.example', import.meta.url), 'utf8');
+const goHTTPUtilResponses = readFileSync(new URL('../../backend/internal/httputil/response.go', import.meta.url), 'utf8');
 const goRequestDTOs = new Map([
 	['auth', readFileSync(new URL('../../backend/internal/modules/auth/dto.go', import.meta.url), 'utf8')],
 	['accounts', readFileSync(new URL('../../backend/internal/modules/accounts/dto.go', import.meta.url), 'utf8')],
@@ -389,6 +390,17 @@ test('OpenAPI shared error responses include structured examples', () => {
 	}
 });
 
+test('ErrorResponse keeps request ids as a stable response field', () => {
+	assert.match(generator, /validateErrorResponseSchema/);
+	assert.match(generator, /ErrorResponse\.\$\{propertyName\} is missing required/);
+	const schema = openapiSchema('ErrorResponse');
+	assert.match(schema, /required: \[[^\]]*requestId[^\]]*\]/);
+	assert.match(generatedTypes, /requestId: string;/);
+	assert.doesNotMatch(generatedTypes, /requestId\?: string;/);
+	assert.match(goHTTPUtilResponses, /RequestID\s+string\s+`json:"requestId"`/);
+	assert.doesNotMatch(goHTTPUtilResponses, /RequestID\s+string\s+`json:"requestId,omitempty"`/);
+});
+
 test('generator requires a 2xx success response for every operation', () => {
 	assert.match(generator, /missing 2xx success response/);
 	assert.match(generator, /\^2\\d\\d\$/);
@@ -435,8 +447,11 @@ test('generator requires closed core response schemas', () => {
 
 test('generator requires stable current user response fields to be required', () => {
 	assert.match(generator, /validateCurrentUserResponseSchema/);
+	const authDTO = goRequestDTOs.get('auth');
 	for (const fieldName of ['username', 'phone', 'email', 'wechatId']) {
 		assert.doesNotMatch(generatedTypes, new RegExp(`${fieldName}\\?:`));
+		assert.match(authDTO, new RegExp(`json:"${fieldName}"`));
+		assert.doesNotMatch(authDTO, new RegExp(`json:"${fieldName},omitempty"`));
 	}
 });
 
@@ -574,7 +589,7 @@ test('Go request DTOs enforce OpenAPI request schema constraints at binding', ()
 		['accounts', /Balance\s+float64\s+`json:"balance" binding:"omitempty,min=0"`/],
 		['budgets', /Month\s+string\s+`json:"month" binding:"required,datetime=2006-01"`/],
 		['budgets', /CategoryID\s+uint\s+`json:"categoryId" binding:"required,min=1"`/],
-		['budgets', /Amount\s+\*float64\s+`json:"amount" binding:"required,min=0"`/],
+		['budgets', /Amount\s+\*float64\s+`json:"amount" binding:"required,gt=0"`/],
 		['categories', /Name string `json:"name" binding:"required,min=1"`/],
 		['categories', /Type string `json:"type" binding:"required,oneof=income expense"`/],
 		['transactions', /Type\s+string\s+`json:"type" binding:"required,oneof=income expense"`/],
@@ -582,6 +597,8 @@ test('Go request DTOs enforce OpenAPI request schema constraints at binding', ()
 		['transactions', /CategoryID\s+uint\s+`json:"categoryId" binding:"required,min=1"`/],
 		['transactions', /AccountID\s+uint\s+`json:"accountId" binding:"required,min=1"`/],
 		['transactions', /Note\s+string\s+`json:"note" binding:"required,min=1"`/],
+		['transactions', /PageSize\s+\*int\s+`form:"pageSize" binding:"omitempty,min=1,max=200"`/],
+		['transactions', /Keyword\s+string\s+`form:"q" binding:"omitempty,max=100"`/],
 		['ai', /Text string `json:"text" binding:"required,min=1"`/],
 		['dataio', /Content\s+string\s+`json:"content" binding:"required,min=1,max=5242880"`/],
 	];
@@ -615,6 +632,13 @@ test('generator requires Retry-After header on rate-limited response', () => {
 	assert.match(openapi, /RetryAfter:[\s\S]+example: '60'/);
 	assert.match(openapi, /RateLimitLimit:[\s\S]+Maximum number of failed login attempts/);
 	assert.match(openapi, /RateLimited:[\s\S]+RateLimit-Limit:[\s\S]+RateLimit-Remaining:[\s\S]+RateLimit-Reset:/);
+});
+
+test('generator requires Location header on accepted import jobs', () => {
+	assert.match(generator, /POST \/io\/import\/jobs 202 response is missing Location header/);
+	assert.match(generator, /components\.headers\.Location must document queued resource URLs with an example/);
+	assert.match(openapi, /Location:[\s\S]+Relative URL of the created or queued API resource/);
+	assert.match(openapi, /postIoImportJobs[\s\S]+'202':[\s\S]+Location:[\s\S]+\$ref: '#\/components\/headers\/Location'/);
 });
 
 test('generator requires not-acceptable responses for operations with response bodies', () => {
@@ -672,9 +696,13 @@ test('generator requires documented download filename headers', () => {
 	for (const source of [webApiClient, mobileApiClient]) {
 		assert.match(source, /function contentDispositionParams\(disposition: string\)/);
 		assert.match(source, /function splitHeaderParameters\(value: string\)/);
+		assert.match(source, /function unquoteHeaderValue\(value: string\)/);
 		assert.match(source, /function decodeExtendedFilename\(value: string\)/);
+		assert.match(source, /function safeDecodeURIComponent\(value: string\)/);
 		assert.match(source, /params\.get\('filename\*'\)/);
 		assert.match(source, /params\.get\('filename'\)/);
+		assert.match(source, /if \(match\[1\] && match\[1\]\.toLowerCase\(\) !== 'utf-8'\) \{/);
+		assert.match(source, /return safeDecodeURIComponent\(match\[2\]\);/);
 		assert.match(source, /catch \{\n\s+return '';\n\s+\}/);
 	}
 });

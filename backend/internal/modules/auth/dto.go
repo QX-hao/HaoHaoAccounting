@@ -10,10 +10,10 @@ type loginRequest struct {
 type currentUserResponse struct {
 	ID       uint   `json:"id"`
 	Name     string `json:"name"`
-	Username string `json:"username,omitempty"`
-	Phone    string `json:"phone,omitempty"`
-	Email    string `json:"email,omitempty"`
-	WechatID string `json:"wechatId,omitempty"`
+	Username string `json:"username"`
+	Phone    string `json:"phone"`
+	Email    string `json:"email"`
+	WechatID string `json:"wechatId"`
 }
 
 type loginResponse struct {

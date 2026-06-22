@@ -21,22 +21,30 @@ func SecurityHeaders(configs ...SecurityHeadersConfig) gin.HandlerFunc {
 	hsts := strictTransportSecurityValue(cfg)
 	return func(c *gin.Context) {
 		headers := c.Writer.Header()
-		headers.Set("Cross-Origin-Opener-Policy", "same-origin")
-		headers.Set("Cross-Origin-Resource-Policy", "same-origin")
-		headers.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
-		headers.Set("Origin-Agent-Cluster", "?1")
-		headers.Set("Referrer-Policy", "no-referrer")
-		headers.Set("Permissions-Policy", "camera=(), geolocation=(), microphone=(), payment=()")
-		headers.Set("X-Content-Type-Options", "nosniff")
-		headers.Set("X-DNS-Prefetch-Control", "off")
-		headers.Set("X-Download-Options", "noopen")
-		headers.Set("X-Frame-Options", "DENY")
-		headers.Set("X-Permitted-Cross-Domain-Policies", "none")
-		headers.Set("X-XSS-Protection", "0")
+		for key, value := range defaultSecurityHeaders() {
+			headers.Set(key, value)
+		}
 		if hsts != "" {
 			headers.Set("Strict-Transport-Security", hsts)
 		}
 		c.Next()
+	}
+}
+
+func defaultSecurityHeaders() map[string]string {
+	return map[string]string{
+		"Cross-Origin-Opener-Policy":        "same-origin",
+		"Cross-Origin-Resource-Policy":      "same-origin",
+		"Content-Security-Policy":           "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+		"Origin-Agent-Cluster":              "?1",
+		"Referrer-Policy":                   "no-referrer",
+		"Permissions-Policy":                "camera=(), geolocation=(), microphone=(), payment=()",
+		"X-Content-Type-Options":            "nosniff",
+		"X-DNS-Prefetch-Control":            "off",
+		"X-Download-Options":                "noopen",
+		"X-Frame-Options":                   "DENY",
+		"X-Permitted-Cross-Domain-Policies": "none",
+		"X-XSS-Protection":                  "0",
 	}
 }
 

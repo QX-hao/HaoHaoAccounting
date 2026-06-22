@@ -332,8 +332,9 @@ func TestMeReturnsCurrentUserContract(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	assertOnlyKeys(t, body, "id", "name", "username")
-	if body["username"] != "admin" || body["name"] != "管理员" {
+	assertOnlyKeys(t, body, "id", "name", "username", "phone", "email", "wechatId")
+	if body["username"] != "admin" || body["name"] != "管理员" ||
+		body["phone"] != "" || body["email"] != "" || body["wechatId"] != "" {
 		t.Fatalf("unexpected user body: %#v", body)
 	}
 }
@@ -376,6 +377,35 @@ func TestRefreshRevokesCurrentTokenWhenRevokerIsConfigured(t *testing.T) {
 	if revocationStore.key == "" || revocationStore.value != "1" || revocationStore.ttl <= 0 {
 		t.Fatalf("revocation store = %#v", revocationStore)
 	}
+}
+
+func TestRefreshReturnsInvalidTokenChallengeWhenRevocationTTLCannotBeComputed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	s := testutil.NewStore(t)
+	user := models.User{Username: "admin", PasswordHash: "hash", Name: "管理员"}
+	if err := s.DB.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("user_id", user.ID)
+		c.Set("token_revoker", &TokenRevoker{cache: &recordingRevocationStore{enabled: true}})
+		c.Next()
+	})
+	handler := &Handler{store: s, tokenService: testTokenService(t)}
+	handler.RegisterPrivate(router.Group("/api/v1"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+	req.Header.Set("Authorization", "Bearer not-a-valid-jwt")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body = %s", resp.Code, resp.Body.String())
+	}
+	assertInvalidTokenChallenge(t, resp)
 }
 
 func TestLoginReturnsPayloadTooLargeWhenBodyLimitIsExceeded(t *testing.T) {
@@ -440,6 +470,7 @@ func TestLogoutReturnsUnauthorizedWhenRevocationTTLCannotBeComputed(t *testing.T
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401, body = %s", resp.Code, resp.Body.String())
 	}
+	assertInvalidTokenChallenge(t, resp)
 }
 
 func TestTokenRevokerStoresRevocationWithProvidedTTL(t *testing.T) {
@@ -511,6 +542,14 @@ func postLogin(t *testing.T, router http.Handler, body string) *httptest.Respons
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	return resp
+}
+
+func assertInvalidTokenChallenge(t *testing.T, resp *httptest.ResponseRecorder) {
+	t.Helper()
+	want := `Bearer realm="haohao-accounting-api", error="invalid_token", error_description="The access token is missing, expired, revoked, or invalid"`
+	if got := resp.Header().Get("WWW-Authenticate"); got != want {
+		t.Fatalf("WWW-Authenticate = %q, want %q", got, want)
+	}
 }
 
 func assertOnlyKeys(t *testing.T, value map[string]any, keys ...string) {

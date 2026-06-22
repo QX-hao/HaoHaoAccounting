@@ -125,7 +125,8 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"credentials disabled",
 		"`gin-contrib/cors`",
 		"`TRUSTED_PROXIES`",
-		"`RequestID` -> `RequestTimeout` -> logger -> `Recovery` -> `SecurityHeaders` -> CORS -> `BodyLimit` -> `ContentType` -> `Accept`",
+		"`RequestID` -> `RequestTimeout` -> logger -> `Recovery` -> `SecurityHeaders` -> CORS -> `NoStoreAPI` -> `BodyLimit` -> `ContentType` -> `Accept`",
+		"no-store API cache headers",
 		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
 		"early rejections",
 		"`X-Request-ID`",
@@ -319,6 +320,8 @@ func TestValidateCORSConfig(t *testing.T) {
 		{"https://app.example.com/api"},
 		{"https://*.example.com"},
 		{"chrome-extension://abc"},
+		{"https://app.example.com:bad"},
+		{"https:///app.example.com"},
 		{},
 	} {
 		t.Run(strings.Join(origins, ","), func(t *testing.T) {
@@ -407,6 +410,34 @@ func TestLoggerConfigDoesNotLogQueryString(t *testing.T) {
 	}
 }
 
+func TestLoggerConfigIncludesStructuredErrorSummary(t *testing.T) {
+	previousMode := gin.Mode()
+	previousWriter := gin.DefaultWriter
+	t.Cleanup(func() {
+		gin.SetMode(previousMode)
+		gin.DefaultWriter = previousWriter
+	})
+	gin.SetMode(gin.TestMode)
+
+	var logOutput bytes.Buffer
+	gin.DefaultWriter = &logOutput
+	router := gin.New()
+	router.Use(gin.LoggerWithConfig(newLoggerConfig()))
+	router.GET("/api/v1/accounts", func(c *gin.Context) {
+		httputil.BadRequest(c, "raw user input: password=secret")
+	})
+
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil))
+
+	got := logOutput.String()
+	if !strings.Contains(got, `error="Error #01: status=400 code=bad_request`) {
+		t.Fatalf("api log = %q, missing structured error summary", got)
+	}
+	if strings.Contains(got, "password=secret") || strings.Contains(got, "raw user input") {
+		t.Fatalf("api log leaked response message: %q", got)
+	}
+}
+
 func TestLoggerConfigSkipsOnlyProbePaths(t *testing.T) {
 	config := newLoggerConfig()
 
@@ -470,6 +501,15 @@ func TestEarlyRejectedRequestsKeepGlobalHeaders(t *testing.T) {
 			}
 			if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 				t.Fatalf("X-Content-Type-Options = %q", got)
+			}
+			if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control = %q", got)
+			}
+			if got := resp.Header().Get("Pragma"); got != "no-cache" {
+				t.Fatalf("Pragma = %q", got)
+			}
+			if got := resp.Header().Get("Expires"); got != "0" {
+				t.Fatalf("Expires = %q", got)
 			}
 			if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-123" {
 				t.Fatalf("%s = %q", middleware.RequestIDHeader, got)

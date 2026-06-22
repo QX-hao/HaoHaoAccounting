@@ -277,7 +277,7 @@ export type ImportJob = {
 export type ErrorResponse = {
   error: string;
   code: "bad_request" | "invalid_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "rate_limited" | "payload_too_large" | "unsupported_media_type" | "not_acceptable" | "request_timeout" | "client_closed_request" | "internal_error";
-  requestId?: string;
+  requestId: string;
 };
 
 export type OkResponse = {

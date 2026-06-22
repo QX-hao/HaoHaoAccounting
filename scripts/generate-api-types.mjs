@@ -87,7 +87,7 @@ function validateSchemaConstraints(allSchemas) {
     ['BudgetRequest', "pattern: '^\\d{4}-\\d{2}$'"],
     ['BudgetRequest', 'required: [month, categoryId, amount]'],
     ['BudgetRequest', 'minimum: 1'],
-    ['BudgetRequest', 'minimum: 0'],
+    ['BudgetRequest', 'exclusiveMinimum: 0'],
     ['BudgetRequest', 'multipleOf: 0.01'],
     ['CategoryRequest', 'minLength: 1'],
     ['TransactionRequest', 'exclusiveMinimum: 0'],
@@ -109,6 +109,7 @@ function validateSchemaConstraints(allSchemas) {
 
   validateRequestSchemasAreClosed(allSchemas);
   validateSharedResponseSchemasAreClosed(allSchemas);
+  validateErrorResponseSchema(allSchemas.ErrorResponse || '');
   validateCoreResponseSchemasAreClosed(allSchemas);
   validateCurrentUserResponseSchema(allSchemas.CurrentUser || '');
   validateCoreResourceTimestampSchemas(allSchemas);
@@ -144,6 +145,14 @@ function validateCoreResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of ['CurrentUser', 'LoginResponse', 'Account', 'Budget', 'Category', 'Transaction']) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateErrorResponseSchema(schema) {
+  for (const propertyName of ['error', 'code', 'requestId']) {
+    if (!schemaRequiredProperties(schema).has(propertyName)) {
+      throw new Error(`ErrorResponse.${propertyName} is missing required`);
     }
   }
 }
@@ -352,6 +361,15 @@ function validateResponseComponents(openapi) {
   validateRateLimitHeader(openapi, 'RateLimitLimit', 'Maximum number of failed login attempts');
   validateRateLimitHeader(openapi, 'RateLimitRemaining', 'Remaining failed login attempts');
   validateRateLimitHeader(openapi, 'RateLimitReset', 'Delay in seconds');
+
+  const importJobAccepted = operationResponseBlockById(openapi, 'postIoImportJobs', '202');
+  if (!importJobAccepted.includes('Location:')) {
+    throw new Error('POST /io/import/jobs 202 response is missing Location header');
+  }
+  const location = componentHeaderBlock(openapi, 'Location');
+  if (!location.includes('Relative URL') || !location.includes('/api/v1/io/import/jobs/1')) {
+    throw new Error('components.headers.Location must document queued resource URLs with an example');
+  }
 
   const notAcceptable = openapi.match(/^    NotAcceptable:\n(?:      .+\n)+/m)?.[0] || '';
   if (!notAcceptable.includes('application/json:')) {
@@ -992,6 +1010,31 @@ function operationResponseBlocks(block) {
       block: responsesBlock.slice(match.index, next?.index),
     };
   });
+}
+
+function operationResponseBlockById(openapi, operationId, status) {
+  const operation = operationBlockById(openapi, operationId);
+  return operationResponseBlocks(operation).find((response) => response.status === status)?.block || '';
+}
+
+function operationBlockById(openapi, operationId) {
+  const pathsBlock = openapi.slice(openapi.indexOf('paths:'), openapi.indexOf('components:'));
+  const pathMatches = [...pathsBlock.matchAll(/^  (\/[^:]+):$/gm)];
+  for (const [pathIndex, pathMatch] of pathMatches.entries()) {
+    const pathStart = pathMatch.index;
+    const pathEnd = pathMatches[pathIndex + 1]?.index ?? pathsBlock.length;
+    const pathBlock = pathsBlock.slice(pathStart, pathEnd);
+    const methodMatches = [...pathBlock.matchAll(/^    (get|post|put|delete):$/gm)];
+    for (const [methodIndex, methodMatch] of methodMatches.entries()) {
+      const methodStart = methodMatch.index;
+      const methodEnd = methodMatches[methodIndex + 1]?.index ?? pathBlock.length;
+      const methodBlock = pathBlock.slice(methodStart, methodEnd);
+      if (methodBlock.includes(`operationId: ${operationId}`)) {
+        return methodBlock;
+      }
+    }
+  }
+  return '';
 }
 
 function isPublicOperation(block) {

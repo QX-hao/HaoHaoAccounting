@@ -16,6 +16,6 @@ Gin middleware and auth token helpers.
 
 `Accept` enforces declared response media types for API routes, supports compatible media ranges and structured syntax suffixes, treats `q=0` media ranges as explicit exclusions, and appends `Vary: Accept` on negotiated routes.
 
-`NoStore` applies `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0` to API responses that should not be cached by browsers or intermediaries.
+`NoStoreAPI` applies `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0` to requests under the API prefix before early global rejections can write an error. `NoStore` applies the same headers inside API route groups.
 
 `RequireAuth` validates the bearer JWT signature, expiration, issued-at time, issuer, and audience before putting the user ID into request context for module handlers. Token revocation checks fail closed: if the revocation backend cannot be queried, the request is rejected instead of being passed to business handlers.

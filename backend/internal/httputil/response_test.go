@@ -56,6 +56,27 @@ func TestErrorIncludesCodeAndRequestID(t *testing.T) {
 	}
 }
 
+func TestErrorIncludesEmptyRequestIDField(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	resp := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(resp)
+
+	BadRequest(c, "invalid amount")
+
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	value, ok := body["requestId"]
+	if !ok {
+		t.Fatalf("requestId missing from %#v", body)
+	}
+	if value != "" {
+		t.Fatalf("requestId = %#v, want empty string", value)
+	}
+}
+
 func TestErrorDoesNotWriteAfterResponseStarted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -76,6 +97,21 @@ func TestErrorDoesNotWriteAfterResponseStarted(t *testing.T) {
 	}
 }
 
+func TestErrorRecordsNonSensitiveLogSummary(t *testing.T) {
+	resp := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(resp)
+
+	Error(c, http.StatusBadRequest, CodeBadRequest, "raw user input: password=secret")
+
+	if got := c.Errors.ByType(gin.ErrorTypePrivate).String(); got != "Error #01: status=400 code=bad_request\n" {
+		t.Fatalf("gin private error = %q", got)
+	}
+	got := c.Errors.ByType(gin.ErrorTypePrivate).String()
+	if strings.Contains(got, "password=secret") || strings.Contains(got, "raw user input") {
+		t.Fatalf("gin private error leaked response message: %q", got)
+	}
+}
+
 func TestReadmeDocumentsHTTPUtilityContracts(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {
@@ -85,7 +121,8 @@ func TestReadmeDocumentsHTTPUtilityContracts(t *testing.T) {
 
 	for _, want := range []string{
 		"`Error`",
-		"`error`, `code`, and optional `requestId`",
+		"`error`, `code`, and `requestId`",
+		"Gin private error summary",
 		"already-started response",
 		"`InternalError`",
 		"`context.DeadlineExceeded`",

@@ -45,7 +45,7 @@ const (
 type ErrorResponse struct {
 	Error     string `json:"error"`
 	Code      string `json:"code"`
-	RequestID string `json:"requestId,omitempty"`
+	RequestID string `json:"requestId"`
 }
 
 func Error(c *gin.Context, status int, code string, message string) {
@@ -55,6 +55,7 @@ func Error(c *gin.Context, status int, code string, message string) {
 	if code == "" {
 		code = codeForStatus(status)
 	}
+	_ = c.Error(responseLogError{status: status, code: code})
 	c.JSON(status, ErrorResponse{
 		Error:     message,
 		Code:      code,
@@ -244,4 +245,13 @@ func requestIDFromContext(c *gin.Context) string {
 	}
 	requestID, _ := value.(string)
 	return requestID
+}
+
+type responseLogError struct {
+	status int
+	code   string
+}
+
+func (err responseLogError) Error() string {
+	return fmt.Sprintf("status=%d code=%s", err.status, err.code)
 }

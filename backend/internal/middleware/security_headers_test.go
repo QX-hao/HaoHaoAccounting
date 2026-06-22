@@ -20,20 +20,7 @@ func TestSecurityHeadersSetsDefaultHeaders(t *testing.T) {
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ping", nil))
 
 	headers := recorder.Result().Header
-	for key, want := range map[string]string{
-		"Cross-Origin-Opener-Policy":        "same-origin",
-		"Cross-Origin-Resource-Policy":      "same-origin",
-		"Content-Security-Policy":           "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
-		"Origin-Agent-Cluster":              "?1",
-		"Referrer-Policy":                   "no-referrer",
-		"Permissions-Policy":                "camera=(), geolocation=(), microphone=(), payment=()",
-		"X-Content-Type-Options":            "nosniff",
-		"X-DNS-Prefetch-Control":            "off",
-		"X-Download-Options":                "noopen",
-		"X-Frame-Options":                   "DENY",
-		"X-Permitted-Cross-Domain-Policies": "none",
-		"X-XSS-Protection":                  "0",
-	} {
+	for key, want := range defaultSecurityHeaders() {
 		if got := headers.Get(key); got != want {
 			t.Fatalf("%s = %q, want %q", key, got, want)
 		}

@@ -114,7 +114,7 @@ func (h *Handler) refresh(c *gin.Context) {
 	if token, ok := middleware.BearerToken(c.GetHeader("Authorization")); ok {
 		invalidToken, err := h.revokeTokenFromContext(c, token)
 		if invalidToken {
-			httputil.Unauthorized(c, "invalid token")
+			httputil.InvalidToken(c, "invalid token")
 			return
 		}
 		if err != nil {
@@ -133,7 +133,7 @@ func (h *Handler) logout(c *gin.Context) {
 	}
 	invalidToken, err := h.revokeTokenFromContext(c, token)
 	if invalidToken {
-		httputil.Unauthorized(c, "invalid token")
+		httputil.InvalidToken(c, "invalid token")
 		return
 	}
 	if err != nil {

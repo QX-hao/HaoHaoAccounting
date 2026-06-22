@@ -89,6 +89,18 @@ func TestBudgetRejectsAmountsWithMoreThanTwoFractionDigits(t *testing.T) {
 	}
 }
 
+func TestBudgetRejectsZeroAmount(t *testing.T) {
+	s := testutil.NewStore(t)
+
+	_, err := NewService(s, nil).Create(context.Background(), 1, budgetRequest{Month: "2026-06", Amount: floatPtr(0)})
+	if err == nil {
+		t.Fatal("expected zero amount error")
+	}
+	if err.Error() != "amount must be > 0" {
+		t.Fatalf("err = %q", err.Error())
+	}
+}
+
 func TestBudgetServicePassesContextToGORMQueries(t *testing.T) {
 	s := testutil.NewStore(t)
 	service := NewService(s, nil)

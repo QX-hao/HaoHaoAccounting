@@ -31,6 +31,37 @@ func TestNoStore(t *testing.T) {
 	}
 }
 
+func TestNoStoreAPIOnlyAppliesToAPIPrefix(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(NoStoreAPI("/api/v1"))
+	router.GET("/api/v1/me", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	router.GET("/api/v10/me", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	router.GET("/livez", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	for _, path := range []string{"/api/v1", "/api/v1/me"} {
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+			t.Fatalf("%s Cache-Control = %q", path, got)
+		}
+	}
+	for _, path := range []string{"/api/v10/me", "/livez"} {
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := resp.Header().Get("Cache-Control"); got != "" {
+			t.Fatalf("%s Cache-Control = %q, want empty", path, got)
+		}
+	}
+}
+
 func TestSetNoStore(t *testing.T) {
 	headers := http.Header{}
 	SetNoStore(headers)

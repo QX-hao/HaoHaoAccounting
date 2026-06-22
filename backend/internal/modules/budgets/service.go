@@ -103,8 +103,8 @@ func (s *Service) buildBudget(ctx context.Context, userID uint, existing models.
 	if req.Amount == nil {
 		return models.Budget{}, errors.New("amount is required")
 	}
-	if *req.Amount < 0 {
-		return models.Budget{}, errors.New("amount must be >= 0")
+	if *req.Amount <= 0 {
+		return models.Budget{}, errors.New("amount must be > 0")
 	}
 	amountCents, err := money.ToCentsExact(*req.Amount)
 	if err != nil {

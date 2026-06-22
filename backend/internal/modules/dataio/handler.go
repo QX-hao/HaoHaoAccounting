@@ -124,6 +124,7 @@ func (h *Handler) createImportJob(c *gin.Context) {
 		httputil.BadRequest(c, err.Error())
 		return
 	}
+	c.Header("Location", strings.TrimRight(c.Request.URL.Path, "/")+"/"+strconv.FormatUint(uint64(job.ID), 10))
 	c.JSON(http.StatusAccepted, job)
 }
 

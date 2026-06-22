@@ -1185,6 +1185,8 @@ paths:
               $ref: '#/components/headers/Pragma'
             Expires:
               $ref: '#/components/headers/Expires'
+            Location:
+              $ref: '#/components/headers/Location'
             Vary:
               $ref: '#/components/headers/Vary'
             X-Request-ID:
@@ -1452,6 +1454,11 @@ components:
       schema:
         type: string
       example: attachment; filename="transactions.csv"; filename*=UTF-8''transactions.csv
+    Location:
+      description: Relative URL of the created or queued API resource.
+      schema:
+        type: string
+      example: /api/v1/io/import/jobs/1
     CacheControl:
       description: Cache policy for API responses containing user or authentication data.
       schema:
@@ -1895,7 +1902,7 @@ components:
           minimum: 1
         amount:
           type: number
-          minimum: 0
+          exclusiveMinimum: 0
           multipleOf: 0.01
     Category:
       type: object
@@ -2386,7 +2393,7 @@ components:
     ErrorResponse:
       type: object
       additionalProperties: false
-      required: [error, code]
+      required: [error, code, requestId]
       example:
         error: invalid Authorization format
         code: unauthorized

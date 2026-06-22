@@ -106,6 +106,7 @@ func applyGlobalMiddleware(router *gin.Engine, cfg config.Config) {
 	router.Use(gin.LoggerWithConfig(newLoggerConfig()), middleware.Recovery())
 	router.Use(middleware.SecurityHeaders(securityHeadersConfig(cfg)))
 	router.Use(cors.New(newCORSConfig(cfg)))
+	router.Use(middleware.NoStoreAPI("/api/v1"))
 	router.Use(middleware.BodyLimit(cfg.HTTP.MaxBodyBytes))
 	router.Use(middleware.ContentType(middleware.APIMediaTypeRules()))
 	router.Use(middleware.Accept(middleware.APIAcceptRules()))
@@ -190,7 +191,7 @@ func validateExplicitCORSOrigin(origin string) error {
 		return fmt.Errorf("CORS_ALLOW_ORIGINS must use explicit origins; %q contains a wildcard", origin)
 	}
 
-	parsed, err := url.Parse(origin)
+	parsed, err := url.ParseRequestURI(origin)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return fmt.Errorf("CORS_ALLOW_ORIGINS contains invalid origin %q", origin)
 	}

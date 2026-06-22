@@ -21,22 +21,11 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"`BodyLimit`",
 		"`ContentType`",
 		"`Accept`",
+		"`NoStoreAPI`",
 		"`NoStore`",
 		"`RequireAuth`",
 		"128 visible ASCII characters",
 		"invalid values are replaced",
-		"Content-Security-Policy",
-		"Cross-Origin-Opener-Policy",
-		"Cross-Origin-Resource-Policy",
-		"Origin-Agent-Cluster",
-		"Referrer-Policy",
-		"Permissions-Policy",
-		"X-Content-Type-Options",
-		"X-DNS-Prefetch-Control",
-		"X-Download-Options",
-		"X-Frame-Options",
-		"X-Permitted-Cross-Domain-Policies",
-		"X-XSS-Protection",
 		"Strict-Transport-Security",
 		"Broken pipe",
 		"connection reset",
@@ -47,6 +36,8 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"`q=0` media ranges as explicit exclusions",
 		"Vary: Accept",
 		"Cache-Control: no-store",
+		"API prefix",
+		"early global rejections",
 		"bearer JWT signature",
 		"expiration",
 		"issued-at time",
@@ -56,6 +47,11 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("README.md is missing middleware guidance %q", want)
+		}
+	}
+	for header := range defaultSecurityHeaders() {
+		if !strings.Contains(source, header) {
+			t.Fatalf("README.md is missing default security header %q", header)
 		}
 	}
 }

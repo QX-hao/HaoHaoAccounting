@@ -57,6 +57,7 @@ func TestCreateRejectsInvalidRequestBody(t *testing.T) {
 		`{"month":"2026-06","categoryId":1}`,
 		`{"month":"2026-6","categoryId":1,"amount":100}`,
 		`{"month":"2026-06","categoryId":0,"amount":100}`,
+		`{"month":"2026-06","categoryId":1,"amount":0}`,
 		`{"month":"2026-06","categoryId":1,"amount":-1}`,
 	} {
 		t.Run(body, func(t *testing.T) {

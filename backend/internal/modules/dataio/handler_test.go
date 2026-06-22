@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -205,6 +206,37 @@ func TestGetImportJobRejectsInvalidPathID(t *testing.T) {
 				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
 			}
 		})
+	}
+}
+
+func TestCreateImportJobReturnsLocationHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("user_id", uint(1))
+		c.Next()
+	})
+	store := testutil.NewStore(t)
+	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group("/api/v1"))
+
+	body, contentType := multipartBody(t, "file", "transactions.csv", "occurred_at,type,amount,category,account,note,tags\n2026-06-01T12:30:00+08:00,expense,35.50,餐饮,现金,午饭,\n")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/io/import/jobs", bytes.NewReader(body))
+	req.Header.Set("Content-Type", contentType)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202, body = %s", resp.Code, resp.Body.String())
+	}
+	var job ImportJobResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &job); err != nil {
+		t.Fatalf("decode job: %v", err)
+	}
+	if job.ID == 0 {
+		t.Fatalf("job id = %d", job.ID)
+	}
+	if got := resp.Header().Get("Location"); got != "/api/v1/io/import/jobs/"+strconv.FormatUint(uint64(job.ID), 10) {
+		t.Fatalf("Location = %q", got)
 	}
 }
 
