@@ -49,6 +49,7 @@ func TestHealthLivezReturnsOK(t *testing.T) {
 	if !strings.Contains(resp.Body.String(), `"status":"ok"`) {
 		t.Fatalf("body = %s", resp.Body.String())
 	}
+	assertNoCacheHeaders(t, resp)
 }
 
 func TestReadmeDocumentsRouteContracts(t *testing.T) {
@@ -71,6 +72,7 @@ func TestReadmeDocumentsRouteContracts(t *testing.T) {
 		"`Cache-Control: no-store`",
 		"`Pragma: no-cache`",
 		"`Expires: 0`",
+		"Health probe responses use `Cache-Control: no-cache`",
 		"Non-API health probe fallbacks remain cache-neutral",
 	} {
 		if !strings.Contains(source, want) {
@@ -79,7 +81,7 @@ func TestReadmeDocumentsRouteContracts(t *testing.T) {
 	}
 }
 
-func TestAPIRoutesDisableCachingWithoutChangingHealthProbes(t *testing.T) {
+func TestAPIRoutesDisableCachingAndHealthProbesRequireRevalidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
@@ -119,9 +121,7 @@ func TestAPIRoutesDisableCachingWithoutChangingHealthProbes(t *testing.T) {
 	if healthResp.Code != http.StatusOK {
 		t.Fatalf("livez status = %d, body = %s", healthResp.Code, healthResp.Body.String())
 	}
-	if got := healthResp.Header().Get("Cache-Control"); got != "" {
-		t.Fatalf("livez Cache-Control = %q, want empty", got)
-	}
+	assertNoCacheHeaders(t, healthResp)
 }
 
 func TestFallbackRoutesReturnStructuredErrors(t *testing.T) {
@@ -278,6 +278,7 @@ func TestReadyzReturnsOKWhenDatabaseIsReadyAndRedisDisabled(t *testing.T) {
 	if body.Status != "ok" || body.Checks["database"]["status"] != "ok" || body.Checks["redis"]["status"] != "disabled" {
 		t.Fatalf("body = %#v", body)
 	}
+	assertNoCacheHeaders(t, resp)
 }
 
 func TestReadyzReturnsUnavailableWhenDatabaseFails(t *testing.T) {
@@ -296,6 +297,7 @@ func TestReadyzReturnsUnavailableWhenDatabaseFails(t *testing.T) {
 	if body.Status != "unavailable" || body.Checks["database"]["status"] != "error" || body.Checks["database"]["error"] != "database down" {
 		t.Fatalf("body = %#v", body)
 	}
+	assertNoCacheHeaders(t, resp)
 }
 
 func TestReadyzReturnsUnavailableWhenRedisFails(t *testing.T) {
@@ -314,6 +316,21 @@ func TestReadyzReturnsUnavailableWhenRedisFails(t *testing.T) {
 	body := parseHealthBody(t, resp)
 	if body.Status != "unavailable" || body.Checks["redis"]["status"] != "error" || body.Checks["redis"]["error"] != "redis down" {
 		t.Fatalf("body = %#v", body)
+	}
+	assertNoCacheHeaders(t, resp)
+}
+
+func assertNoCacheHeaders(t *testing.T, resp *httptest.ResponseRecorder) {
+	t.Helper()
+
+	if got := resp.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := resp.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q", got)
+	}
+	if got := resp.Header().Get("Expires"); got != "0" {
+		t.Fatalf("Expires = %q", got)
 	}
 }
 

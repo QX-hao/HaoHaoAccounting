@@ -282,7 +282,7 @@ CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 
 后端 CORS 允许浏览器发送 `Authorization` 和 `X-Request-ID`，并暴露 `X-Request-ID`、`Link`、`X-Total-Count`、`Content-Disposition`、`Allow`、`WWW-Authenticate`、`Retry-After`，方便前端读取追踪 ID、分页、导出文件名、鉴权、限流和 405 允许方法信息。
 
-所有 `/api/v1` 业务接口及其框架级 404/405 错误都会返回 `Cache-Control: no-store`、`Pragma: no-cache` 和 `Expires: 0`，避免浏览器或中间代理缓存登录 token、用户数据、账单、报表响应或 API 错误。`/livez`、`/readyz`、`/health` 探针不套用该策略。
+所有 `/api/v1` 业务接口及其框架级 404/405 错误都会返回 `Cache-Control: no-store`、`Pragma: no-cache` 和 `Expires: 0`，避免浏览器或中间代理缓存登录 token、用户数据、账单、报表响应或 API 错误。`/livez`、`/readyz`、`/health` 探针不套用 API 的禁止存储策略，但会返回 `Cache-Control: no-cache`、`Pragma: no-cache` 和 `Expires: 0`，要求代理在复用健康状态前重新校验。
 
 后端会统一返回基础安全响应头，包括 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin` 和一个保守的 `Permissions-Policy`，默认关闭相机、定位、麦克风和支付能力。
 
@@ -389,4 +389,4 @@ REDIS_DB=0
 curl http://localhost:8080/health
 ```
 
-生产部署建议用 `/livez` 做 liveness probe，用 `/readyz` 做 readiness probe。`/readyz` 会检查数据库连接；Redis 未启用时显示 `disabled`，启用后会执行 ping。`/health` 保持兼容，返回和 `/readyz` 相同的结果。
+生产部署建议用 `/livez` 做 liveness probe，用 `/readyz` 做 readiness probe。`/readyz` 会检查数据库连接；Redis 未启用时显示 `disabled`，启用后会执行 ping。`/health` 保持兼容，返回和 `/readyz` 相同的结果。这些探针响应会带 `Cache-Control: no-cache`，避免代理直接复用过期的进程或依赖状态。

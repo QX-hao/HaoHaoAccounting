@@ -102,6 +102,7 @@ func registerHealthRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.
 }
 
 func livez(c *gin.Context) {
+	middleware.SetNoCache(c.Writer.Header())
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -115,6 +116,8 @@ func readyz(s *store.Store, redisCache *cache.RedisCache) gin.HandlerFunc {
 
 func readyzWithDependencies(database pinger, redis pinger) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		middleware.SetNoCache(c.Writer.Header())
+
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
 

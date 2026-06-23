@@ -18,6 +18,6 @@ Gin middleware and auth token helpers.
 
 `HTTPMetrics` records low-cardinality Prometheus counters and duration histograms after route handling. Labels use only HTTP method, Gin route pattern, and response status; unmatched routes are grouped as `unmatched` so raw URLs and query strings do not become metric labels.
 
-`NoStoreAPI` applies `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0` to requests under the API prefix before early global rejections can write an error. `NoStore` applies the same headers inside API route groups.
+`NoStoreAPI` applies `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0` to requests under the API prefix before early global rejections can write an error. `NoStore` applies the same headers inside API route groups. `SetNoCache` is available for non-sensitive operational endpoints such as health probes that may be stored but must be revalidated before reuse.
 
 `RequireAuth` validates the bearer JWT signature, expiration, issued-at time, issuer, and audience before putting the user ID into request context for module handlers. Token revocation checks fail closed: if the revocation backend cannot be queried, the request is rejected instead of being passed to business handlers.

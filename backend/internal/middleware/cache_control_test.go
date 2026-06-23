@@ -76,3 +76,18 @@ func TestSetNoStore(t *testing.T) {
 		t.Fatalf("Expires = %q", got)
 	}
 }
+
+func TestSetNoCache(t *testing.T) {
+	headers := http.Header{}
+	SetNoCache(headers)
+
+	if got := headers.Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := headers.Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q", got)
+	}
+	if got := headers.Get("Expires"); got != "0" {
+		t.Fatalf("Expires = %q", got)
+	}
+}
