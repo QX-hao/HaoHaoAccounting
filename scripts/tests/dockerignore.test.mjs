@@ -115,6 +115,16 @@ test('dependabot only watches npm packages with lockfiles', () => {
 	}
 });
 
+test('dependabot update blocks are rate-limited and scheduled in one maintenance window', () => {
+	const blocks = dependabotUpdateBlocks();
+	assert.equal(blocks.length, 8);
+	for (const block of blocks) {
+		assert.match(block, /schedule:\n\s+interval: weekly\n\s+day: monday\n\s+time: "\d{2}:\d{2}"\n\s+timezone: Asia\/Shanghai/);
+		assert.match(block, /open-pull-requests-limit: 1/);
+		assert.match(block, /cooldown:\n\s+default-days: 7/);
+	}
+});
+
 test('CI workflow runs the same verification commands documented for local checks', () => {
 	for (const [job, command] of [
 		['deployment-config', 'npm run verify:compose'],
@@ -318,6 +328,12 @@ function dependabotDirectories(ecosystem) {
 			(match) => match[1].trim(),
 		),
 	);
+}
+
+function dependabotUpdateBlocks() {
+	return dependabot
+		.split(/\n(?=\s+- package-ecosystem: )/)
+		.filter((block) => block.includes('package-ecosystem:'));
 }
 
 function escapeRegExp(value) {
