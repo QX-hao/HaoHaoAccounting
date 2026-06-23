@@ -458,9 +458,10 @@ func TestValidateCORSConfig(t *testing.T) {
 func TestSecurityHeadersConfigUsesHTTPConfig(t *testing.T) {
 	cfg := config.Config{
 		HTTP: config.HTTPConfig{
-			HSTSMaxAgeSeconds:     31536000,
-			HSTSIncludeSubDomains: true,
-			HSTSPreload:           true,
+			HSTSMaxAgeSeconds:         31536000,
+			HSTSIncludeSubDomains:     true,
+			HSTSPreload:               true,
+			CrossOriginEmbedderPolicy: "require-corp",
 		},
 	}
 
@@ -468,7 +469,8 @@ func TestSecurityHeadersConfigUsesHTTPConfig(t *testing.T) {
 
 	if securityConfig.HSTSMaxAgeSeconds != 31536000 ||
 		!securityConfig.HSTSIncludeSubDomains ||
-		!securityConfig.HSTSPreload {
+		!securityConfig.HSTSPreload ||
+		securityConfig.CrossOriginEmbedderPolicy != "require-corp" {
 		t.Fatalf("security headers config = %#v", securityConfig)
 	}
 }

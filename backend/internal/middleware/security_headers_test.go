@@ -28,6 +28,9 @@ func TestSecurityHeadersSetsDefaultHeaders(t *testing.T) {
 	if got := headers.Get("Strict-Transport-Security"); got != "" {
 		t.Fatalf("Strict-Transport-Security = %q, want empty by default", got)
 	}
+	if got := headers.Get("Cross-Origin-Embedder-Policy"); got != "" {
+		t.Fatalf("Cross-Origin-Embedder-Policy = %q, want empty by default", got)
+	}
 }
 
 func TestSecurityHeadersSetsConfiguredHSTS(t *testing.T) {
@@ -48,5 +51,23 @@ func TestSecurityHeadersSetsConfiguredHSTS(t *testing.T) {
 	want := "max-age=31536000; includeSubDomains; preload"
 	if got := recorder.Result().Header.Get("Strict-Transport-Security"); got != want {
 		t.Fatalf("Strict-Transport-Security = %q, want %q", got, want)
+	}
+}
+
+func TestSecurityHeadersSetsConfiguredCrossOriginEmbedderPolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(SecurityHeaders(SecurityHeadersConfig{
+		CrossOriginEmbedderPolicy: "require-corp",
+	}))
+	router.GET("/ping", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ping", nil))
+
+	if got := recorder.Result().Header.Get("Cross-Origin-Embedder-Policy"); got != "require-corp" {
+		t.Fatalf("Cross-Origin-Embedder-Policy = %q, want require-corp", got)
 	}
 }

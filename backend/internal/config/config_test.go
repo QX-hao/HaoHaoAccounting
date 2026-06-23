@@ -153,7 +153,8 @@ func TestLoadDefaultsForLocalDevelopment(t *testing.T) {
 		cfg.HTTP.MetricsToken != "" ||
 		cfg.HTTP.HSTSMaxAgeSeconds != 0 ||
 		cfg.HTTP.HSTSIncludeSubDomains ||
-		cfg.HTTP.HSTSPreload {
+		cfg.HTTP.HSTSPreload ||
+		cfg.HTTP.CrossOriginEmbedderPolicy != "" {
 		t.Fatalf("HTTP config = %#v", cfg.HTTP)
 	}
 	if cfg.LoginRateLimit.MaxFailures != 5 || cfg.LoginRateLimit.Window != 10*time.Minute {
@@ -200,6 +201,7 @@ func TestLoadParsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("HTTP_HSTS_MAX_AGE_SECONDS", "31536000")
 	t.Setenv("HTTP_HSTS_INCLUDE_SUBDOMAINS", "true")
 	t.Setenv("HTTP_HSTS_PRELOAD", "true")
+	t.Setenv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY", "require-corp")
 	t.Setenv("ADMIN_USERNAME", "admin")
 	t.Setenv("ADMIN_PASSWORD", "password")
 	t.Setenv("ADMIN_NAME", "Owner")
@@ -252,7 +254,8 @@ func TestLoadParsesEnvironmentOverrides(t *testing.T) {
 		cfg.HTTP.MetricsToken != "scrape-secret" ||
 		cfg.HTTP.HSTSMaxAgeSeconds != 31536000 ||
 		!cfg.HTTP.HSTSIncludeSubDomains ||
-		!cfg.HTTP.HSTSPreload {
+		!cfg.HTTP.HSTSPreload ||
+		cfg.HTTP.CrossOriginEmbedderPolicy != "require-corp" {
 		t.Fatalf("HTTP config = %#v", cfg.HTTP)
 	}
 	if cfg.Admin.Username != "admin" || cfg.Admin.Password != "password" || cfg.Admin.Name != "Owner" {
@@ -286,6 +289,7 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 	t.Setenv("HTTP_REQUEST_TIMEOUT", "-1s")
 	t.Setenv("HTTP_METRICS_ENABLED", "not-a-bool")
 	t.Setenv("HTTP_HSTS_INCLUDE_SUBDOMAINS", "not-a-bool")
+	t.Setenv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY", "same-origin")
 	t.Setenv("JWT_TTL", "0s")
 
 	_, err := LoadStrict()
@@ -300,6 +304,7 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 		"HTTP_REQUEST_TIMEOUT",
 		"HTTP_METRICS_ENABLED",
 		"HTTP_HSTS_INCLUDE_SUBDOMAINS",
+		"HTTP_CROSS_ORIGIN_EMBEDDER_POLICY",
 		"JWT_TTL",
 	} {
 		if !strings.Contains(message, want) {
@@ -422,6 +427,20 @@ func TestHTTPConfigValidate(t *testing.T) {
 	paddingOnlyMetricsToken.MetricsToken = "=="
 	if err := paddingOnlyMetricsToken.Validate(); err == nil {
 		t.Fatal("expected padding-only metrics token error")
+	}
+	for _, policy := range []string{"require-corp", "credentialless", "unsafe-none", " REQUIRE-CORP "} {
+		t.Run("valid COEP "+policy, func(t *testing.T) {
+			cfg := valid
+			cfg.CrossOriginEmbedderPolicy = policy
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("valid cross-origin embedder policy error: %v", err)
+			}
+		})
+	}
+	invalidCOEP := valid
+	invalidCOEP.CrossOriginEmbedderPolicy = "same-origin"
+	if err := invalidCOEP.Validate(); err == nil {
+		t.Fatal("expected invalid cross-origin embedder policy error")
 	}
 	invalidHSTSDirective := valid
 	invalidHSTSDirective.HSTSIncludeSubDomains = true
@@ -691,6 +710,24 @@ func TestEnvExampleDocumentsMetricsExposure(t *testing.T) {
 	}
 }
 
+func TestEnvExampleDocumentsCrossOriginEmbedderPolicy(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".env.example"))
+	if err != nil {
+		t.Fatalf("read backend/.env.example: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"Optional COEP header",
+		"Allowed values: require-corp, credentialless, unsafe-none",
+		"HTTP_CROSS_ORIGIN_EMBEDDER_POLICY=",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("backend/.env.example is missing COEP guidance %q", want)
+		}
+	}
+}
+
 func TestEnvExampleLoadsStrictly(t *testing.T) {
 	unsetConfigEnv(t)
 
@@ -769,6 +806,18 @@ func TestProductionComposeDisablesMetricsByDefault(t *testing.T) {
 		if !strings.Contains(source, want) {
 			t.Fatalf("docker-compose.yaml must include metrics default %q", want)
 		}
+	}
+}
+
+func TestProductionComposeDisablesCrossOriginEmbedderPolicyByDefault(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yaml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yaml: %v", err)
+	}
+	source := string(data)
+
+	if !strings.Contains(source, "HTTP_CROSS_ORIGIN_EMBEDDER_POLICY: ${HTTP_CROSS_ORIGIN_EMBEDDER_POLICY:-}") {
+		t.Fatal("docker-compose.yaml must default HTTP_CROSS_ORIGIN_EMBEDDER_POLICY to empty")
 	}
 }
 
@@ -1186,6 +1235,7 @@ func configEnvKeys() []string {
 		"HTTP_HSTS_MAX_AGE_SECONDS",
 		"HTTP_HSTS_INCLUDE_SUBDOMAINS",
 		"HTTP_HSTS_PRELOAD",
+		"HTTP_CROSS_ORIGIN_EMBEDDER_POLICY",
 		"ADMIN_USERNAME",
 		"ADMIN_PASSWORD",
 		"ADMIN_NAME",

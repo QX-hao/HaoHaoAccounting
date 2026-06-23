@@ -51,22 +51,23 @@ type RedisConfig struct {
 }
 
 type HTTPConfig struct {
-	GinMode               string
-	CORSAllowOrigins      []string
-	TrustedProxies        []string
-	ReadTimeout           time.Duration
-	ReadHeaderTimeout     time.Duration
-	WriteTimeout          time.Duration
-	IdleTimeout           time.Duration
-	ShutdownTimeout       time.Duration
-	RequestTimeout        time.Duration
-	MaxHeaderBytes        int
-	MaxBodyBytes          int64
-	MetricsEnabled        bool
-	MetricsToken          string
-	HSTSMaxAgeSeconds     int
-	HSTSIncludeSubDomains bool
-	HSTSPreload           bool
+	GinMode                   string
+	CORSAllowOrigins          []string
+	TrustedProxies            []string
+	ReadTimeout               time.Duration
+	ReadHeaderTimeout         time.Duration
+	WriteTimeout              time.Duration
+	IdleTimeout               time.Duration
+	ShutdownTimeout           time.Duration
+	RequestTimeout            time.Duration
+	MaxHeaderBytes            int
+	MaxBodyBytes              int64
+	MetricsEnabled            bool
+	MetricsToken              string
+	HSTSMaxAgeSeconds         int
+	HSTSIncludeSubDomains     bool
+	HSTSPreload               bool
+	CrossOriginEmbedderPolicy string
 }
 
 type AdminConfig struct {
@@ -212,22 +213,23 @@ func Load() Config {
 			DB:       intEnv("REDIS_DB", 0),
 		},
 		HTTP: HTTPConfig{
-			GinMode:               stringEnv("GIN_MODE", "release"),
-			CORSAllowOrigins:      corsAllowOrigins(),
-			TrustedProxies:        csvEnv("TRUSTED_PROXIES"),
-			ReadTimeout:           durationEnv("HTTP_READ_TIMEOUT", 15*time.Second),
-			ReadHeaderTimeout:     durationEnv("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
-			WriteTimeout:          durationEnv("HTTP_WRITE_TIMEOUT", 30*time.Second),
-			IdleTimeout:           durationEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
-			ShutdownTimeout:       durationEnv("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
-			RequestTimeout:        nonNegativeDurationEnv("HTTP_REQUEST_TIMEOUT", defaultHTTPRequestTimeout),
-			MaxHeaderBytes:        positiveIntEnv("HTTP_MAX_HEADER_BYTES", 1<<20),
-			MaxBodyBytes:          int64Env("HTTP_MAX_BODY_BYTES", 6*1024*1024),
-			MetricsEnabled:        boolEnv("HTTP_METRICS_ENABLED", false),
-			MetricsToken:          strings.TrimSpace(os.Getenv("HTTP_METRICS_TOKEN")),
-			HSTSMaxAgeSeconds:     nonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS", 0),
-			HSTSIncludeSubDomains: boolEnv("HTTP_HSTS_INCLUDE_SUBDOMAINS", false),
-			HSTSPreload:           boolEnv("HTTP_HSTS_PRELOAD", false),
+			GinMode:                   stringEnv("GIN_MODE", "release"),
+			CORSAllowOrigins:          corsAllowOrigins(),
+			TrustedProxies:            csvEnv("TRUSTED_PROXIES"),
+			ReadTimeout:               durationEnv("HTTP_READ_TIMEOUT", 15*time.Second),
+			ReadHeaderTimeout:         durationEnv("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
+			WriteTimeout:              durationEnv("HTTP_WRITE_TIMEOUT", 30*time.Second),
+			IdleTimeout:               durationEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
+			ShutdownTimeout:           durationEnv("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
+			RequestTimeout:            nonNegativeDurationEnv("HTTP_REQUEST_TIMEOUT", defaultHTTPRequestTimeout),
+			MaxHeaderBytes:            positiveIntEnv("HTTP_MAX_HEADER_BYTES", 1<<20),
+			MaxBodyBytes:              int64Env("HTTP_MAX_BODY_BYTES", 6*1024*1024),
+			MetricsEnabled:            boolEnv("HTTP_METRICS_ENABLED", false),
+			MetricsToken:              strings.TrimSpace(os.Getenv("HTTP_METRICS_TOKEN")),
+			HSTSMaxAgeSeconds:         nonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS", 0),
+			HSTSIncludeSubDomains:     boolEnv("HTTP_HSTS_INCLUDE_SUBDOMAINS", false),
+			HSTSPreload:               boolEnv("HTTP_HSTS_PRELOAD", false),
+			CrossOriginEmbedderPolicy: crossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
 		},
 		Admin: AdminConfig{
 			Username: strings.TrimSpace(os.Getenv("ADMIN_USERNAME")),
@@ -317,6 +319,7 @@ func validateEnvValues() error {
 		validateNonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS"),
 		validateBoolEnv("HTTP_HSTS_INCLUDE_SUBDOMAINS"),
 		validateBoolEnv("HTTP_HSTS_PRELOAD"),
+		validateCrossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
 		validateBoolEnv("HTTP_METRICS_ENABLED"),
 		validatePositiveIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES"),
 		validatePositiveDurationEnv("LOGIN_RATE_LIMIT_WINDOW"),
@@ -541,6 +544,9 @@ func (c HTTPConfig) Validate() error {
 	if c.MetricsToken != "" && !middleware.ValidBearerTokenValue(c.MetricsToken) {
 		errs = append(errs, errors.New("HTTP_METRICS_TOKEN must contain only RFC 6750 bearer token characters"))
 	}
+	if !validCrossOriginEmbedderPolicy(c.CrossOriginEmbedderPolicy) {
+		errs = append(errs, errors.New("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY must be empty or one of: require-corp, credentialless, unsafe-none"))
+	}
 	if err := validateTrustedProxies(c.TrustedProxies); err != nil {
 		errs = append(errs, err)
 	}
@@ -556,6 +562,27 @@ func (c HTTPConfig) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func validateCrossOriginEmbedderPolicyEnv(key string) func() error {
+	return func() error {
+		if _, exists := os.LookupEnv(key); !exists {
+			return nil
+		}
+		if !validCrossOriginEmbedderPolicy(os.Getenv(key)) {
+			return fmt.Errorf("%s must be empty or one of: require-corp, credentialless, unsafe-none", key)
+		}
+		return nil
+	}
+}
+
+func validCrossOriginEmbedderPolicy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "require-corp", "credentialless", "unsafe-none":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateTrustedProxies(proxies []string) error {
@@ -706,6 +733,14 @@ func boolEnv(key string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
+}
+
+func crossOriginEmbedderPolicyEnv(key string) string {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if !validCrossOriginEmbedderPolicy(value) {
+		return ""
+	}
+	return value
 }
 
 func int64Env(key string, fallback int64) int64 {
