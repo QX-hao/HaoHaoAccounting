@@ -51,12 +51,15 @@ func TestErrorIncludesCodeAndRequestID(t *testing.T) {
 	if body.Code != CodeBadRequest {
 		t.Fatalf("code = %q", body.Code)
 	}
+	if body.Status != http.StatusBadRequest {
+		t.Fatalf("body status = %d, want 400", body.Status)
+	}
 	if body.RequestID != "request-123" {
 		t.Fatalf("requestId = %q", body.RequestID)
 	}
 }
 
-func TestErrorIncludesEmptyRequestIDField(t *testing.T) {
+func TestErrorIncludesStableEnvelopeFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	resp := httptest.NewRecorder()
@@ -74,6 +77,11 @@ func TestErrorIncludesEmptyRequestIDField(t *testing.T) {
 	}
 	if value != "" {
 		t.Fatalf("requestId = %#v, want empty string", value)
+	}
+	if value, ok := body["status"]; !ok {
+		t.Fatalf("status missing from %#v", body)
+	} else if value != float64(http.StatusBadRequest) {
+		t.Fatalf("status = %#v, want 400", value)
 	}
 }
 
@@ -121,7 +129,7 @@ func TestReadmeDocumentsHTTPUtilityContracts(t *testing.T) {
 
 	for _, want := range []string{
 		"`Error`",
-		"`error`, `code`, and `requestId`",
+		"`error`, `code`, `status`, and `requestId`",
 		"Gin private error summary",
 		"already-started response",
 		"`InternalError`",
@@ -153,6 +161,14 @@ func TestErrorCodesMatchOpenAPIEnum(t *testing.T) {
 	want := openAPIErrorCodes(t)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Go error codes = %#v, want OpenAPI enum %#v", got, want)
+	}
+}
+
+func TestErrorResponseRequiredFieldsMatchOpenAPI(t *testing.T) {
+	got := errorResponseJSONFields(t)
+	want := openAPIErrorResponseRequiredFields(t)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Go ErrorResponse fields = %#v, want OpenAPI required fields %#v", got, want)
 	}
 }
 
@@ -555,6 +571,41 @@ func openAPIErrorCodes(t *testing.T) []string {
 	return code.Enum
 }
 
+func errorResponseJSONFields(t *testing.T) []string {
+	t.Helper()
+
+	responseType := reflect.TypeOf(ErrorResponse{})
+	fields := make([]string, 0, responseType.NumField())
+	for i := 0; i < responseType.NumField(); i++ {
+		field := responseType.Field(i)
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		fields = append(fields, name)
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+func openAPIErrorResponseRequiredFields(t *testing.T) []string {
+	t.Helper()
+
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	errorResponse, ok := doc.Components.Schemas["ErrorResponse"]
+	if !ok {
+		t.Fatal("OpenAPI ErrorResponse schema is missing")
+	}
+	required := append([]string(nil), errorResponse.Required...)
+	sort.Strings(required)
+	return required
+}
+
 func readOpenAPI(t *testing.T) []byte {
 	t.Helper()
 
@@ -583,4 +634,5 @@ type openAPIComponents struct {
 type openAPISchema struct {
 	Properties map[string]openAPISchema `yaml:"properties"`
 	Enum       []string                 `yaml:"enum"`
+	Required   []string                 `yaml:"required"`
 }
