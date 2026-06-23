@@ -53,6 +53,12 @@ test('docker build contexts exclude generated build and test output', () => {
 	}
 });
 
+test('root docker build context excludes local prototype archives', () => {
+	const patterns = dockerignoreByName('root');
+
+	assertHasAnyPattern('root', patterns, ['*.zip', '**/*.zip']);
+});
+
 test('docker build contexts exclude editor and local OS files', () => {
 	for (const [name, patterns] of dockerignores) {
 		assertHasAnyPattern(name, patterns, ['.DS_Store']);
@@ -267,6 +273,12 @@ function assertHasAnyPattern(name, patterns, candidates) {
 		candidates.some((candidate) => patterns.has(candidate)),
 		`${name} .dockerignore is missing one of: ${candidates.join(', ')}`,
 	);
+}
+
+function dockerignoreByName(name) {
+	const patterns = dockerignores.find(([candidate]) => candidate === name)?.[1];
+	assert.ok(patterns, `missing ${name} .dockerignore patterns`);
+	return patterns;
 }
 
 function runtimeStageHasNonRootUser(dockerfile) {
