@@ -11,6 +11,9 @@ updates:
     open-pull-requests-limit: 1
     cooldown:
       default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       github-actions:
         patterns:
@@ -27,6 +30,9 @@ updates:
     open-pull-requests-limit: 1
     cooldown:
       default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       go-modules:
         patterns:
@@ -43,6 +49,9 @@ updates:
     open-pull-requests-limit: 1
     cooldown:
       default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       web-npm:
         patterns:
@@ -59,6 +68,9 @@ updates:
     open-pull-requests-limit: 1
     cooldown:
       default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       mobile-npm:
         patterns:
@@ -75,6 +87,9 @@ updates:
     open-pull-requests-limit: 1
     cooldown:
       default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       root-docker:
         patterns:
@@ -90,6 +105,9 @@ updates:
     open-pull-requests-limit: 1
     cooldown:
       default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       backend-docker:
         patterns:
@@ -105,6 +123,9 @@ updates:
     open-pull-requests-limit: 1
     cooldown:
       default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       web-docker:
         patterns:
@@ -120,6 +141,9 @@ updates:
     open-pull-requests-limit: 1
     cooldown:
       default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
       mobile-docker:
         patterns:
