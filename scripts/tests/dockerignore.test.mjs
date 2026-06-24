@@ -146,6 +146,13 @@ test('CI workflow only runs branch events that can affect main', () => {
 	assert.match(ciWorkflow, /on:\n\s+push:\n\s+branches: \[main\]\n\s+pull_request:\n\s+branches: \[main\]\n\s+workflow_dispatch:/);
 });
 
+test('CI jobs pin the hosted runner image instead of following latest', () => {
+	const floatingRunners = [...ciWorkflow.matchAll(/runs-on:\s+ubuntu-latest/g)];
+	assert.deepEqual(floatingRunners, []);
+	const pinnedRunners = [...ciWorkflow.matchAll(/runs-on:\s+ubuntu-24\.04/g)];
+	assert.equal(pinnedRunners.length, 5);
+});
+
 test('CI checkout steps avoid persisting write-capable credentials', () => {
 	assert.match(ciWorkflow, /permissions:\n\s+contents: read/);
 	const checkoutSteps = [...ciWorkflow.matchAll(/- uses: actions\/checkout@v4/g)];
