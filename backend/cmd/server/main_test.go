@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -22,6 +23,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRequestLogFormatterIncludesRequestID(t *testing.T) {
@@ -197,6 +199,54 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	}
 	if strings.Contains(body, "/api/v1/accounts/42") || strings.Contains(body, "token=secret") {
 		t.Fatalf("metrics leaked raw URL data: %s", body)
+	}
+}
+
+func TestRecoveredPanicsAreCountedByHTTPMetrics(t *testing.T) {
+	previousMode := gin.Mode()
+	previousWriter := gin.DefaultWriter
+	previousErrorWriter := gin.DefaultErrorWriter
+	gin.SetMode(gin.TestMode)
+	var logOutput bytes.Buffer
+	gin.DefaultWriter = &logOutput
+	gin.DefaultErrorWriter = &logOutput
+	t.Cleanup(func() {
+		gin.SetMode(previousMode)
+		gin.DefaultWriter = previousWriter
+		gin.DefaultErrorWriter = previousErrorWriter
+	})
+
+	router := gin.New()
+	metrics := installMetrics(router, config.Config{HTTP: config.HTTPConfig{MetricsEnabled: true}})
+	applyGlobalMiddleware(router, config.Config{HTTP: config.HTTPConfig{
+		CORSAllowOrigins: []string{"https://app.example.com"},
+	}}, metrics)
+	router.GET("/api/v1/panic", func(*gin.Context) {
+		panic("boom")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/panic", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("panic status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResp := httptest.NewRecorder()
+	router.ServeHTTP(metricsResp, metricsReq)
+	if metricsResp.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, body = %s", metricsResp.Code, metricsResp.Body.String())
+	}
+
+	body := metricsResp.Body.String()
+	for _, want := range []string{
+		`haohao_http_requests_total{method="GET",route="/api/v1/panic",status="500"} 1`,
+		`haohao_http_request_duration_seconds_bucket{method="GET",route="/api/v1/panic",status="500"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics body missing %q: %s", want, body)
+		}
 	}
 }
 
@@ -409,6 +459,20 @@ func TestCORSAllowMethodsCoverRegisteredAPIMethods(t *testing.T) {
 	}
 }
 
+func TestCORSExposeHeadersCoverDocumentedClientHeaders(t *testing.T) {
+	corsConfig := newCORSConfig(config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+		},
+	})
+
+	for _, header := range openAPIClientReadableHeaders(t) {
+		if !slices.Contains(corsConfig.ExposeHeaders, header) {
+			t.Fatalf("ExposeHeaders = %#v, missing documented client header %s", corsConfig.ExposeHeaders, header)
+		}
+	}
+}
+
 func corsRouteContractConfig() config.Config {
 	return config.Config{
 		Admin: config.AdminConfig{
@@ -425,6 +489,133 @@ func corsRouteContractConfig() config.Config {
 			Audience:  "api",
 		},
 	}
+}
+
+func openAPIClientReadableHeaders(t *testing.T) []string {
+	t.Helper()
+
+	data := readOpenAPIForServerTest(t)
+	var doc serverTestOpenAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	headers := map[string]bool{}
+	for _, response := range doc.Components.Responses {
+		collectClientHeader(headers, response)
+	}
+	for _, item := range doc.Paths {
+		for _, operation := range item.operations() {
+			for _, response := range operation.Responses {
+				collectClientHeader(headers, response)
+				if resolved := resolveServerTestResponse(response, doc.Components.Responses); resolved != nil {
+					collectClientHeader(headers, *resolved)
+				}
+			}
+		}
+	}
+	return sortedServerTestKeys(headers)
+}
+
+func collectClientHeader(headers map[string]bool, response serverTestOpenAPIResponse) {
+	for header := range response.Headers {
+		if corsExposedByDefault(header) || !clientNeedsCORSExposure(header) {
+			continue
+		}
+		headers[header] = true
+	}
+}
+
+func corsExposedByDefault(header string) bool {
+	switch strings.ToLower(header) {
+	case "cache-control", "content-language", "content-length", "content-type", "expires", "last-modified", "pragma":
+		return true
+	default:
+		return false
+	}
+}
+
+func clientNeedsCORSExposure(header string) bool {
+	switch strings.ToLower(header) {
+	case "vary":
+		return false
+	default:
+		return true
+	}
+}
+
+func readOpenAPIForServerTest(t *testing.T) []byte {
+	t.Helper()
+
+	candidates := []string{
+		filepath.Join("..", "..", "api", "openapi.yaml"),
+		filepath.Join("backend", "api", "openapi.yaml"),
+	}
+	for _, candidate := range candidates {
+		data, err := os.ReadFile(candidate)
+		if err == nil {
+			return data
+		}
+	}
+	t.Fatalf("read openapi.yaml from %v", candidates)
+	return nil
+}
+
+type serverTestOpenAPIDocument struct {
+	Paths      map[string]serverTestOpenAPIPathItem `yaml:"paths"`
+	Components serverTestOpenAPIComponents          `yaml:"components"`
+}
+
+type serverTestOpenAPIComponents struct {
+	Responses map[string]serverTestOpenAPIResponse `yaml:"responses"`
+}
+
+type serverTestOpenAPIPathItem struct {
+	Delete *serverTestOpenAPIOperation `yaml:"delete"`
+	Get    *serverTestOpenAPIOperation `yaml:"get"`
+	Patch  *serverTestOpenAPIOperation `yaml:"patch"`
+	Post   *serverTestOpenAPIOperation `yaml:"post"`
+	Put    *serverTestOpenAPIOperation `yaml:"put"`
+}
+
+type serverTestOpenAPIOperation struct {
+	Responses map[string]serverTestOpenAPIResponse `yaml:"responses"`
+}
+
+type serverTestOpenAPIResponse struct {
+	Ref     string         `yaml:"$ref"`
+	Headers map[string]any `yaml:"headers"`
+}
+
+func (item serverTestOpenAPIPathItem) operations() []*serverTestOpenAPIOperation {
+	operations := []*serverTestOpenAPIOperation{item.Delete, item.Get, item.Patch, item.Post, item.Put}
+	result := make([]*serverTestOpenAPIOperation, 0, len(operations))
+	for _, operation := range operations {
+		if operation != nil {
+			result = append(result, operation)
+		}
+	}
+	return result
+}
+
+func resolveServerTestResponse(response serverTestOpenAPIResponse, components map[string]serverTestOpenAPIResponse) *serverTestOpenAPIResponse {
+	const prefix = "#/components/responses/"
+	if !strings.HasPrefix(response.Ref, prefix) {
+		return nil
+	}
+	if resolved, ok := components[strings.TrimPrefix(response.Ref, prefix)]; ok {
+		return &resolved
+	}
+	return nil
+}
+
+func sortedServerTestKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 func TestValidateCORSConfig(t *testing.T) {

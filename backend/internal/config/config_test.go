@@ -1,10 +1,12 @@
 package config
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -994,26 +996,76 @@ func validHTTPConfig() HTTPConfig {
 func configSourceEnvKeys(t *testing.T) []string {
 	t.Helper()
 
-	data, err := os.ReadFile("config.go")
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "config.go", nil, 0)
 	if err != nil {
-		t.Fatalf("read config.go: %v", err)
+		t.Fatalf("parse config.go: %v", err)
 	}
 
-	keyPattern := regexp.MustCompile(`"(?:[A-Z][A-Z0-9]*_)*[A-Z][A-Z0-9]*"`)
-	ignored := map[string]bool{
-		"POSTGRES": true,
-	}
 	keys := map[string]bool{}
-	for _, match := range keyPattern.FindAllString(string(data), -1) {
-		key := strings.Trim(match, `"`)
-		if ignored[key] {
-			continue
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
 		}
-		if strings.Contains(key, "_") || strings.HasPrefix(key, "PORT") {
+
+		if key, ok := envKeyFromCall(call); ok {
 			keys[key] = true
 		}
-	}
+		return true
+	})
 	return sortedKeys(keys)
+}
+
+func envKeyFromCall(call *ast.CallExpr) (string, bool) {
+	if len(call.Args) == 0 || !isEnvReader(call.Fun) {
+		return "", false
+	}
+	literal, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || literal.Kind != token.STRING {
+		return "", false
+	}
+	key := strings.Trim(literal.Value, `"`)
+	if !isEnvKey(key) {
+		return "", false
+	}
+	return key, true
+}
+
+func isEnvReader(expr ast.Expr) bool {
+	if selector, ok := expr.(*ast.SelectorExpr); ok {
+		ident, ok := selector.X.(*ast.Ident)
+		return ok && ident.Name == "os" && (selector.Sel.Name == "Getenv" || selector.Sel.Name == "LookupEnv")
+	}
+
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	switch ident.Name {
+	case "stringEnv",
+		"intEnv",
+		"nonNegativeIntEnv",
+		"positiveIntEnv",
+		"boolEnv",
+		"crossOriginEmbedderPolicyEnv",
+		"int64Env",
+		"durationEnv",
+		"nonNegativeDurationEnv",
+		"csvEnv",
+		"validatePortEnv",
+		"validateIntEnv",
+		"validateNonNegativeIntEnv",
+		"validatePositiveIntEnv",
+		"validatePositiveInt64Env",
+		"validateBoolEnv",
+		"validatePositiveDurationEnv",
+		"validateNonNegativeDurationEnv",
+		"validateCrossOriginEmbedderPolicyEnv":
+		return true
+	default:
+		return false
+	}
 }
 
 func envExampleKeys(t *testing.T) []string {

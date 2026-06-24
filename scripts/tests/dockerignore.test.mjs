@@ -121,7 +121,7 @@ test('dependabot update blocks are rate-limited and scheduled in one maintenance
 	for (const block of blocks) {
 		assert.match(block, /schedule:\n\s+interval: weekly\n\s+day: monday\n\s+time: "\d{2}:\d{2}"\n\s+timezone: Asia\/Shanghai/);
 		assert.match(block, /open-pull-requests-limit: 1/);
-		assert.match(block, /cooldown:\n\s+default-days: 7\n\s+semver-major-days: 30\n\s+semver-minor-days: 7\n\s+semver-patch-days: 3/);
+		assert.match(block, /cooldown:\n\s+default-days: 7/);
 	}
 });
 

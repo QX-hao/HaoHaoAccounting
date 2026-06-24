@@ -72,6 +72,36 @@ func TestHTTPMetricsGroupsUnmatchedRoutes(t *testing.T) {
 	}
 }
 
+func TestHTTPMetricsNormalizesUnknownMethods(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	registry := prometheus.NewRegistry()
+	metrics := NewHTTPMetrics(registry)
+	router := gin.New()
+	router.Use(metrics.Middleware())
+	router.Handle("PROPFIND", "/api/v1/accounts", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest("PROPFIND", "/api/v1/accounts", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	gathered, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+
+	metricsText := metricFamiliesText(gathered)
+	wantLabels := map[string]string{"method": "UNKNOWN", "route": "/api/v1/accounts", "status": "204"}
+	if !hasMetricWithLabels(gathered, "haohao_http_requests_total", wantLabels) {
+		t.Fatalf("metrics = %s, missing normalized method labels %#v", metricsText, wantLabels)
+	}
+	if strings.Contains(metricsText, "PROPFIND") {
+		t.Fatalf("metrics leaked raw unknown method: %s", metricsText)
+	}
+}
+
 func hasMetricWithLabels(families []*dto.MetricFamily, name string, labels map[string]string) bool {
 	for _, family := range families {
 		if family.GetName() != name {
