@@ -142,6 +142,10 @@ test('CI workflow runs the same verification commands documented for local check
 	assert.match(ciWorkflow, /actions\/setup-go@v5/);
 });
 
+test('CI workflow only runs branch events that can affect main', () => {
+	assert.match(ciWorkflow, /on:\n\s+push:\n\s+branches: \[main\]\n\s+pull_request:\n\s+branches: \[main\]\n\s+workflow_dispatch:/);
+});
+
 test('CI checkout steps avoid persisting write-capable credentials', () => {
 	assert.match(ciWorkflow, /permissions:\n\s+contents: read/);
 	const checkoutSteps = [...ciWorkflow.matchAll(/- uses: actions\/checkout@v4/g)];
