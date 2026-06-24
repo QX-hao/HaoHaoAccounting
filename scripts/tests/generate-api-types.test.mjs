@@ -229,7 +229,7 @@ test('OpenAPI response components document no-store API cache headers', () => {
 });
 
 test('API clients only default JSON Content-Type when a non-FormData body is present', () => {
-	const expected = /if \(init\.body !== undefined && init\.body !== null && !\(init\.body instanceof FormData\)\) \{\s+headers\.set\('Content-Type', headers\.get\('Content-Type'\) \|\| 'application\/json'\);/;
+	const expected = /if \(init\.body !== undefined && init\.body !== null && !\(init\.body instanceof FormData\)\) \{[\s\S]*?headers\.set\('Content-Type', headers\.get\('Content-Type'\) \|\| 'application\/json'\);/;
 	assert.match(webApiClient, expected);
 	assert.match(mobileApiClient, expected);
 });
@@ -400,18 +400,25 @@ test('OpenAPI shared error responses include structured examples', () => {
 		assert.match(response, /\$ref: '#\/components\/schemas\/ErrorResponse'/);
 		assert.match(response, /example:[\s\S]+error:/, `${responseName} is missing error example`);
 		assert.match(response, /example:[\s\S]+code:/, `${responseName} is missing code example`);
+		assert.match(response, /example:[\s\S]+status:/, `${responseName} is missing status example`);
 		assert.match(response, /example:[\s\S]+requestId:/, `${responseName} is missing requestId example`);
 	}
 });
 
-test('ErrorResponse keeps request ids as a stable response field', () => {
+test('ErrorResponse keeps status and request ids as stable response fields', () => {
 	assert.match(generator, /validateErrorResponseSchema/);
 	assert.match(generator, /ErrorResponse\.\$\{propertyName\} is missing required/);
 	const schema = openapiSchema('ErrorResponse');
+	assert.match(schema, /required: \[[^\]]*status[^\]]*\]/);
 	assert.match(schema, /required: \[[^\]]*requestId[^\]]*\]/);
+	assert.match(schema, /status:\n\s+type: integer\n\s+minimum: 100\n\s+maximum: 599/);
+	assert.match(generatedTypes, /status: number;/);
+	assert.doesNotMatch(generatedTypes, /status\?: number;/);
 	assert.match(generatedTypes, /requestId: string;/);
 	assert.doesNotMatch(generatedTypes, /requestId\?: string;/);
+	assert.match(goHTTPUtilResponses, /Status\s+int\s+`json:"status"`/);
 	assert.match(goHTTPUtilResponses, /RequestID\s+string\s+`json:"requestId"`/);
+	assert.doesNotMatch(goHTTPUtilResponses, /Status\s+int\s+`json:"status,omitempty"`/);
 	assert.doesNotMatch(goHTTPUtilResponses, /RequestID\s+string\s+`json:"requestId,omitempty"`/);
 });
 

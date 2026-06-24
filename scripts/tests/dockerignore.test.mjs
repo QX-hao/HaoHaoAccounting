@@ -53,6 +53,12 @@ test('docker build contexts exclude generated build and test output', () => {
 	}
 });
 
+test('root docker build context excludes local prototype archives', () => {
+	const patterns = dockerignoreByName('root');
+
+	assertHasAnyPattern('root', patterns, ['*.zip', '**/*.zip']);
+});
+
 test('docker build contexts exclude editor and local OS files', () => {
 	for (const [name, patterns] of dockerignores) {
 		assertHasAnyPattern(name, patterns, ['.DS_Store']);
@@ -106,6 +112,16 @@ test('dependabot only watches npm packages with lockfiles', () => {
 	assert.deepEqual([...npmDependabotDirs].sort(), ciNpmPackageDirs.map((directory) => `/${directory}`));
 	for (const directory of ciNpmPackageDirs) {
 		assert.ok(packageLockByName.has(directory), `${directory} npm package must have a tracked package-lock.json`);
+	}
+});
+
+test('dependabot update blocks are rate-limited and scheduled in one maintenance window', () => {
+	const blocks = dependabotUpdateBlocks();
+	assert.equal(blocks.length, 8);
+	for (const block of blocks) {
+		assert.match(block, /schedule:\n\s+interval: weekly\n\s+day: monday\n\s+time: "\d{2}:\d{2}"\n\s+timezone: Asia\/Shanghai/);
+		assert.match(block, /open-pull-requests-limit: 1/);
+		assert.match(block, /cooldown:\n\s+default-days: 7/);
 	}
 });
 
@@ -269,6 +285,12 @@ function assertHasAnyPattern(name, patterns, candidates) {
 	);
 }
 
+function dockerignoreByName(name) {
+	const patterns = dockerignores.find(([candidate]) => candidate === name)?.[1];
+	assert.ok(patterns, `missing ${name} .dockerignore patterns`);
+	return patterns;
+}
+
 function runtimeStageHasNonRootUser(dockerfile) {
 	const finalStage = dockerfile.split(/^FROM\s+/im).at(-1);
 	return finalStage
@@ -306,6 +328,12 @@ function dependabotDirectories(ecosystem) {
 			(match) => match[1].trim(),
 		),
 	);
+}
+
+function dependabotUpdateBlocks() {
+	return dependabot
+		.split(/\n(?=\s+- package-ecosystem: )/)
+		.filter((block) => block.includes('package-ecosystem:'));
 }
 
 function escapeRegExp(value) {

@@ -150,7 +150,7 @@ function validateCoreResponseSchemasAreClosed(allSchemas) {
 }
 
 function validateErrorResponseSchema(schema) {
-  for (const propertyName of ['error', 'code', 'requestId']) {
+  for (const propertyName of ['error', 'code', 'status', 'requestId']) {
     if (!schemaRequiredProperties(schema).has(propertyName)) {
       throw new Error(`ErrorResponse.${propertyName} is missing required`);
     }
@@ -450,7 +450,7 @@ function validateErrorResponseExamples(openapi) {
       throw new Error(`components.responses.${responseName} is missing ErrorResponse schema`);
     }
     const example = nestedBlock(nestedBlock(response, 'application/json:'), 'example:');
-    for (const field of ['error:', 'code:', 'requestId:']) {
+    for (const field of ['error:', 'code:', 'status:', 'requestId:']) {
       if (!example.includes(field)) {
         throw new Error(`components.responses.${responseName} example is missing ${field}`);
       }

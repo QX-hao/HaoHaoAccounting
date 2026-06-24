@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a reproducible problem in HaoHaoAccounting.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请提供可复现的信息，并移除日志、配置、截图中的密码、token、DSN 等敏感内容。
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: 问题主要影响哪个部分？
+      options:
+        - Backend API
+        - Web app
+        - Mobile app
+        - Docker / deployment config
+        - OpenAPI / generated client
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: 写清楚从干净环境或指定页面/API 开始怎么触发。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: 你期望看到什么结果？
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: 实际发生了什么？如果有状态码、响应体、页面提示，请贴出来。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: 填写相关版本和运行方式。
+      value: |
+        - OS:
+        - Browser / device:
+        - Node:
+        - Go:
+        - Docker:
+        - Branch / commit:
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: 贴出相关 `.env`、docker compose、请求头或 OpenAPI 片段，务必删除敏感值。
+      render: yaml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: 贴出后端日志、浏览器控制台、测试输出或截图。
+      render: text

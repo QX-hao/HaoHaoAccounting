@@ -45,6 +45,7 @@ const (
 type ErrorResponse struct {
 	Error     string `json:"error"`
 	Code      string `json:"code"`
+	Status    int    `json:"status"`
 	RequestID string `json:"requestId"`
 }
 
@@ -59,6 +60,7 @@ func Error(c *gin.Context, status int, code string, message string) {
 	c.JSON(status, ErrorResponse{
 		Error:     message,
 		Code:      code,
+		Status:    status,
 		RequestID: requestIDFromContext(c),
 	})
 }

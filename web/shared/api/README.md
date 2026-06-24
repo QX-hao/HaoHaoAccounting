@@ -10,7 +10,7 @@ Thin browser-side HTTP helpers for the Next.js frontend.
 - Authenticated calls attach the bearer token from shared auth storage; `401` responses clear the token and redirect browser users back to `/login`.
 - Requests are bounded by a 30 second `AbortController` timeout while still honoring a caller-provided `RequestInit.signal`.
 - Error responses are parsed from `application/json` and structured `application/*+json` media types, with plain text fallback for non-JSON bodies.
-- `ApiError` preserves backend `code`, `requestId`, `Retry-After`, `RateLimit-*`, and `WWW-Authenticate` headers for UI decisions.
+- `ApiError` preserves backend `status`, `code`, `requestId`, `Retry-After`, `RateLimit-*`, and `WWW-Authenticate` headers for UI decisions.
 - Downloads use the shared error parser and decode `Content-Disposition` `filename*` before falling back to `filename`.
 
 Feature API files should wrap these helpers with business names such as `listTransactions` or `createAccount`.

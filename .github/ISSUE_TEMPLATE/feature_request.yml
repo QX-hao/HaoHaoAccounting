@@ -1,0 +1,52 @@
+name: Feature request
+description: Suggest an improvement or new capability.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: 当前哪里不方便、缺什么能力，或者哪个流程成本高？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: 你希望它怎么工作？可以包含页面、API、配置、数据结构或交互细节。
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend API
+        - Web app
+        - Mobile app
+        - Docker / deployment config
+        - OpenAPI / generated client
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: 用可验证的条目描述完成标准。
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: 如果有替代方案或不希望采用的方案，请说明原因。
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: 相关截图、接口样例、竞品参考、配置片段或约束。

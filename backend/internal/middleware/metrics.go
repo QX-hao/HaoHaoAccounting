@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,12 +35,23 @@ func (metrics *HTTPMetrics) Middleware() gin.HandlerFunc {
 		started := time.Now()
 		c.Next()
 
+		method := normalizedMetricMethod(c.Request.Method)
 		status := strconv.Itoa(c.Writer.Status())
 		route := c.FullPath()
 		if route == "" {
 			route = "unmatched"
 		}
-		metrics.requests.WithLabelValues(c.Request.Method, route, status).Inc()
-		metrics.duration.WithLabelValues(c.Request.Method, route, status).Observe(time.Since(started).Seconds())
+		metrics.requests.WithLabelValues(method, route, status).Inc()
+		metrics.duration.WithLabelValues(method, route, status).Observe(time.Since(started).Seconds())
+	}
+}
+
+func normalizedMetricMethod(method string) string {
+	clean := strings.ToUpper(strings.TrimSpace(method))
+	switch clean {
+	case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "CONNECT", "OPTIONS", "TRACE":
+		return clean
+	default:
+		return "UNKNOWN"
 	}
 }

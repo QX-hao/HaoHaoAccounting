@@ -8,9 +8,10 @@ import (
 )
 
 type SecurityHeadersConfig struct {
-	HSTSMaxAgeSeconds     int
-	HSTSIncludeSubDomains bool
-	HSTSPreload           bool
+	HSTSMaxAgeSeconds         int
+	HSTSIncludeSubDomains     bool
+	HSTSPreload               bool
+	CrossOriginEmbedderPolicy string
 }
 
 func SecurityHeaders(configs ...SecurityHeadersConfig) gin.HandlerFunc {
@@ -23,6 +24,9 @@ func SecurityHeaders(configs ...SecurityHeadersConfig) gin.HandlerFunc {
 		headers := c.Writer.Header()
 		for key, value := range defaultSecurityHeaders() {
 			headers.Set(key, value)
+		}
+		if cfg.CrossOriginEmbedderPolicy != "" {
+			headers.Set("Cross-Origin-Embedder-Policy", cfg.CrossOriginEmbedderPolicy)
 		}
 		if hsts != "" {
 			headers.Set("Strict-Transport-Security", hsts)

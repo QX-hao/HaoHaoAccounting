@@ -1,10 +1,12 @@
 package config
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -153,7 +155,8 @@ func TestLoadDefaultsForLocalDevelopment(t *testing.T) {
 		cfg.HTTP.MetricsToken != "" ||
 		cfg.HTTP.HSTSMaxAgeSeconds != 0 ||
 		cfg.HTTP.HSTSIncludeSubDomains ||
-		cfg.HTTP.HSTSPreload {
+		cfg.HTTP.HSTSPreload ||
+		cfg.HTTP.CrossOriginEmbedderPolicy != "" {
 		t.Fatalf("HTTP config = %#v", cfg.HTTP)
 	}
 	if cfg.LoginRateLimit.MaxFailures != 5 || cfg.LoginRateLimit.Window != 10*time.Minute {
@@ -200,6 +203,7 @@ func TestLoadParsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("HTTP_HSTS_MAX_AGE_SECONDS", "31536000")
 	t.Setenv("HTTP_HSTS_INCLUDE_SUBDOMAINS", "true")
 	t.Setenv("HTTP_HSTS_PRELOAD", "true")
+	t.Setenv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY", "require-corp")
 	t.Setenv("ADMIN_USERNAME", "admin")
 	t.Setenv("ADMIN_PASSWORD", "password")
 	t.Setenv("ADMIN_NAME", "Owner")
@@ -252,7 +256,8 @@ func TestLoadParsesEnvironmentOverrides(t *testing.T) {
 		cfg.HTTP.MetricsToken != "scrape-secret" ||
 		cfg.HTTP.HSTSMaxAgeSeconds != 31536000 ||
 		!cfg.HTTP.HSTSIncludeSubDomains ||
-		!cfg.HTTP.HSTSPreload {
+		!cfg.HTTP.HSTSPreload ||
+		cfg.HTTP.CrossOriginEmbedderPolicy != "require-corp" {
 		t.Fatalf("HTTP config = %#v", cfg.HTTP)
 	}
 	if cfg.Admin.Username != "admin" || cfg.Admin.Password != "password" || cfg.Admin.Name != "Owner" {
@@ -286,6 +291,7 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 	t.Setenv("HTTP_REQUEST_TIMEOUT", "-1s")
 	t.Setenv("HTTP_METRICS_ENABLED", "not-a-bool")
 	t.Setenv("HTTP_HSTS_INCLUDE_SUBDOMAINS", "not-a-bool")
+	t.Setenv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY", "same-origin")
 	t.Setenv("JWT_TTL", "0s")
 
 	_, err := LoadStrict()
@@ -300,6 +306,7 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 		"HTTP_REQUEST_TIMEOUT",
 		"HTTP_METRICS_ENABLED",
 		"HTTP_HSTS_INCLUDE_SUBDOMAINS",
+		"HTTP_CROSS_ORIGIN_EMBEDDER_POLICY",
 		"JWT_TTL",
 	} {
 		if !strings.Contains(message, want) {
@@ -422,6 +429,20 @@ func TestHTTPConfigValidate(t *testing.T) {
 	paddingOnlyMetricsToken.MetricsToken = "=="
 	if err := paddingOnlyMetricsToken.Validate(); err == nil {
 		t.Fatal("expected padding-only metrics token error")
+	}
+	for _, policy := range []string{"require-corp", "credentialless", "unsafe-none", " REQUIRE-CORP "} {
+		t.Run("valid COEP "+policy, func(t *testing.T) {
+			cfg := valid
+			cfg.CrossOriginEmbedderPolicy = policy
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("valid cross-origin embedder policy error: %v", err)
+			}
+		})
+	}
+	invalidCOEP := valid
+	invalidCOEP.CrossOriginEmbedderPolicy = "same-origin"
+	if err := invalidCOEP.Validate(); err == nil {
+		t.Fatal("expected invalid cross-origin embedder policy error")
 	}
 	invalidHSTSDirective := valid
 	invalidHSTSDirective.HSTSIncludeSubDomains = true
@@ -691,6 +712,24 @@ func TestEnvExampleDocumentsMetricsExposure(t *testing.T) {
 	}
 }
 
+func TestEnvExampleDocumentsCrossOriginEmbedderPolicy(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".env.example"))
+	if err != nil {
+		t.Fatalf("read backend/.env.example: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"Optional COEP header",
+		"Allowed values: require-corp, credentialless, unsafe-none",
+		"HTTP_CROSS_ORIGIN_EMBEDDER_POLICY=",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("backend/.env.example is missing COEP guidance %q", want)
+		}
+	}
+}
+
 func TestEnvExampleLoadsStrictly(t *testing.T) {
 	unsetConfigEnv(t)
 
@@ -769,6 +808,18 @@ func TestProductionComposeDisablesMetricsByDefault(t *testing.T) {
 		if !strings.Contains(source, want) {
 			t.Fatalf("docker-compose.yaml must include metrics default %q", want)
 		}
+	}
+}
+
+func TestProductionComposeDisablesCrossOriginEmbedderPolicyByDefault(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yaml"))
+	if err != nil {
+		t.Fatalf("read docker-compose.yaml: %v", err)
+	}
+	source := string(data)
+
+	if !strings.Contains(source, "HTTP_CROSS_ORIGIN_EMBEDDER_POLICY: ${HTTP_CROSS_ORIGIN_EMBEDDER_POLICY:-}") {
+		t.Fatal("docker-compose.yaml must default HTTP_CROSS_ORIGIN_EMBEDDER_POLICY to empty")
 	}
 }
 
@@ -945,26 +996,76 @@ func validHTTPConfig() HTTPConfig {
 func configSourceEnvKeys(t *testing.T) []string {
 	t.Helper()
 
-	data, err := os.ReadFile("config.go")
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "config.go", nil, 0)
 	if err != nil {
-		t.Fatalf("read config.go: %v", err)
+		t.Fatalf("parse config.go: %v", err)
 	}
 
-	keyPattern := regexp.MustCompile(`"(?:[A-Z][A-Z0-9]*_)*[A-Z][A-Z0-9]*"`)
-	ignored := map[string]bool{
-		"POSTGRES": true,
-	}
 	keys := map[string]bool{}
-	for _, match := range keyPattern.FindAllString(string(data), -1) {
-		key := strings.Trim(match, `"`)
-		if ignored[key] {
-			continue
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
 		}
-		if strings.Contains(key, "_") || strings.HasPrefix(key, "PORT") {
+
+		if key, ok := envKeyFromCall(call); ok {
 			keys[key] = true
 		}
-	}
+		return true
+	})
 	return sortedKeys(keys)
+}
+
+func envKeyFromCall(call *ast.CallExpr) (string, bool) {
+	if len(call.Args) == 0 || !isEnvReader(call.Fun) {
+		return "", false
+	}
+	literal, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || literal.Kind != token.STRING {
+		return "", false
+	}
+	key := strings.Trim(literal.Value, `"`)
+	if !isEnvKey(key) {
+		return "", false
+	}
+	return key, true
+}
+
+func isEnvReader(expr ast.Expr) bool {
+	if selector, ok := expr.(*ast.SelectorExpr); ok {
+		ident, ok := selector.X.(*ast.Ident)
+		return ok && ident.Name == "os" && (selector.Sel.Name == "Getenv" || selector.Sel.Name == "LookupEnv")
+	}
+
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	switch ident.Name {
+	case "stringEnv",
+		"intEnv",
+		"nonNegativeIntEnv",
+		"positiveIntEnv",
+		"boolEnv",
+		"crossOriginEmbedderPolicyEnv",
+		"int64Env",
+		"durationEnv",
+		"nonNegativeDurationEnv",
+		"csvEnv",
+		"validatePortEnv",
+		"validateIntEnv",
+		"validateNonNegativeIntEnv",
+		"validatePositiveIntEnv",
+		"validatePositiveInt64Env",
+		"validateBoolEnv",
+		"validatePositiveDurationEnv",
+		"validateNonNegativeDurationEnv",
+		"validateCrossOriginEmbedderPolicyEnv":
+		return true
+	default:
+		return false
+	}
 }
 
 func envExampleKeys(t *testing.T) []string {
@@ -1186,6 +1287,7 @@ func configEnvKeys() []string {
 		"HTTP_HSTS_MAX_AGE_SECONDS",
 		"HTTP_HSTS_INCLUDE_SUBDOMAINS",
 		"HTTP_HSTS_PRELOAD",
+		"HTTP_CROSS_ORIGIN_EMBEDDER_POLICY",
 		"ADMIN_USERNAME",
 		"ADMIN_PASSWORD",
 		"ADMIN_NAME",

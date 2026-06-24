@@ -16,6 +16,8 @@
 
 `/readyz` and `/health` check the database and optional Redis cache with a 2 second dependency budget. Database failures return `503` with `status: unavailable`; Redis is reported as `disabled` when no enabled cache is configured.
 
+Health probe responses use `Cache-Control: no-cache`, `Pragma: no-cache`, and `Expires: 0` so load balancers and proxies must revalidate process and dependency state before reusing a stored result.
+
 All `/api/v1` routes use `NoStore` cache headers. API fallback errors for missing routes and unsupported methods return the shared structured error body with request IDs; API fallback errors also keep `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0`. Non-API health probe fallbacks remain cache-neutral.
 
 Business rules, database mutations, and file parsing should stay in `internal/modules/*` or `internal/shared/*`, not in this package.

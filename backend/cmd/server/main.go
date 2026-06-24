@@ -256,9 +256,10 @@ func validateExplicitCORSOrigin(origin string) error {
 
 func securityHeadersConfig(cfg config.Config) middleware.SecurityHeadersConfig {
 	return middleware.SecurityHeadersConfig{
-		HSTSMaxAgeSeconds:     cfg.HTTP.HSTSMaxAgeSeconds,
-		HSTSIncludeSubDomains: cfg.HTTP.HSTSIncludeSubDomains,
-		HSTSPreload:           cfg.HTTP.HSTSPreload,
+		HSTSMaxAgeSeconds:         cfg.HTTP.HSTSMaxAgeSeconds,
+		HSTSIncludeSubDomains:     cfg.HTTP.HSTSIncludeSubDomains,
+		HSTSPreload:               cfg.HTTP.HSTSPreload,
+		CrossOriginEmbedderPolicy: cfg.HTTP.CrossOriginEmbedderPolicy,
 	}
 }
 

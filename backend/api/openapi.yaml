@@ -1542,6 +1542,7 @@ components:
           example:
             error: validation failed
             code: bad_request
+            status: 400
             requestId: api-20260620-example
     Unauthorized:
       description: Missing, invalid, or expired authentication token.
@@ -1563,6 +1564,7 @@ components:
           example:
             error: invalid Authorization format
             code: unauthorized
+            status: 401
             requestId: api-20260620-example
     Forbidden:
       description: Authenticated user cannot perform this action.
@@ -1582,6 +1584,7 @@ components:
           example:
             error: forbidden
             code: forbidden
+            status: 403
             requestId: api-20260620-example
     NotFound:
       description: Requested resource was not found.
@@ -1601,6 +1604,7 @@ components:
           example:
             error: route not found
             code: not_found
+            status: 404
             requestId: api-20260620-example
     MethodNotAllowed:
       description: HTTP method is not supported for this route.
@@ -1622,6 +1626,7 @@ components:
           example:
             error: method not allowed
             code: method_not_allowed
+            status: 405
             requestId: api-20260620-example
     RateLimited:
       description: Too many requests.
@@ -1649,6 +1654,7 @@ components:
           example:
             error: 登录失败次数过多，请稍后再试
             code: rate_limited
+            status: 429
             requestId: api-20260620-example
     PayloadTooLarge:
       description: Request body is too large.
@@ -1668,6 +1674,7 @@ components:
           example:
             error: request body too large
             code: payload_too_large
+            status: 413
             requestId: api-20260620-example
     UnsupportedMediaType:
       description: Request Content-Type is not supported by this operation.
@@ -1687,6 +1694,7 @@ components:
           example:
             error: 'unsupported media type: expected application/json'
             code: unsupported_media_type
+            status: 415
             requestId: api-20260620-example
     NotAcceptable:
       description: Requested response media type is not available for this operation.
@@ -1708,6 +1716,7 @@ components:
           example:
             error: 'not acceptable: expected application/json'
             code: not_acceptable
+            status: 406
             requestId: api-20260620-example
     InternalError:
       description: Internal server error.
@@ -1727,6 +1736,7 @@ components:
           example:
             error: internal server error
             code: internal_error
+            status: 500
             requestId: api-20260620-example
     GatewayTimeout:
       description: Request processing exceeded the server timeout budget.
@@ -1746,6 +1756,7 @@ components:
           example:
             error: request timed out
             code: request_timeout
+            status: 504
             requestId: api-20260620-example
     Error:
       description: Error response. Prefer a status-specific response component when possible.
@@ -1765,6 +1776,7 @@ components:
           example:
             error: request failed
             code: internal_error
+            status: 500
             requestId: api-20260620-example
     Ok:
       description: OK response
@@ -2401,10 +2413,11 @@ components:
     ErrorResponse:
       type: object
       additionalProperties: false
-      required: [error, code, requestId]
+      required: [error, code, status, requestId]
       example:
         error: invalid Authorization format
         code: unauthorized
+        status: 401
         requestId: api-20260620-example
       properties:
         error:
@@ -2412,6 +2425,10 @@ components:
         code:
           type: string
           enum: [bad_request, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, rate_limited, payload_too_large, unsupported_media_type, not_acceptable, request_timeout, client_closed_request, internal_error]
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
         requestId:
           type: string
     OkResponse:

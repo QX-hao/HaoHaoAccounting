@@ -236,7 +236,7 @@ function apiError(resp: Response, data: ApiErrorBody): ApiError {
   const requestId = data.requestId || resp.headers.get('X-Request-ID') || '';
   return new ApiError(
     data.error || '请求失败',
-    resp.status,
+    responseStatus(resp, data),
     data.code || '',
     requestId,
     retryAfterSeconds(resp),
@@ -245,6 +245,11 @@ function apiError(resp: Response, data: ApiErrorBody): ApiError {
     nonNegativeIntegerHeader(resp, 'RateLimit-Reset'),
     resp.headers.get('WWW-Authenticate') || '',
   );
+}
+
+function responseStatus(resp: Response, data: ApiErrorBody) {
+  const status = data.status;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? status : resp.status;
 }
 
 function nonNegativeIntegerHeader(resp: Response, name: string): number | null {

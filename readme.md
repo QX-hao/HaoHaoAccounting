@@ -229,6 +229,7 @@ Web 端使用 Next.js standalone 输出。`NEXT_PUBLIC_API_BASE` 会在构建时
 - `HTTP_METRICS_ENABLED`（可选，默认 `false`；仅在 backend 端口受保护时开启 `/metrics`）
 - `HTTP_METRICS_TOKEN`（可选；设置后 `/metrics` 需要 `Authorization: Bearer <token>`）
 - `HTTP_HSTS_MAX_AGE_SECONDS`、`HTTP_HSTS_INCLUDE_SUBDOMAINS`、`HTTP_HSTS_PRELOAD`（可选，仅 HTTPS 部署启用）
+- `HTTP_CROSS_ORIGIN_EMBEDDER_POLICY`（可选，默认不发送；需要浏览器跨域隔离时设置为 `require-corp`、`credentialless` 或 `unsafe-none`）
 - `BACKEND_STOP_GRACE_PERIOD`（可选，Compose 停止 backend 容器的宽限期，默认 `30s`，应大于 `HTTP_SHUTDOWN_TIMEOUT`）
 - `MYSQL_ROOT_PASSWORD`（仅启用 MySQL profile 时需要）
 
@@ -269,6 +270,7 @@ HTTP_METRICS_TOKEN=
 HTTP_HSTS_MAX_AGE_SECONDS=0
 HTTP_HSTS_INCLUDE_SUBDOMAINS=false
 HTTP_HSTS_PRELOAD=false
+HTTP_CROSS_ORIGIN_EMBEDDER_POLICY=
 BACKEND_STOP_GRACE_PERIOD=30s
 ```
 
@@ -280,9 +282,11 @@ CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 
 后端 CORS 允许浏览器发送 `Authorization` 和 `X-Request-ID`，并暴露 `X-Request-ID`、`Link`、`X-Total-Count`、`Content-Disposition`、`Allow`、`WWW-Authenticate`、`Retry-After`，方便前端读取追踪 ID、分页、导出文件名、鉴权、限流和 405 允许方法信息。
 
-所有 `/api/v1` 业务接口及其框架级 404/405 错误都会返回 `Cache-Control: no-store`、`Pragma: no-cache` 和 `Expires: 0`，避免浏览器或中间代理缓存登录 token、用户数据、账单、报表响应或 API 错误。`/livez`、`/readyz`、`/health` 探针不套用该策略。
+所有 `/api/v1` 业务接口及其框架级 404/405 错误都会返回 `Cache-Control: no-store`、`Pragma: no-cache` 和 `Expires: 0`，避免浏览器或中间代理缓存登录 token、用户数据、账单、报表响应或 API 错误。`/livez`、`/readyz`、`/health` 探针不套用 API 的禁止存储策略，但会返回 `Cache-Control: no-cache`、`Pragma: no-cache` 和 `Expires: 0`，要求代理在复用健康状态前重新校验。
 
-后端会统一返回基础安全响应头，包括 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY` 和一个保守的 `Permissions-Policy`，默认关闭相机、定位、麦克风和支付能力。
+后端会统一返回基础安全响应头，包括 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin` 和一个保守的 `Permissions-Policy`，默认关闭相机、定位、麦克风和支付能力。
+
+`Cross-Origin-Embedder-Policy` 默认不发送，避免 API 被嵌入到还没完成 CORP/CORS 标记的前端或第三方资源链路时出现浏览器拦截。只有确认部署需要浏览器跨域隔离能力时，再设置 `HTTP_CROSS_ORIGIN_EMBEDDER_POLICY=require-corp` 或 `credentialless`；启动校验会拒绝未知值。
 
 `Strict-Transport-Security` 默认不发送，避免本地 HTTP 调试或尚未确认 HTTPS 覆盖面的域名被浏览器长期记住为强制 HTTPS。生产环境确认 API 域名只通过 HTTPS 访问后，可以设置 `HTTP_HSTS_MAX_AGE_SECONDS=31536000`；只有确认所有子域也都支持 HTTPS 时再开启 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。准备加入浏览器 preload 列表时再开启 `HTTP_HSTS_PRELOAD=true`，此时启动校验会要求 `HTTP_HSTS_MAX_AGE_SECONDS>=31536000` 且 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。
 
@@ -385,4 +389,4 @@ REDIS_DB=0
 curl http://localhost:8080/health
 ```
 
-生产部署建议用 `/livez` 做 liveness probe，用 `/readyz` 做 readiness probe。`/readyz` 会检查数据库连接；Redis 未启用时显示 `disabled`，启用后会执行 ping。`/health` 保持兼容，返回和 `/readyz` 相同的结果。
+生产部署建议用 `/livez` 做 liveness probe，用 `/readyz` 做 readiness probe。`/readyz` 会检查数据库连接；Redis 未启用时显示 `disabled`，启用后会执行 ping。`/health` 保持兼容，返回和 `/readyz` 相同的结果。这些探针响应会带 `Cache-Control: no-cache`，避免代理直接复用过期的进程或依赖状态。
