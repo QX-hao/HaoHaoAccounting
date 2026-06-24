@@ -135,6 +135,42 @@ func TestOpenAPIErrorResponsesUseSharedHeadersAndSchema(t *testing.T) {
 	}
 }
 
+func TestOpenAPISecurityContractMatchesBearerMiddleware(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	assertBearerSecurityScheme(t, doc.Components.SecuritySchemes["bearerAuth"])
+	assertBearerSecurityRequirement(t, doc.Security, "OpenAPI root security")
+
+	publicRoutes := map[string]bool{}
+	for path, item := range doc.Paths {
+		for _, operation := range item.operations() {
+			key := operation.method + " " + openAPIPathToGinPath(path)
+			if operation.public {
+				publicRoutes[key] = true
+				continue
+			}
+
+			if operation.securityOverride {
+				t.Fatalf("private route %s must inherit root bearerAuth security instead of overriding it", key)
+			}
+			if response, ok := operation.responses["401"]; !ok {
+				t.Fatalf("private route %s is missing a 401 response", key)
+			} else if !resolvedResponseHasHeader(response, doc.Components.Responses, "WWW-Authenticate") {
+				t.Fatalf("private route %s 401 response is missing WWW-Authenticate header", key)
+			}
+		}
+	}
+
+	wantPublicRoutes := []string{http.MethodPost + " /api/v1/auth/login"}
+	if got := sortedMapKeys(publicRoutes); !reflect.DeepEqual(got, wantPublicRoutes) {
+		t.Fatalf("OpenAPI public routes = %#v, want %#v", got, wantPublicRoutes)
+	}
+}
+
 func TestOpenAPIInternalRefsResolve(t *testing.T) {
 	root := parseOpenAPINode(t)
 
@@ -356,12 +392,20 @@ func mappingValue(node *yaml.Node, key string) *yaml.Node {
 }
 
 type openAPIDocument struct {
+	Security   []map[string][]string      `yaml:"security"`
 	Paths      map[string]openAPIPathItem `yaml:"paths"`
 	Components openAPIComponents          `yaml:"components"`
 }
 
 type openAPIComponents struct {
-	Responses map[string]openAPIResponse `yaml:"responses"`
+	SecuritySchemes map[string]openAPISecurityScheme `yaml:"securitySchemes"`
+	Responses       map[string]openAPIResponse       `yaml:"responses"`
+}
+
+type openAPISecurityScheme struct {
+	Type         string `yaml:"type"`
+	Scheme       string `yaml:"scheme"`
+	BearerFormat string `yaml:"bearerFormat"`
 }
 
 type openAPIPathItem struct {
@@ -395,10 +439,11 @@ type openAPIRef struct {
 }
 
 type openAPIOperationWithMethod struct {
-	method      string
-	public      bool
-	requestBody *openAPIRequestBody
-	responses   map[string]openAPIResponse
+	method           string
+	public           bool
+	securityOverride bool
+	requestBody      *openAPIRequestBody
+	responses        map[string]openAPIResponse
 }
 
 func (item openAPIPathItem) methods() []string {
@@ -426,10 +471,11 @@ func (item openAPIPathItem) operations() []openAPIOperationWithMethod {
 	for _, operation := range operations {
 		if operation.operation != nil {
 			result = append(result, openAPIOperationWithMethod{
-				method:      operation.method,
-				public:      operation.operation.isPublic(),
-				requestBody: operation.operation.RequestBody,
-				responses:   operation.operation.Responses,
+				method:           operation.method,
+				public:           operation.operation.isPublic(),
+				securityOverride: operation.operation.Security != nil,
+				requestBody:      operation.operation.RequestBody,
+				responses:        operation.operation.Responses,
 			})
 		}
 	}
@@ -460,8 +506,39 @@ func resolvedResponse(response openAPIResponse, components map[string]openAPIRes
 	return response
 }
 
+func resolvedResponseHasHeader(response openAPIResponse, components map[string]openAPIResponse, header string) bool {
+	_, ok := resolvedResponse(response, components).Headers[header]
+	return ok
+}
+
 func (operation openAPIOperation) isPublic() bool {
 	return operation.Security != nil && len(operation.Security) == 0
+}
+
+func assertBearerSecurityScheme(t *testing.T, scheme openAPISecurityScheme) {
+	t.Helper()
+
+	if scheme.Type != "http" || scheme.Scheme != "bearer" || scheme.BearerFormat != "JWT" {
+		t.Fatalf("bearerAuth scheme = %#v, want HTTP bearer JWT", scheme)
+	}
+}
+
+func assertBearerSecurityRequirement(t *testing.T, security []map[string][]string, name string) {
+	t.Helper()
+
+	if len(security) != 1 {
+		t.Fatalf("%s = %#v, want exactly one bearerAuth requirement", name, security)
+	}
+	scopes, ok := security[0]["bearerAuth"]
+	if !ok {
+		t.Fatalf("%s = %#v, missing bearerAuth", name, security)
+	}
+	if scopes == nil {
+		return
+	}
+	if len(scopes) != 0 {
+		t.Fatalf("%s bearerAuth scopes = %#v, want empty scopes for HTTP bearer auth", name, scopes)
+	}
 }
 
 var openAPIPathParameterPattern = regexp.MustCompile(`\{([^}/]+)\}`)
