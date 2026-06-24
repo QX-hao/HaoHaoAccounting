@@ -1,11 +1,11 @@
-FROM node:22-bookworm-slim AS deps
+FROM node:26-bookworm-slim AS deps
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:22-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -20,7 +20,7 @@ ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
 RUN mkdir -p public \
     && npm run build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 
 WORKDIR /app
 
