@@ -274,7 +274,7 @@ test('API clients bound fetch calls with timeout and preserve caller abort signa
 		assert.match(source, /const controller = new AbortController\(\);/);
 		assert.match(source, /setTimeout\(\(\) => controller\.abort\(\), API_REQUEST_TIMEOUT_MS\)/);
 		assert.match(source, /callerSignal\.addEventListener\('abort', abort, \{ once: true \}\)/);
-		assert.match(source, /return await fetch\(`\$\{API_BASE\}\$\{path\}`, \{ \.\.\.init, signal \}\);/);
+		assert.match(source, /return await fetch\(`\$\{API_BASE\}\$\{path\}`, \{ \.\.\.init, credentials: 'omit', signal \}\);/);
 		assert.match(source, /finally \{\n\s+cleanup\(\);\n\s+\}/);
 	}
 });
@@ -287,6 +287,7 @@ test('API client READMEs document shared runtime contracts', () => {
 			'`Content-Type: application/json` only when the body is not `FormData`',
 			'30 second `AbortController` timeout',
 			'`RequestInit.signal`',
+			'`credentials: omit`',
 			'`application/*+json`',
 			'`Retry-After`',
 			'`RateLimit-*`',

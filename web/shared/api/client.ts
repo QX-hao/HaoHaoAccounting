@@ -187,7 +187,7 @@ function isJSONContentType(contentType: string) {
 async function fetchAPI(path: string, init: RequestInit = {}) {
   const { signal, cleanup } = requestSignal(init.signal);
   try {
-    return await fetch(`${API_BASE}${path}`, { ...init, signal });
+    return await fetch(`${API_BASE}${path}`, { ...init, credentials: 'omit', signal });
   } catch (err) {
     throw networkError(err);
   } finally {

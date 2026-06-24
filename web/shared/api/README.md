@@ -8,6 +8,7 @@ Thin browser-side HTTP helpers for the Next.js frontend.
 - `requestWithResponse` and `uploadWithResponse` keep the same data parsing path while exposing successful response headers such as `Location` and `Link`.
 - JSON requests send `Accept: application/json`, attach a bounded `X-Request-ID`, and add `Content-Type: application/json` only when the body is not `FormData`.
 - Authenticated calls attach the bearer token from shared auth storage; `401` responses clear the token and redirect browser users back to `/login`.
+- `fetchAPI` uses `credentials: omit` so cross-origin API calls rely only on explicit bearer headers instead of ambient cookies.
 - Requests are bounded by a 30 second `AbortController` timeout while still honoring a caller-provided `RequestInit.signal`.
 - Error responses are parsed from `application/json` and structured `application/*+json` media types, with plain text fallback for non-JSON bodies.
 - `ApiError` preserves backend `status`, `code`, `requestId`, `Retry-After`, `RateLimit-*`, and `WWW-Authenticate` headers for UI decisions.
