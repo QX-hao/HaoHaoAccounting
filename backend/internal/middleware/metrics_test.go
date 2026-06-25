@@ -38,10 +38,9 @@ func TestHTTPMetricsUsesRoutePatternLabels(t *testing.T) {
 	if !hasMetricWithLabels(gathered, "haohao_http_request_duration_seconds", wantLabels) {
 		t.Fatalf("metrics = %s, missing duration histogram labels %#v", metricFamiliesText(gathered), wantLabels)
 	}
-	metricsText := metricFamiliesText(gathered)
 	for _, leaked := range []string{"123", "token=secret"} {
-		if strings.Contains(metricsText, leaked) {
-			t.Fatalf("metrics leaked raw request data %q: %s", leaked, metricsText)
+		if metricLabelsContain(gathered, leaked) {
+			t.Fatalf("metrics leaked raw request label %q: %s", leaked, metricFamiliesText(gathered))
 		}
 	}
 }
@@ -67,7 +66,7 @@ func TestHTTPMetricsGroupsUnmatchedRoutes(t *testing.T) {
 	if !hasMetricWithLabels(gathered, "haohao_http_requests_total", wantLabels) {
 		t.Fatalf("metrics = %s, missing unmatched route labels %#v", metricsText, wantLabels)
 	}
-	if strings.Contains(metricsText, "/missing/path") || strings.Contains(metricsText, "token=secret") {
+	if metricLabelsContain(gathered, "/missing/path") || metricLabelsContain(gathered, "token=secret") {
 		t.Fatalf("metrics leaked unmatched URL: %s", metricsText)
 	}
 }
@@ -97,7 +96,7 @@ func TestHTTPMetricsNormalizesUnknownMethods(t *testing.T) {
 	if !hasMetricWithLabels(gathered, "haohao_http_requests_total", wantLabels) {
 		t.Fatalf("metrics = %s, missing normalized method labels %#v", metricsText, wantLabels)
 	}
-	if strings.Contains(metricsText, "PROPFIND") {
+	if metricLabelsContain(gathered, "PROPFIND") {
 		t.Fatalf("metrics leaked raw unknown method: %s", metricsText)
 	}
 }
@@ -147,6 +146,19 @@ func metricHasLabels(metric *dto.Metric, labels map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func metricLabelsContain(families []*dto.MetricFamily, needle string) bool {
+	for _, family := range families {
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if strings.Contains(label.GetValue(), needle) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func metricFamiliesText(families []*dto.MetricFamily) string {

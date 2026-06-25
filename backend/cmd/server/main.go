@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
 	"log"
@@ -152,14 +153,20 @@ func newMetricsRegistry() *prometheus.Registry {
 func requireMetricsToken(want string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, ok := middleware.BearerToken(c.GetHeader("Authorization"))
-		// 指标 token 属于长期运维凭据，用常量时间比较避免长度相同情况下的时序侧信道。
-		if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(want)) != 1 {
+		if !ok || !constantTimeTokenEqual(token, want) {
 			httputil.Unauthorized(c, "invalid metrics token")
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
+}
+
+func constantTimeTokenEqual(got, want string) bool {
+	// 先哈希成固定长度摘要再比较，避免长度不同导致 ConstantTimeCompare 提前返回。
+	gotHash := sha256.Sum256([]byte(got))
+	wantHash := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) == 1
 }
 
 func validateStartupConfig(cfg config.Config) error {
@@ -206,6 +213,7 @@ func newCORSConfig(cfg config.Config) cors.Config {
 		},
 		ExposeHeaders: []string{
 			"Allow",
+			"Clear-Site-Data",
 			"Content-Disposition",
 			"Link",
 			"Location",
@@ -241,34 +249,61 @@ func normalizedCORSOrigins(origins []string) []string {
 	result := make([]string, 0, len(origins))
 	seen := make(map[string]struct{}, len(origins))
 	for _, origin := range origins {
-		if clean := strings.TrimSpace(origin); clean != "" {
-			if _, exists := seen[clean]; exists {
+		clean := strings.TrimSpace(origin)
+		if clean == "" {
+			continue
+		}
+		normalized, err := canonicalCORSOrigin(clean)
+		if err != nil {
+			normalized = clean
+		}
+		if normalized != "" {
+			if _, exists := seen[normalized]; exists {
 				continue
 			}
-			seen[clean] = struct{}{}
-			result = append(result, clean)
+			seen[normalized] = struct{}{}
+			result = append(result, normalized)
 		}
 	}
 	return result
 }
 
 func validateExplicitCORSOrigin(origin string) error {
+	_, err := canonicalCORSOrigin(origin)
+	return err
+}
+
+// canonicalCORSOrigin 转成浏览器 Origin 头常见的序列化形式，避免大小写或默认端口导致精确匹配失败。
+func canonicalCORSOrigin(origin string) (string, error) {
 	origin = strings.TrimSpace(origin)
 	if strings.Contains(origin, "*") {
-		return fmt.Errorf("CORS_ALLOW_ORIGINS must use explicit origins; %q contains a wildcard", origin)
+		return "", fmt.Errorf("CORS_ALLOW_ORIGINS must use explicit origins; %q contains a wildcard", origin)
 	}
 
 	parsed, err := url.ParseRequestURI(origin)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("CORS_ALLOW_ORIGINS contains invalid origin %q", origin)
+		return "", fmt.Errorf("CORS_ALLOW_ORIGINS contains invalid origin %q", origin)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must use http or https", origin)
+		return "", fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must use http or https", origin)
 	}
 	if parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must not include user info, path, query, or fragment", origin)
+		return "", fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must not include user info, path, query, or fragment", origin)
 	}
-	return nil
+
+	scheme := strings.ToLower(parsed.Scheme)
+	host := strings.ToLower(parsed.Hostname())
+	port := parsed.Port()
+	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
+		port = ""
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port != "" {
+		host += ":" + port
+	}
+	return scheme + "://" + host, nil
 }
 
 func securityHeadersConfig(cfg config.Config) middleware.SecurityHeadersConfig {
@@ -365,7 +400,10 @@ func logUserAgent(request *http.Request) string {
 
 func logPath(path string) string {
 	if beforeQuery, _, ok := strings.Cut(path, "?"); ok {
-		return beforeQuery
+		path = beforeQuery
+	}
+	if path == "" {
+		return "/"
 	}
 	return path
 }

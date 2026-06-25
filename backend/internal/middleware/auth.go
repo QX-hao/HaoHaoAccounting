@@ -14,7 +14,11 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 )
 
-const userContextKey = "user_id"
+const (
+	userContextKey        = "user_id"
+	bearerTokenContextKey = "bearer_token"
+	maxBearerTokenLength  = 4096
+)
 
 type jwtClaims struct {
 	jwt.RegisteredClaims
@@ -194,7 +198,10 @@ func RequireAuthWithRevocation(checker TokenRevocationChecker, tokenService *Tok
 				return
 			}
 		}
+		// 认证成功后不再把明文 Authorization 头透传给业务 handler，降低日志或错误处理误泄露 token 的风险。
+		c.Request.Header.Del("Authorization")
 		c.Set(userContextKey, userID)
+		c.Set(bearerTokenContextKey, token)
 		c.Next()
 	}
 }
@@ -229,7 +236,7 @@ func splitBearerCredentials(auth string) (string, string, bool) {
 
 // ValidBearerTokenValue 校验 token68 字符集和尾部 padding 规则。
 func ValidBearerTokenValue(token string) bool {
-	if token == "" {
+	if token == "" || len(token) > maxBearerTokenLength {
 		return false
 	}
 	paddingStarted := false
@@ -277,4 +284,17 @@ func UserIDFromContext(c *gin.Context) uint {
 		return 0
 	}
 	return id
+}
+
+// BearerTokenFromContext 返回认证中间件已经校验过的 token，供刷新/登出时写入撤销列表。
+func BearerTokenFromContext(c *gin.Context) (string, bool) {
+	v, ok := c.Get(bearerTokenContextKey)
+	if !ok {
+		return "", false
+	}
+	token, ok := v.(string)
+	if !ok || !ValidBearerTokenValue(token) {
+		return "", false
+	}
+	return token, true
 }

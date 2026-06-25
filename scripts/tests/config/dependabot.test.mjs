@@ -6,8 +6,9 @@ const dependabot = readRepositoryFile('.github/dependabot.yml');
 const config = parseDependabotConfig(dependabot);
 
 const allowedTopLevelKeys = new Set(['version', 'updates']);
-const allowedUpdateKeys = new Set(['package-ecosystem', 'directory', 'schedule', 'open-pull-requests-limit', 'cooldown', 'groups']);
+const allowedUpdateKeys = new Set(['package-ecosystem', 'directory', 'directories', 'schedule', 'open-pull-requests-limit', 'target-branch', 'commit-message', 'cooldown', 'groups']);
 const allowedScheduleKeys = new Set(['interval', 'day', 'time', 'timezone']);
+const allowedCommitMessageKeys = new Set(['prefix']);
 const allowedCooldownKeys = new Set(['default-days']);
 const allowedWeeklyDays = new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']);
 const supportedEcosystems = new Set(['docker', 'github-actions', 'gomod', 'npm']);
@@ -15,41 +16,49 @@ const supportedEcosystems = new Set(['docker', 'github-actions', 'gomod', 'npm']
 test('dependabot config uses the supported GitHub schema subset', () => {
 	assert.equal(config.version, 2);
 	assert.deepEqual(new Set(config.topLevelKeys), allowedTopLevelKeys);
-	assert.equal(config.updates.length, 8);
+	assert.equal(config.updates.length, 5);
+	const scheduledMinutes = [];
 
 	for (const update of config.updates) {
-		assertAllowedKeys(update.keys, allowedUpdateKeys, `${update.ecosystem} ${update.directory}`);
+		assertAllowedKeys(update.keys, allowedUpdateKeys, updateContext(update));
 		assert.ok(supportedEcosystems.has(update.ecosystem), `unsupported package ecosystem ${update.ecosystem}`);
-		assert.match(update.directory, /^\//, `${update.ecosystem} directory must be repository-root relative`);
-		assert.equal(update.openPullRequestsLimit, 1, `${update.ecosystem} ${update.directory} must keep bot PR fan-out low`);
+		assertDependabotDirectories(update);
+		assert.equal(update.openPullRequestsLimit, 1, `${updateContext(update)} must keep bot PR fan-out low`);
+		assert.equal(update.targetBranch, 'dev-pxhao', `${updateContext(update)} must target the development branch`);
+		assertAllowedKeys(update.commitMessage.keys, allowedCommitMessageKeys, `${update.ecosystem} commit-message`);
+		assert.match(update.commitMessage.prefix, /^deps\([a-z][a-z0-9-]*\)$/, `${updateContext(update)} must use a scoped bot commit prefix`);
 
-		assertAllowedKeys(update.schedule.keys, allowedScheduleKeys, `${update.ecosystem} schedule`);
+		assertAllowedKeys(update.schedule.keys, allowedScheduleKeys, `${updateContext(update)} schedule`);
 		assert.equal(update.schedule.interval, 'weekly');
-		assert.ok(allowedWeeklyDays.has(update.schedule.day), `${update.ecosystem} ${update.directory} uses invalid schedule day`);
+		assert.ok(allowedWeeklyDays.has(update.schedule.day), `${updateContext(update)} uses invalid schedule day`);
 		assert.equal(update.schedule.day, 'monday');
-		assertValidDependabotTime(update.schedule.time, `${update.ecosystem} ${update.directory}`);
+		assertValidDependabotTime(update.schedule.time, updateContext(update));
+		scheduledMinutes.push(minutesAfterMidnight(update.schedule.time));
 		assert.equal(update.schedule.timezone, 'Asia/Shanghai');
 
-		assertAllowedKeys(update.cooldown.keys, allowedCooldownKeys, `${update.ecosystem} cooldown`);
-		assertDependabotCooldownDays(update.cooldown.defaultDays, `${update.ecosystem} ${update.directory}`);
+		assertAllowedKeys(update.cooldown.keys, allowedCooldownKeys, `${updateContext(update)} cooldown`);
+		assertDependabotCooldownDays(update.cooldown.defaultDays, updateContext(update));
 	}
+	assertDependabotSchedulesAreStaggered(scheduledMinutes);
 });
 
 test('dependabot update entries map to tracked repository manifests', () => {
 	for (const update of config.updates) {
-		const manifest = watchedManifest(update.ecosystem, update.directory);
-		assert.ok(manifest, `${update.ecosystem} ${update.directory} must map to a supported manifest`);
-		if (Array.isArray(manifest)) {
-			assert.ok(manifest.some((path) => existsSync(repositoryURL(path))), `${update.ecosystem} ${update.directory} must have one tracked manifest`);
-		} else {
-			assert.ok(existsSync(repositoryURL(manifest)), `${update.ecosystem} ${update.directory} must have ${manifest}`);
+		for (const directory of update.directories) {
+			const manifest = watchedManifest(update.ecosystem, directory);
+			assert.ok(manifest, `${update.ecosystem} ${directory} must map to a supported manifest`);
+			if (Array.isArray(manifest)) {
+				assert.ok(manifest.some((path) => existsSync(repositoryURL(path))), `${update.ecosystem} ${directory} must have one tracked manifest`);
+			} else {
+				assert.ok(existsSync(repositoryURL(manifest)), `${update.ecosystem} ${directory} must have ${manifest}`);
+			}
 		}
 	}
 });
 
 test('dependabot groups every watched ecosystem into one maintenance PR', () => {
 	for (const update of config.updates) {
-		assert.equal(update.groups.length, 1, `${update.ecosystem} ${update.directory} must use exactly one group`);
+		assert.equal(update.groups.length, 1, `${updateContext(update)} must use exactly one group`);
 		const [group] = update.groups;
 		assert.deepEqual(group.patterns, ['*']);
 		assert.match(group.name, /^[a-z][a-z|_-]*[a-z]$/);
@@ -87,14 +96,18 @@ function parseUpdateBlock(block) {
 
 	const scalars = new Map(rootEntries.map(({ key, value }) => [key, value]));
 	const schedule = parseChildScalars(block, 'schedule');
+	const commitMessage = parseChildScalars(block, 'commit-message');
 	const cooldown = parseChildScalars(block, 'cooldown');
+	const directories = parseDirectories(block, scalars.get('directory'));
 	const groups = parseGroups(block);
 
 	return {
 		keys: rootEntries.map(({ key }) => key),
 		ecosystem: scalars.get('package-ecosystem'),
 		directory: scalars.get('directory'),
+		directories,
 		openPullRequestsLimit: scalars.get('open-pull-requests-limit'),
+		targetBranch: scalars.get('target-branch'),
 		schedule: {
 			keys: schedule.keys,
 			interval: schedule.values.get('interval'),
@@ -102,12 +115,31 @@ function parseUpdateBlock(block) {
 			time: schedule.values.get('time'),
 			timezone: schedule.values.get('timezone'),
 		},
+		commitMessage: {
+			keys: commitMessage.keys,
+			prefix: commitMessage.values.get('prefix'),
+		},
 		cooldown: {
 			keys: cooldown.keys,
 			defaultDays: cooldown.values.get('default-days'),
 		},
 		groups,
 	};
+}
+
+function parseDirectories(block, directory) {
+	if (directory !== undefined) {
+		return [directory];
+	}
+
+	const values = [];
+	for (const line of sectionLines(block, 'directories')) {
+		const match = line.match(/^      - (.+)$/);
+		if (match) {
+			values.push(parseScalar(match[1]));
+		}
+	}
+	return values;
 }
 
 function parseChildScalars(block, key) {
@@ -216,11 +248,41 @@ function assertDependabotCooldownDays(days, context) {
 	assert.ok(days >= 1 && days <= 90, `${context} cooldown default-days must be between 1 and 90`);
 }
 
+function assertDependabotDirectories(update) {
+	const hasDirectory = update.directory !== undefined;
+	const hasDirectories = update.keys.includes('directories');
+	assert.notEqual(hasDirectory, hasDirectories, `${update.ecosystem} must define exactly one of directory or directories`);
+	assert.ok(update.directories.length > 0, `${update.ecosystem} must watch at least one directory`);
+	for (const directory of update.directories) {
+		assert.match(directory, /^\//, `${update.ecosystem} directory must be repository-root relative`);
+	}
+	assert.deepEqual(update.directories, [...new Set(update.directories)], `${update.ecosystem} directories must be unique`);
+}
+
+function updateContext(update) {
+	return `${update.ecosystem} ${update.directories.join(',')}`;
+}
+
 function assertValidDependabotTime(value, context) {
 	assert.match(value, /^\d{2}:\d{2}$/, `${context} schedule time must use hh:mm format`);
 	const [hour, minute] = value.split(':').map(Number);
 	assert.ok(hour >= 0 && hour <= 23, `${context} schedule hour must be 00-23`);
 	assert.ok(minute >= 0 && minute <= 59, `${context} schedule minute must be 00-59`);
+}
+
+function assertDependabotSchedulesAreStaggered(minutes) {
+	const sorted = [...minutes].sort((a, b) => a - b);
+	assert.deepEqual(minutes, sorted, 'dependabot schedules must stay in ascending maintenance order');
+	assert.deepEqual(minutes, [...new Set(minutes)], 'dependabot schedules must not share the same minute');
+	// 多生态更新错峰触发，避免同一时间堆出多条 bot PR 和重复 CI。
+	for (let index = 1; index < sorted.length; index++) {
+		assert.ok(sorted[index] - sorted[index - 1] >= 10, 'dependabot schedules must be staggered by at least 10 minutes');
+	}
+}
+
+function minutesAfterMidnight(value) {
+	const [hour, minute] = value.split(':').map(Number);
+	return hour * 60 + minute;
 }
 
 function indentOf(line) {

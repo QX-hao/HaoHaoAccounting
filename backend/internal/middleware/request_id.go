@@ -39,7 +39,10 @@ func RequestIDFromContext(c *gin.Context) string {
 	if !ok {
 		return ""
 	}
-	requestID, _ := value.(string)
+	requestID, ok := value.(string)
+	if !ok || !ValidRequestID(requestID) {
+		return ""
+	}
 	return requestID
 }
 
@@ -48,7 +51,10 @@ func RequestIDFromStdContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	requestID, _ := ctx.Value(requestIDStdContextKey{}).(string)
+	requestID, ok := ctx.Value(requestIDStdContextKey{}).(string)
+	if !ok || !ValidRequestID(requestID) {
+		return ""
+	}
 	return requestID
 }
 

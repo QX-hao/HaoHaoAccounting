@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -324,6 +325,77 @@ func TestRequireAuthFailsClosedWhenRevocationCheckErrors(t *testing.T) {
 	}
 }
 
+func TestRequireAuthStoresTokenAndRemovesAuthorizationHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tokenService := testTokenService(t)
+
+	token, err := tokenService.BuildToken(42)
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+
+	called := false
+	router := gin.New()
+	router.GET("/private", RequireAuthWithRevocation(nil, tokenService), func(c *gin.Context) {
+		called = true
+		if got := c.GetHeader("Authorization"); got != "" {
+			t.Fatalf("Authorization header leaked to handler: %q", got)
+		}
+		contextToken, ok := BearerTokenFromContext(c)
+		if !ok || contextToken != token {
+			t.Fatalf("BearerTokenFromContext = %q, %v, want token", contextToken, ok)
+		}
+		if got := UserIDFromContext(c); got != 42 {
+			t.Fatalf("user id = %d, want 42", got)
+		}
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/private", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if !called {
+		t.Fatal("handler was not called")
+	}
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.Code)
+	}
+}
+
+func TestBearerTokenFromContextRejectsInvalidContextValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name      string
+		value     any
+		setValue  bool
+		wantToken string
+		wantOK    bool
+	}{
+		{name: "missing"},
+		{name: "wrong type", setValue: true, value: 42},
+		{name: "empty", setValue: true, value: ""},
+		{name: "invalid character", setValue: true, value: "token,part"},
+		{name: "padding only", setValue: true, value: "=="},
+		{name: "too long", setValue: true, value: strings.Repeat("a", maxBearerTokenLength+1)},
+		{name: "valid", setValue: true, value: "header.payload.signature", wantToken: "header.payload.signature", wantOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			if tc.setValue {
+				c.Set(bearerTokenContextKey, tc.value)
+			}
+
+			token, ok := BearerTokenFromContext(c)
+			if token != tc.wantToken || ok != tc.wantOK {
+				t.Fatalf("BearerTokenFromContext = %q, %v, want %q, %v", token, ok, tc.wantToken, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestRequireAuthSetsAuthenticateChallenge(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -382,6 +454,8 @@ func TestBearerTokenParsesRFC6750Credentials(t *testing.T) {
 		{name: "invalid character", header: "Bearer token,part", wantOK: false},
 		{name: "padding only", header: "Bearer ==", wantOK: false},
 		{name: "padding before token char", header: "Bearer abc=def", wantOK: false},
+		{name: "max length token", header: "Bearer " + strings.Repeat("a", maxBearerTokenLength), wantToken: strings.Repeat("a", maxBearerTokenLength), wantOK: true},
+		{name: "too long token", header: "Bearer " + strings.Repeat("a", maxBearerTokenLength+1), wantOK: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			token, ok := BearerToken(tc.header)

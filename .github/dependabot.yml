@@ -9,6 +9,9 @@ updates:
       time: "09:00"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
+    target-branch: dev-pxhao
+    commit-message:
+      prefix: deps(actions)
     cooldown:
       default-days: 7
     groups:
@@ -25,6 +28,9 @@ updates:
       time: "09:10"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
+    target-branch: dev-pxhao
+    commit-message:
+      prefix: deps(backend)
     cooldown:
       default-days: 7
     groups:
@@ -41,6 +47,9 @@ updates:
       time: "09:20"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
+    target-branch: dev-pxhao
+    commit-message:
+      prefix: deps(web)
     cooldown:
       default-days: 7
     groups:
@@ -57,6 +66,9 @@ updates:
       time: "09:30"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
+    target-branch: dev-pxhao
+    commit-message:
+      prefix: deps(mobile)
     cooldown:
       default-days: 7
     groups:
@@ -65,62 +77,24 @@ updates:
           - "*"
 
   - package-ecosystem: docker
-    directory: /
-    # Docker 基础镜像更新也走限流，减少多个镜像 PR 同时失败后堆积。
+    directories:
+      - /
+      - /backend
+      - /web
+      - /mobile
+    # Docker 基础镜像使用多目录配置集中维护，减少同一生态的 bot 分支和重复 PR。
     schedule:
       interval: weekly
       day: monday
       time: "09:40"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
+    target-branch: dev-pxhao
+    commit-message:
+      prefix: deps(docker)
     cooldown:
       default-days: 7
     groups:
-      root-docker:
-        patterns:
-          - "*"
-
-  - package-ecosystem: docker
-    directory: /backend
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:50"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 1
-    cooldown:
-      default-days: 7
-    groups:
-      backend-docker:
-        patterns:
-          - "*"
-
-  - package-ecosystem: docker
-    directory: /web
-    schedule:
-      interval: weekly
-      day: monday
-      time: "10:00"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 1
-    cooldown:
-      default-days: 7
-    groups:
-      web-docker:
-        patterns:
-          - "*"
-
-  - package-ecosystem: docker
-    directory: /mobile
-    schedule:
-      interval: weekly
-      day: monday
-      time: "10:10"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 1
-    cooldown:
-      default-days: 7
-    groups:
-      mobile-docker:
+      docker-images:
         patterns:
           - "*"

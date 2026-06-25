@@ -52,6 +52,23 @@ func TestHealthLivezReturnsOK(t *testing.T) {
 	assertNoCacheHeaders(t, resp)
 }
 
+func TestHealthProbeHEADReturnsStatusAndHeadersOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	registerHealthRoutes(router, nil, nil)
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodHead, "/livez", nil))
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if resp.Body.Len() != 0 {
+		t.Fatalf("HEAD body = %q, want empty", resp.Body.String())
+	}
+	assertNoCacheHeaders(t, resp)
+}
+
 func TestReadmeDocumentsRouteContracts(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {
@@ -74,6 +91,7 @@ func TestReadmeDocumentsRouteContracts(t *testing.T) {
 		"`Pragma: no-cache`",
 		"`Expires: 0`",
 		"Health probe responses use `Cache-Control: no-cache`",
+		"Health probes support both `GET` and `HEAD`",
 		"Non-API health probe fallbacks remain cache-neutral",
 	} {
 		if !strings.Contains(source, want) {
@@ -172,7 +190,7 @@ func TestFallbackRoutesReturnStructuredErrors(t *testing.T) {
 	if methodResp.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("method status = %d, body = %s", methodResp.Code, methodResp.Body.String())
 	}
-	if got := methodResp.Header().Get("Allow"); got != http.MethodGet {
+	if got := methodResp.Header().Get("Allow"); got != "GET, HEAD" {
 		t.Fatalf("Allow = %q", got)
 	}
 	if got := methodResp.Header().Get("Cache-Control"); got != "" {
@@ -191,7 +209,7 @@ func TestFallbackRoutesReturnStructuredErrors(t *testing.T) {
 	if apiMethodResp.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("api method status = %d, body = %s", apiMethodResp.Code, apiMethodResp.Body.String())
 	}
-	if got := apiMethodResp.Header().Get("Allow"); got != "GET, POST" && got != "POST, GET" {
+	if got := apiMethodResp.Header().Get("Allow"); got != "GET, POST" {
 		t.Fatalf("api Allow = %q", got)
 	}
 	if got := apiMethodResp.Header().Get("Cache-Control"); got != "no-store" {
@@ -200,6 +218,17 @@ func TestFallbackRoutesReturnStructuredErrors(t *testing.T) {
 	apiMethodBody := parseErrorBody(t, apiMethodResp)
 	if apiMethodBody.Code != httputil.CodeMethodNotAllowed || apiMethodBody.RequestID != "request-api-405" {
 		t.Fatalf("api method body = %#v", apiMethodBody)
+	}
+}
+
+func TestNormalizeAllowHeaderUsesStableMethodOrder(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Allow", "POST, get, GET, DELETE, PATCH, UNKNOWN, OPTIONS, HEAD, PUT")
+
+	normalizeAllowHeader(headers)
+
+	if got := headers.Get("Allow"); got != "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, UNKNOWN" {
+		t.Fatalf("Allow = %q", got)
 	}
 }
 
@@ -302,6 +331,24 @@ func TestReadyzReturnsUnavailableWhenDatabaseFails(t *testing.T) {
 	}
 	if strings.Contains(resp.Body.String(), internalError) || strings.Contains(resp.Body.String(), "secret") {
 		t.Fatalf("health response leaked internal dependency error: %s", resp.Body.String())
+	}
+	assertNoCacheHeaders(t, resp)
+}
+
+func TestReadyzHEADPreservesDependencyStatus(t *testing.T) {
+	router := gin.New()
+	router.HEAD("/readyz", readyzWithDependencies(pingFunc(func(context.Context) error {
+		return errors.New("database down")
+	}), nil))
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodHead, "/readyz", nil))
+
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.Code)
+	}
+	if resp.Body.Len() != 0 {
+		t.Fatalf("HEAD body = %q, want empty", resp.Body.String())
 	}
 	assertNoCacheHeaders(t, resp)
 }

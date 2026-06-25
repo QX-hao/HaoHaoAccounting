@@ -14,6 +14,26 @@ type SecurityHeadersConfig struct {
 	CrossOriginEmbedderPolicy string
 }
 
+type securityHeader struct {
+	Key   string
+	Value string
+}
+
+var defaultSecurityHeaders = []securityHeader{
+	{Key: "Cross-Origin-Opener-Policy", Value: "same-origin"},
+	{Key: "Cross-Origin-Resource-Policy", Value: "same-origin"},
+	{Key: "Content-Security-Policy", Value: "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"},
+	{Key: "Origin-Agent-Cluster", Value: "?1"},
+	{Key: "Referrer-Policy", Value: "no-referrer"},
+	{Key: "Permissions-Policy", Value: "camera=(), geolocation=(), microphone=(), payment=()"},
+	{Key: "X-Content-Type-Options", Value: "nosniff"},
+	{Key: "X-DNS-Prefetch-Control", Value: "off"},
+	{Key: "X-Download-Options", Value: "noopen"},
+	{Key: "X-Frame-Options", Value: "DENY"},
+	{Key: "X-Permitted-Cross-Domain-Policies", Value: "none"},
+	{Key: "X-XSS-Protection", Value: "0"},
+}
+
 // SecurityHeaders 写入 API 默认浏览器安全头；HSTS 和 COEP 这类部署敏感头通过配置显式开启。
 func SecurityHeaders(configs ...SecurityHeadersConfig) gin.HandlerFunc {
 	cfg := SecurityHeadersConfig{}
@@ -24,8 +44,8 @@ func SecurityHeaders(configs ...SecurityHeadersConfig) gin.HandlerFunc {
 	coep := normalizedCrossOriginEmbedderPolicy(cfg.CrossOriginEmbedderPolicy)
 	return func(c *gin.Context) {
 		headers := c.Writer.Header()
-		for key, value := range defaultSecurityHeaders() {
-			headers.Set(key, value)
+		for _, header := range defaultSecurityHeaders {
+			headers.Set(header.Key, header.Value)
 		}
 		if coep != "" {
 			headers.Set("Cross-Origin-Embedder-Policy", coep)
@@ -34,23 +54,6 @@ func SecurityHeaders(configs ...SecurityHeadersConfig) gin.HandlerFunc {
 			headers.Set("Strict-Transport-Security", hsts)
 		}
 		c.Next()
-	}
-}
-
-func defaultSecurityHeaders() map[string]string {
-	return map[string]string{
-		"Cross-Origin-Opener-Policy":        "same-origin",
-		"Cross-Origin-Resource-Policy":      "same-origin",
-		"Content-Security-Policy":           "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
-		"Origin-Agent-Cluster":              "?1",
-		"Referrer-Policy":                   "no-referrer",
-		"Permissions-Policy":                "camera=(), geolocation=(), microphone=(), payment=()",
-		"X-Content-Type-Options":            "nosniff",
-		"X-DNS-Prefetch-Control":            "off",
-		"X-Download-Options":                "noopen",
-		"X-Frame-Options":                   "DENY",
-		"X-Permitted-Cross-Domain-Policies": "none",
-		"X-XSS-Protection":                  "0",
 	}
 }
 

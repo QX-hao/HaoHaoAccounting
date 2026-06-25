@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -85,6 +86,7 @@ func registerFallbackRoutes(engine *gin.Engine) {
 	})
 	engine.NoMethod(func(c *gin.Context) {
 		noStoreAPIError(c)
+		normalizeAllowHeader(c.Writer.Header())
 		httputil.MethodNotAllowed(c, "method not allowed")
 	})
 }
@@ -95,14 +97,76 @@ func noStoreAPIError(c *gin.Context) {
 	}
 }
 
+// normalizeAllowHeader 固定 405 Allow 响应头顺序，避免 Gin 内部路由树遍历顺序泄漏成 API 契约。
+func normalizeAllowHeader(headers http.Header) {
+	methods := parseAllowHeader(headers.Get("Allow"))
+	if len(methods) == 0 {
+		return
+	}
+	headers.Set("Allow", strings.Join(methods, ", "))
+}
+
+func parseAllowHeader(value string) []string {
+	seen := make(map[string]struct{})
+	methods := make([]string, 0)
+	for _, part := range strings.Split(value, ",") {
+		method := strings.ToUpper(strings.TrimSpace(part))
+		if method == "" {
+			continue
+		}
+		if _, ok := seen[method]; ok {
+			continue
+		}
+		seen[method] = struct{}{}
+		methods = append(methods, method)
+	}
+	slices.SortFunc(methods, compareHTTPMethods)
+	return methods
+}
+
+func compareHTTPMethods(left, right string) int {
+	leftRank := httpMethodRank(left)
+	rightRank := httpMethodRank(right)
+	if leftRank != rightRank {
+		return leftRank - rightRank
+	}
+	return strings.Compare(left, right)
+}
+
+func httpMethodRank(method string) int {
+	for i, candidate := range []string{
+		http.MethodGet,
+		http.MethodHead,
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodPatch,
+		http.MethodDelete,
+		http.MethodOptions,
+	} {
+		if method == candidate {
+			return i
+		}
+	}
+	return 100
+}
+
 func registerHealthRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisCache) {
+	readyzHandler := readyz(s, redisCache)
+	// 探针同时支持 GET 和 HEAD，方便负载均衡器只检查状态码和响应头，不拉取 JSON body。
 	engine.GET("/livez", livez)
-	engine.GET("/readyz", readyz(s, redisCache))
-	engine.GET("/health", readyz(s, redisCache))
+	engine.HEAD("/livez", livez)
+	engine.GET("/readyz", readyzHandler)
+	engine.HEAD("/readyz", readyzHandler)
+	engine.GET("/health", readyzHandler)
+	engine.HEAD("/health", readyzHandler)
 }
 
 func livez(c *gin.Context) {
 	middleware.SetNoCache(c.Writer.Header())
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -146,6 +210,10 @@ func readyzWithDependencies(database pinger, redis pinger) gin.HandlerFunc {
 		overall := "ok"
 		if status != http.StatusOK {
 			overall = "unavailable"
+		}
+		if c.Request.Method == http.MethodHead {
+			c.Status(status)
+			return
 		}
 		c.JSON(status, gin.H{
 			"status": overall,

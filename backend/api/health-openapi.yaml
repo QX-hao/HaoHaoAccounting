@@ -1,0 +1,202 @@
+openapi: 3.0.3
+info:
+  title: HaoHaoAccounting Health API
+  version: 0.1.0
+  description: |
+    Operational probes are served from the root HTTP server, not from the `/api/v1`
+    business API prefix. Load balancers and orchestrators should rely on HTTP
+    status codes; response bodies are intentionally small and omit dependency
+    error details.
+servers:
+  - url: http://localhost:8080
+    description: Local development server root.
+tags:
+  - name: health
+    description: Liveness and readiness probes for runtime infrastructure.
+paths:
+  /livez:
+    get:
+      tags: [health]
+      operationId: getLivez
+      summary: Check process liveness
+      description: Returns 200 when the HTTP process is alive. It does not check database or cache dependencies.
+      responses:
+        '200':
+          $ref: '#/components/responses/LivezOK'
+    head:
+      tags: [health]
+      operationId: headLivez
+      summary: Check process liveness without a response body
+      description: Returns the same status code and cache headers as GET /livez, but no JSON body.
+      responses:
+        '200':
+          $ref: '#/components/responses/HeadOK'
+  /readyz:
+    get:
+      tags: [health]
+      operationId: getReadyz
+      summary: Check dependency readiness
+      description: Checks the database and optional Redis cache within the server readiness budget.
+      responses:
+        '200':
+          $ref: '#/components/responses/ReadyzOK'
+        '503':
+          $ref: '#/components/responses/ReadyzUnavailable'
+    head:
+      tags: [health]
+      operationId: headReadyz
+      summary: Check dependency readiness without a response body
+      description: Returns the same status code and cache headers as GET /readyz, but no JSON body.
+      responses:
+        '200':
+          $ref: '#/components/responses/HeadOK'
+        '503':
+          $ref: '#/components/responses/HeadUnavailable'
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Compatibility readiness check
+      description: Compatibility alias for GET /readyz.
+      responses:
+        '200':
+          $ref: '#/components/responses/ReadyzOK'
+        '503':
+          $ref: '#/components/responses/ReadyzUnavailable'
+    head:
+      tags: [health]
+      operationId: headHealth
+      summary: Compatibility readiness check without a response body
+      description: Compatibility alias for HEAD /readyz.
+      responses:
+        '200':
+          $ref: '#/components/responses/HeadOK'
+        '503':
+          $ref: '#/components/responses/HeadUnavailable'
+components:
+  headers:
+    CacheControl:
+      description: Health probes require revalidation before reuse.
+      schema:
+        type: string
+        enum: [no-cache]
+      example: no-cache
+    Pragma:
+      description: HTTP/1.0 compatibility no-cache directive.
+      schema:
+        type: string
+        enum: [no-cache]
+      example: no-cache
+    Expires:
+      description: Expired immediately so intermediaries revalidate probe state.
+      schema:
+        type: string
+        enum: ['0']
+      example: '0'
+  responses:
+    LivezOK:
+      description: Process is alive.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LivezResponse'
+          example:
+            status: ok
+    ReadyzOK:
+      description: Dependencies are ready.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReadyzResponse'
+          example:
+            status: ok
+            checks:
+              database:
+                status: ok
+              redis:
+                status: disabled
+    ReadyzUnavailable:
+      description: A required dependency is unavailable.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReadyzResponse'
+          example:
+            status: unavailable
+            checks:
+              database:
+                status: error
+                error: unavailable
+              redis:
+                status: disabled
+    HeadOK:
+      description: Probe is successful; no response body is returned.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
+    HeadUnavailable:
+      description: Probe dependency check failed; no response body is returned.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
+  schemas:
+    LivezResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    ReadyzResponse:
+      type: object
+      additionalProperties: false
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+        checks:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/DependencyCheck'
+    DependencyCheck:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, disabled, error]
+        error:
+          type: string
+          enum: [unavailable]

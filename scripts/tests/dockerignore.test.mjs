@@ -102,9 +102,7 @@ test('backend runtime image includes the migration command and SQL migrations', 
 });
 
 test('dependabot watches every Dockerfile directory', () => {
-	for (const directory of ['/', '/backend', '/web', '/mobile']) {
-		assert.match(dependabot, new RegExp(`package-ecosystem: docker\\n\\s+directory: ${escapeRegExp(directory)}`));
-	}
+	assert.deepEqual([...dependabotDirectories('docker')].sort(), ['/', '/backend', '/mobile', '/web']);
 });
 
 test('dependabot only watches npm packages with lockfiles', () => {
@@ -117,10 +115,11 @@ test('dependabot only watches npm packages with lockfiles', () => {
 
 test('dependabot update blocks are rate-limited and scheduled in one maintenance window', () => {
 	const blocks = dependabotUpdateBlocks();
-	assert.equal(blocks.length, 8);
+	assert.equal(blocks.length, 5);
 	for (const block of blocks) {
 		assert.match(block, /schedule:\n\s+interval: weekly\n\s+day: monday\n\s+time: "\d{2}:\d{2}"\n\s+timezone: Asia\/Shanghai/);
 		assert.match(block, /open-pull-requests-limit: 1/);
+		assert.match(block, /commit-message:\n\s+prefix: deps\([a-z][a-z0-9-]*\)/);
 		assert.match(block, /cooldown:\n\s+default-days: 7/);
 	}
 });
@@ -142,6 +141,20 @@ test('CI workflow runs the same verification commands documented for local check
 	assert.match(ciWorkflow, /actions\/setup-go@v5/);
 });
 
+test('API contract verification fails on generated and runtime client drift', () => {
+	const command = packageJSONByName.get('root').scripts['verify:api-contract'];
+	for (const file of [
+		'web/shared/types/api.ts',
+		'mobile/src/shared/types/api.ts',
+		'web/shared/api/generated-client.ts',
+		'mobile/src/shared/api/generated-client.ts',
+		'web/shared/api/client.ts',
+		'mobile/src/shared/api/client.ts',
+	]) {
+		assert.match(command, new RegExp(escapeRegExp(file)), `verify:api-contract must check ${file}`);
+	}
+});
+
 test('CI workflow keeps pull request checks on read-only credentials', () => {
 	assert.match(ciWorkflow, /permissions:\n(?:\s+# .+\n)?\s+contents: read/);
 	assert.doesNotMatch(ciWorkflow, /pull_request_target:/);
@@ -152,8 +165,8 @@ test('CI run steps use explicit bash defaults for pipefail semantics', () => {
 	assert.match(ciWorkflow, /defaults:\n\s+run:\n\s+shell: bash/);
 });
 
-test('CI workflow only runs branch events that can affect main', () => {
-	assert.match(ciWorkflow, /on:\n\s+push:\n\s+branches: \[main\]\n\s+pull_request:\n\s+branches: \[main\]\n\s+workflow_dispatch:/);
+test('CI workflow runs only maintained branch events', () => {
+	assert.match(ciWorkflow, /on:\n\s+push:\n\s+branches: \[main, dev-pxhao\]\n\s+pull_request:\n\s+branches: \[main, dev-pxhao\]\n\s+workflow_dispatch:/);
 });
 
 test('CI jobs pin the hosted runner image instead of following latest', () => {
@@ -236,6 +249,25 @@ test('migration job stays internal and one-shot', () => {
 	assert.doesNotMatch(dbmigrate, /ports:/);
 	assert.doesNotMatch(dbmigrate, /expose:/);
 	assert.doesNotMatch(dbmigrate, /healthcheck:/);
+});
+
+test('production compose requires explicit deployment secrets and public endpoints', () => {
+	for (const variable of [
+		'NEXT_PUBLIC_API_BASE',
+		'POSTGRES_PASSWORD',
+		'REDIS_PASSWORD',
+		'JWT_SECRET',
+		'ADMIN_USERNAME',
+		'ADMIN_PASSWORD',
+		'CORS_ALLOW_ORIGINS',
+		'MYSQL_ROOT_PASSWORD',
+	]) {
+		assert.match(compose, new RegExp(`\\$\\{${variable}:\\?set `), `${variable} must use Compose required-variable syntax`);
+		assert.doesNotMatch(compose, new RegExp(`\\$\\{${variable}:-`), `${variable} must not have a production fallback`);
+	}
+	assert.doesNotMatch(compose, /JWT_SECRET:\s+haohao-dev-jwt-secret-change-me-32chars/);
+	assert.doesNotMatch(compose, /ADMIN_PASSWORD:\s+haohao123/);
+	assert.doesNotMatch(compose, /REDIS_PASSWORD:\s+haohao123/);
 });
 
 test('stateful compose services keep privilege escalation disabled without read-only roots', () => {
@@ -370,11 +402,21 @@ function ciJobBlocks() {
 }
 
 function dependabotDirectories(ecosystem) {
-	return new Set(
-		[...dependabot.matchAll(new RegExp(`package-ecosystem: ${escapeRegExp(ecosystem)}\\n\\s+directory: ([^\\n]+)`, 'g'))].map(
-			(match) => match[1].trim(),
-		),
-	);
+	const directories = new Set();
+	for (const block of dependabotUpdateBlocks()) {
+		if (!new RegExp(`package-ecosystem: ${escapeRegExp(ecosystem)}\\n`).test(block)) {
+			continue;
+		}
+		const singleDirectory = block.match(/^\s+directory:\s+([^\n]+)$/m);
+		if (singleDirectory) {
+			directories.add(singleDirectory[1].trim());
+			continue;
+		}
+		for (const match of block.matchAll(/^\s+-\s+(\/[^\n]*)$/gm)) {
+			directories.add(match[1].trim());
+		}
+	}
+	return directories;
 }
 
 function dependabotUpdateBlocks() {

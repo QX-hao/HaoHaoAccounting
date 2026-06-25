@@ -172,10 +172,15 @@ function handleUnauthorized(status: number) {
 async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
   const contentType = resp.headers.get('Content-Type') || '';
   if (isJSONContentType(contentType)) {
-    return resp.json().catch(() => ({}));
+    const data = await resp.json().catch(() => ({}));
+    return isObjectRecord(data) ? data as ApiErrorBody : {};
   }
   const text = await resp.text().catch(() => '');
   return text ? { error: text } : {};
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isJSONContentType(contentType: string) {
@@ -238,7 +243,7 @@ function apiError(resp: Response, data: ApiErrorBody): ApiError {
 
 function responseStatus(resp: Response, data: ApiErrorBody) {
   const status = data.status;
-  return typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? status : resp.status;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599 ? status : resp.status;
 }
 
 function nonNegativeIntegerHeader(resp: Response, name: string): number | null {

@@ -53,7 +53,12 @@ func normalizeMediaTypes(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
 		clean := strings.ToLower(strings.TrimSpace(value))
-		if _, _, ok := splitMediaType(clean); !ok {
+		mediaTypeValue, params, err := mime.ParseMediaType(clean)
+		if err != nil || len(params) > 0 || mediaTypeValue != clean {
+			continue
+		}
+		mediaType, mediaSubtype, ok := splitMediaType(clean)
+		if !ok || mediaType == "*" || mediaSubtype == "*" || strings.HasPrefix(mediaSubtype, "*+") {
 			continue
 		}
 		if _, exists := seen[clean]; exists {

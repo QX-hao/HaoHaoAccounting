@@ -72,10 +72,12 @@ func writeXLSX(c *gin.Context, rows []models.Transaction) error {
 	return err
 }
 
+// attachmentDisposition 同时写入 filename 和 filename*，兼容浏览器下载和客户端文件名解析。
 func attachmentDisposition(filename string) string {
 	return fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s", filename, url.PathEscape(filename))
 }
 
+// safeCSVCell 中和表格公式前缀，避免导出的 CSV/XLSX 被电子表格软件当作公式执行。
 func safeCSVCell(value string) string {
 	if value == "" {
 		return value

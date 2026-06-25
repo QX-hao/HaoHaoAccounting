@@ -61,8 +61,6 @@ export function createApiClient(runtime: ApiRuntime) {
         let path = "/auth/logout";
         return runtime.request<OkResponse>(path, { method: 'POST' });
       },
-    },
-    me: {
       getMe: () => {
         let path = "/me";
         return runtime.request<CurrentUser>(path);

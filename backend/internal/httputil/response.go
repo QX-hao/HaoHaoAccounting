@@ -54,6 +54,11 @@ func Error(c *gin.Context, status int, code string, message string) {
 	if c.Writer.Written() {
 		return
 	}
+	if status < http.StatusBadRequest || status > 599 {
+		status = http.StatusInternalServerError
+		code = CodeInternal
+		message = "internal server error"
+	}
 	if code == "" {
 		code = codeForStatus(status)
 	}
@@ -186,6 +191,11 @@ func BindJSONBody(c *gin.Context, dst any) error {
 	return nil
 }
 
+// BindQuery 统一入口绑定 query 参数，handler 只需要决定失败时返回的业务提示。
+func BindQuery(c *gin.Context, dst any) error {
+	return c.ShouldBindQuery(dst)
+}
+
 // SetPaginationHeaders 写入总数和 RFC 8288 Link 分页头；非法分页参数会被忽略。
 func SetPaginationHeaders(c *gin.Context, total int64, page, pageSize int) {
 	if total < 0 || page < 1 || pageSize < 1 {
@@ -197,12 +207,17 @@ func SetPaginationHeaders(c *gin.Context, total int64, page, pageSize int) {
 	}
 }
 
-// SetCreatedLocation 为创建成功的资源写入相对 Location 头。
-func SetCreatedLocation(c *gin.Context, id uint) {
+// SetResourceLocation 为创建成功或已排队的资源写入相对 Location 头。
+func SetResourceLocation(c *gin.Context, id uint) {
 	if id == 0 {
 		return
 	}
 	c.Header("Location", strings.TrimRight(c.Request.URL.Path, "/")+"/"+strconv.FormatUint(uint64(id), 10))
+}
+
+// SetCreatedLocation 为创建成功的资源写入相对 Location 头。
+func SetCreatedLocation(c *gin.Context, id uint) {
+	SetResourceLocation(c, id)
 }
 
 func paginationLinkHeader(requestURL *url.URL, total int64, page, pageSize int) string {
@@ -271,8 +286,23 @@ func requestIDFromContext(c *gin.Context) string {
 	if !ok {
 		return ""
 	}
-	requestID, _ := value.(string)
+	requestID, ok := value.(string)
+	if !ok || !validRequestID(requestID) {
+		return ""
+	}
 	return requestID
+}
+
+func validRequestID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, r := range value {
+		if r < 33 || r > 126 {
+			return false
+		}
+	}
+	return true
 }
 
 type responseLogError struct {

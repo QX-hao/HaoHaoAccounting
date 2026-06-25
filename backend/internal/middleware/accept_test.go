@@ -82,6 +82,7 @@ func TestAcceptAllowsStructuredSyntaxSuffixRanges(t *testing.T) {
 func TestAcceptRejectsExcludedOrIncompatibleMediaRanges(t *testing.T) {
 	for _, header := range []string{
 		"application/json;q=0",
+		"application/json;Q=0",
 		"application/json;q=0, */*;q=1",
 		"application/*;q=0, */*;q=1",
 		"application/*+json",
@@ -91,6 +92,24 @@ func TestAcceptRejectsExcludedOrIncompatibleMediaRanges(t *testing.T) {
 		if acceptsAnyOfferedType(header, []string{"application/json"}) {
 			t.Fatalf("Accept %q should reject application/json", header)
 		}
+	}
+}
+
+func TestAcceptUsesBestQualityForDuplicateMediaRanges(t *testing.T) {
+	if !acceptsAnyOfferedType("application/json;q=0.2, application/json;q=0.8", []string{"application/json"}) {
+		t.Fatal("duplicate media ranges should use the best non-zero quality")
+	}
+}
+
+func TestAcceptIgnoresMalformedMediaRangesWhenValidRangeMatches(t *testing.T) {
+	if !acceptsAnyOfferedType("not a media type, application/json", []string{"application/json"}) {
+		t.Fatal("malformed Accept items should not hide later valid media ranges")
+	}
+}
+
+func TestAcceptRejectsWhenAllMediaRangesAreMalformed(t *testing.T) {
+	if acceptsAnyOfferedType("not a media type, also bad", []string{"application/json"}) {
+		t.Fatal("all-malformed Accept header should reject negotiated routes")
 	}
 }
 
@@ -172,6 +191,29 @@ func TestAcceptIgnoresRulesWithoutValidMediaTypes(t *testing.T) {
 	}
 }
 
+func TestAcceptIgnoresWildcardOfferedTypes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(Accept([]AcceptRule{{
+		Method:       http.MethodGet,
+		Path:         "/api/v1/example",
+		OfferedTypes: []string{"*/*", "application/*", "application/*+json"},
+	}}))
+	router.GET("/api/v1/example", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/example", nil)
+	req.Header.Set("Accept", "text/csv")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestAcceptFallsBackToStaticOfferedTypesWhenDynamicListIsEmpty(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -196,6 +238,44 @@ func TestAcceptFallsBackToStaticOfferedTypesWhenDynamicListIsEmpty(t *testing.T)
 	}
 }
 
+func TestAcceptOnlyCallsDynamicOfferedForMatchedRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	calledUnmatched := false
+	router := gin.New()
+	router.Use(Accept([]AcceptRule{
+		{
+			Method:       http.MethodGet,
+			Path:         "/api/v1/unmatched",
+			OfferedTypes: []string{"application/json"},
+			Offered: func(*gin.Context) []string {
+				calledUnmatched = true
+				return []string{"application/json"}
+			},
+		},
+		{
+			Method:       http.MethodGet,
+			Path:         "/api/v1/example",
+			OfferedTypes: []string{"application/json"},
+		},
+	}))
+	router.GET("/api/v1/example", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/example", nil)
+	req.Header.Set("Accept", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if calledUnmatched {
+		t.Fatal("Accept called dynamic offered function for an unmatched route")
+	}
+}
+
 func TestAppendVaryPreservesExistingFieldsAndAvoidsDuplicates(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("Vary", "Origin")
@@ -204,6 +284,17 @@ func TestAppendVaryPreservesExistingFieldsAndAvoidsDuplicates(t *testing.T) {
 	appendVary(headers, "accept")
 
 	if got := headers.Get("Vary"); got != "Origin, Accept" {
+		t.Fatalf("Vary = %q", got)
+	}
+}
+
+func TestAppendVaryPreservesWildcard(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Vary", "*")
+
+	appendVary(headers, "Accept")
+
+	if got := headers.Get("Vary"); got != "*" {
 		t.Fatalf("Vary = %q", got)
 	}
 }

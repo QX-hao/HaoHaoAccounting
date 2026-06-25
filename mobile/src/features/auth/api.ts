@@ -5,5 +5,5 @@ export function login(payload: { username: string; password: string }) {
 }
 
 export function verifyCurrentUser() {
-  return api.me.getMe();
+  return api.auth.getMe();
 }

@@ -2,6 +2,7 @@ package dataio
 
 import (
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,7 +36,7 @@ func (h *Handler) Register(group *gin.RouterGroup) {
 func (h *Handler) exportData(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	var query exportQuery
-	if err := c.ShouldBindQuery(&query); err != nil {
+	if err := httputil.BindQuery(c, &query); err != nil {
 		httputil.InvalidRequest(c, "invalid query parameters")
 		return
 	}
@@ -68,17 +69,12 @@ func (h *Handler) exportData(c *gin.Context) {
 
 func (h *Handler) importData(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	file, err := c.FormFile("file")
-	if err != nil {
-		if middleware.HandleBodyReadError(c, err) {
-			return
-		}
-		httputil.BadRequest(c, "file is required")
+	file, ok := requiredImportFile(c)
+	if !ok {
 		return
 	}
-	skipDuplicates, ok := parseBoolDefault(c.PostForm("skipDuplicates"), true)
+	skipDuplicates, ok := importSkipDuplicates(c)
 	if !ok {
-		httputil.InvalidRequest(c, "skipDuplicates must be a boolean")
 		return
 	}
 
@@ -94,12 +90,8 @@ func (h *Handler) importData(c *gin.Context) {
 
 func (h *Handler) previewImport(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	file, err := c.FormFile("file")
-	if err != nil {
-		if middleware.HandleBodyReadError(c, err) {
-			return
-		}
-		httputil.BadRequest(c, "file is required")
+	file, ok := requiredImportFile(c)
+	if !ok {
 		return
 	}
 
@@ -113,17 +105,12 @@ func (h *Handler) previewImport(c *gin.Context) {
 
 func (h *Handler) createImportJob(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	file, err := c.FormFile("file")
-	if err != nil {
-		if middleware.HandleBodyReadError(c, err) {
-			return
-		}
-		httputil.BadRequest(c, "file is required")
+	file, ok := requiredImportFile(c)
+	if !ok {
 		return
 	}
-	skipDuplicates, ok := parseBoolDefault(c.PostForm("skipDuplicates"), true)
+	skipDuplicates, ok := importSkipDuplicates(c)
 	if !ok {
-		httputil.InvalidRequest(c, "skipDuplicates must be a boolean")
 		return
 	}
 
@@ -134,8 +121,31 @@ func (h *Handler) createImportJob(c *gin.Context) {
 		httputil.BadRequest(c, err.Error())
 		return
 	}
-	httputil.SetCreatedLocation(c, job.ID)
+	httputil.SetResourceLocation(c, job.ID)
 	c.JSON(http.StatusAccepted, job)
+}
+
+// requiredImportFile 统一读取 multipart 的必填 file 字段，并保留上传体超限时的 413 映射。
+func requiredImportFile(c *gin.Context) (*multipart.FileHeader, bool) {
+	file, err := c.FormFile("file")
+	if err == nil {
+		return file, true
+	}
+	if middleware.HandleBodyReadError(c, err) {
+		return nil, false
+	}
+	httputil.InvalidRequest(c, "file is required")
+	return nil, false
+}
+
+// importSkipDuplicates 解析导入表单的 skipDuplicates；缺省为 true，显式非法值返回 invalid_request。
+func importSkipDuplicates(c *gin.Context) (bool, bool) {
+	value, ok := parseBoolDefault(c.PostForm("skipDuplicates"), true)
+	if !ok {
+		httputil.InvalidRequest(c, "skipDuplicates must be a boolean")
+		return false, false
+	}
+	return value, true
 }
 
 func (h *Handler) listImportJobs(c *gin.Context) {

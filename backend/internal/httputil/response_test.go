@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,37 @@ func TestErrorIncludesCodeAndRequestID(t *testing.T) {
 	}
 	if body.RequestID != "request-123" {
 		t.Fatalf("requestId = %q", body.RequestID)
+	}
+}
+
+func TestErrorOmitsUnsafeRequestID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{name: "wrong type", value: 42},
+		{name: "empty", value: ""},
+		{name: "control character", value: "bad\nid"},
+		{name: "whitespace", value: "bad id"},
+		{name: "too long", value: strings.Repeat("a", 129)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(resp)
+			c.Set(requestIDContextKey, tc.value)
+
+			BadRequest(c, "invalid amount")
+
+			var body ErrorResponse
+			if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body.RequestID != "" {
+				t.Fatalf("requestId = %q, want empty", body.RequestID)
+			}
+		})
 	}
 }
 
@@ -120,6 +152,124 @@ func TestErrorRecordsNonSensitiveLogSummary(t *testing.T) {
 	}
 }
 
+func TestErrorRejectsNonErrorStatuses(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusFound, 700} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			resp := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(resp)
+
+			Error(c, status, CodeBadRequest, "caller supplied non-error status")
+
+			if resp.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500", resp.Code)
+			}
+			var body ErrorResponse
+			if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body.Status != http.StatusInternalServerError {
+				t.Fatalf("body status = %d, want 500", body.Status)
+			}
+			if body.Code != CodeInternal {
+				t.Fatalf("code = %q, want %q", body.Code, CodeInternal)
+			}
+			if body.Error != "internal server error" {
+				t.Fatalf("error = %q", body.Error)
+			}
+			if strings.Contains(resp.Body.String(), "caller supplied") {
+				t.Fatalf("response leaked caller message: %s", resp.Body.String())
+			}
+		})
+	}
+}
+
+func TestErrorDefaultsStableCodesForKnownStatuses(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		code   string
+	}{
+		{status: http.StatusBadRequest, code: CodeBadRequest},
+		{status: http.StatusUnauthorized, code: CodeUnauthorized},
+		{status: http.StatusForbidden, code: CodeForbidden},
+		{status: http.StatusNotFound, code: CodeNotFound},
+		{status: http.StatusMethodNotAllowed, code: CodeMethodNotAllowed},
+		{status: http.StatusTooManyRequests, code: CodeRateLimited},
+		{status: http.StatusRequestEntityTooLarge, code: CodePayloadTooLarge},
+		{status: http.StatusUnsupportedMediaType, code: CodeUnsupportedMediaType},
+		{status: http.StatusNotAcceptable, code: CodeNotAcceptable},
+		{status: http.StatusGatewayTimeout, code: CodeRequestTimeout},
+		{status: StatusClientClosedRequest, code: CodeClientClosedRequest},
+		{status: http.StatusInternalServerError, code: CodeInternal},
+		{status: http.StatusBadGateway, code: CodeInternal},
+	} {
+		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+			resp := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(resp)
+
+			Error(c, tc.status, "", "request failed")
+
+			var body ErrorResponse
+			if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if resp.Code != tc.status {
+				t.Fatalf("status = %d, want %d", resp.Code, tc.status)
+			}
+			if body.Status != tc.status {
+				t.Fatalf("body status = %d, want %d", body.Status, tc.status)
+			}
+			if body.Code != tc.code {
+				t.Fatalf("code = %q, want %q", body.Code, tc.code)
+			}
+		})
+	}
+}
+
+func TestErrorHelpersUseDocumentedStatusAndCode(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		write  func(*gin.Context)
+		status int
+		code   string
+	}{
+		{name: "BadRequest", write: func(c *gin.Context) { BadRequest(c, "bad request") }, status: http.StatusBadRequest, code: CodeBadRequest},
+		{name: "InvalidRequest", write: func(c *gin.Context) { InvalidRequest(c, "invalid request") }, status: http.StatusBadRequest, code: CodeInvalidRequest},
+		{name: "Unauthorized", write: func(c *gin.Context) { Unauthorized(c, "unauthorized") }, status: http.StatusUnauthorized, code: CodeUnauthorized},
+		{name: "InvalidToken", write: func(c *gin.Context) { InvalidToken(c, "invalid token") }, status: http.StatusUnauthorized, code: CodeUnauthorized},
+		{name: "Forbidden", write: func(c *gin.Context) { Forbidden(c, "forbidden") }, status: http.StatusForbidden, code: CodeForbidden},
+		{name: "NotFound", write: func(c *gin.Context) { NotFound(c, "not found") }, status: http.StatusNotFound, code: CodeNotFound},
+		{name: "MethodNotAllowed", write: func(c *gin.Context) { MethodNotAllowed(c, "method not allowed") }, status: http.StatusMethodNotAllowed, code: CodeMethodNotAllowed},
+		{name: "RateLimited", write: func(c *gin.Context) { RateLimited(c, "too many requests", 0) }, status: http.StatusTooManyRequests, code: CodeRateLimited},
+		{name: "RateLimitedWithPolicy", write: func(c *gin.Context) { RateLimitedWithPolicy(c, "too many requests", 0, 5, 0) }, status: http.StatusTooManyRequests, code: CodeRateLimited},
+		{name: "PayloadTooLarge", write: func(c *gin.Context) { PayloadTooLarge(c, "payload too large") }, status: http.StatusRequestEntityTooLarge, code: CodePayloadTooLarge},
+		{name: "UnsupportedMediaType", write: func(c *gin.Context) { UnsupportedMediaType(c, "unsupported media type") }, status: http.StatusUnsupportedMediaType, code: CodeUnsupportedMediaType},
+		{name: "NotAcceptable", write: func(c *gin.Context) { NotAcceptable(c, "not acceptable") }, status: http.StatusNotAcceptable, code: CodeNotAcceptable},
+		{name: "GatewayTimeout", write: func(c *gin.Context) { GatewayTimeout(c, "request timed out") }, status: http.StatusGatewayTimeout, code: CodeRequestTimeout},
+		{name: "ClientClosedRequest", write: func(c *gin.Context) { ClientClosedRequest(c, "client closed request") }, status: StatusClientClosedRequest, code: CodeClientClosedRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(resp)
+
+			tc.write(c)
+
+			var body ErrorResponse
+			if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if resp.Code != tc.status {
+				t.Fatalf("status = %d, want %d", resp.Code, tc.status)
+			}
+			if body.Status != tc.status {
+				t.Fatalf("body status = %d, want %d", body.Status, tc.status)
+			}
+			if body.Code != tc.code {
+				t.Fatalf("code = %q, want %q", body.Code, tc.code)
+			}
+		})
+	}
+}
+
 func TestReadmeDocumentsHTTPUtilityContracts(t *testing.T) {
 	data, err := os.ReadFile("README.md")
 	if err != nil {
@@ -130,11 +280,15 @@ func TestReadmeDocumentsHTTPUtilityContracts(t *testing.T) {
 	for _, want := range []string{
 		"`Error`",
 		"`error`, `code`, `status`, and `requestId`",
+		"non-error HTTP statuses",
+		"`500 internal_error`",
 		"Gin private error summary",
 		"already-started response",
 		"`InternalError`",
 		"`context.DeadlineExceeded`",
 		"`context.Canceled`",
+		"non-standard `499`",
+		"`client_closed_request`",
 		"`WWW-Authenticate` bearer challenges",
 		"`RateLimitedWithPolicy`",
 		"`Retry-After`",
@@ -147,12 +301,58 @@ func TestReadmeDocumentsHTTPUtilityContracts(t *testing.T) {
 		"multiple JSON values",
 		"Gin `binding` tag validation",
 		"documented request schema",
+		"`BindQuery`",
+		"query binding",
+		"`invalid_request` response",
+		"query parameters",
 		"`X-Total-Count`",
 		"RFC 8288 `Link` headers",
+		"`SetCreatedLocation`",
+		"relative `Location` header",
+		"created or queued resources",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("README.md is missing HTTP utility guidance %q", want)
 		}
+	}
+}
+
+func TestHandlersUseStrictJSONBindingHelper(t *testing.T) {
+	matches, err := filepath.Glob(filepath.Join("..", "modules", "*", "*.go"))
+	if err != nil {
+		t.Fatalf("glob module files: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("no module Go files found")
+	}
+
+	checkedHandlers := 0
+	for _, path := range matches {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		source := string(data)
+		if !strings.HasSuffix(path, "handler.go") {
+			if strings.Contains(source, "BindJSONBody(") || strings.Contains(source, "ShouldBindJSON(") {
+				t.Fatalf("%s contains JSON binding outside handler.go", path)
+			}
+			continue
+		}
+		checkedHandlers++
+		// handler 必须走 BindJSONBody，保持服务端严格 JSON 解析和 OpenAPI closed schema 一致。
+		if strings.Contains(source, "ShouldBindJSON(") {
+			t.Fatalf("%s uses ShouldBindJSON directly; use BindJSONBody", path)
+		}
+		if strings.Contains(source, "BindJSONBody(") && !strings.Contains(source, "HandleBodyReadError(c, err)") {
+			t.Fatalf("%s uses BindJSONBody without first mapping MaxBytesReader errors through HandleBodyReadError", path)
+		}
+	}
+	if checkedHandlers == 0 {
+		t.Fatal("no module handler.go files found")
 	}
 }
 
@@ -169,6 +369,32 @@ func TestErrorResponseRequiredFieldsMatchOpenAPI(t *testing.T) {
 	want := openAPIErrorResponseRequiredFields(t)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Go ErrorResponse fields = %#v, want OpenAPI required fields %#v", got, want)
+	}
+}
+
+func TestClientClosedRequestMatchesOpenAPIResponseComponent(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	response, ok := doc.Components.Responses["ClientClosedRequest"]
+	if !ok {
+		t.Fatal("OpenAPI components.responses.ClientClosedRequest is missing")
+	}
+	media, ok := response.Content["application/json"]
+	if !ok {
+		t.Fatal("ClientClosedRequest response is missing application/json content")
+	}
+	if media.Schema.Ref != "#/components/schemas/ErrorResponse" {
+		t.Fatalf("ClientClosedRequest schema ref = %q", media.Schema.Ref)
+	}
+	if media.Example.Status != StatusClientClosedRequest {
+		t.Fatalf("ClientClosedRequest example status = %d, want %d", media.Example.Status, StatusClientClosedRequest)
+	}
+	if media.Example.Code != CodeClientClosedRequest {
+		t.Fatalf("ClientClosedRequest example code = %q, want %q", media.Example.Code, CodeClientClosedRequest)
 	}
 }
 
@@ -336,6 +562,39 @@ func TestBindJSONBodyValidatesBindingTags(t *testing.T) {
 	}
 }
 
+func TestBindQueryUsesGinQueryBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var query struct {
+		Page int `form:"page" binding:"min=1"`
+	}
+	resp := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(resp)
+	c.Request = httptest.NewRequest(http.MethodGet, "/items?page=2", nil)
+
+	if err := BindQuery(c, &query); err != nil {
+		t.Fatalf("bind query: %v", err)
+	}
+	if query.Page != 2 {
+		t.Fatalf("page = %d, want 2", query.Page)
+	}
+}
+
+func TestBindQueryReturnsBindingErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var query struct {
+		Page int `form:"page" binding:"min=1"`
+	}
+	resp := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(resp)
+	c.Request = httptest.NewRequest(http.MethodGet, "/items?page=0", nil)
+
+	if err := BindQuery(c, &query); err == nil {
+		t.Fatal("expected query binding validation error")
+	}
+}
+
 func TestMethodNotAllowedUsesStableCode(t *testing.T) {
 	resp := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(resp)
@@ -397,6 +656,16 @@ func TestRateLimitedRoundsRetryAfterUp(t *testing.T) {
 
 	if got := resp.Header().Get("Retry-After"); got != "1" {
 		t.Fatalf("Retry-After = %q", got)
+	}
+}
+
+func TestRateLimitedOmitsRetryAfterWhenDelayIsNotPositive(t *testing.T) {
+	resp := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(resp)
+	RateLimited(c, "too many requests", 0)
+
+	if got := resp.Header().Get("Retry-After"); got != "" {
+		t.Fatalf("Retry-After = %q, want empty", got)
 	}
 }
 
@@ -471,6 +740,27 @@ func TestSetPaginationHeadersOmitsLinkForSinglePage(t *testing.T) {
 	}
 }
 
+func TestSetPaginationHeadersSkipsInvalidPaginationInputs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET("/transactions", func(c *gin.Context) {
+		SetPaginationHeaders(c, -1, 0, 0)
+		c.Status(http.StatusNoContent)
+	})
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/transactions?page=0&pageSize=0", nil)
+	router.ServeHTTP(resp, req)
+
+	if got := resp.Header().Get("X-Total-Count"); got != "" {
+		t.Fatalf("X-Total-Count = %q, want empty", got)
+	}
+	if got := resp.Header().Get("Link"); got != "" {
+		t.Fatalf("Link = %q, want empty", got)
+	}
+}
+
 func TestSetPaginationHeadersHandlesLargeTotals(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -507,6 +797,23 @@ func TestSetCreatedLocation(t *testing.T) {
 
 	if got := resp.Header().Get("Location"); got != "/accounts/42" {
 		t.Fatalf("Location = %q, want /accounts/42", got)
+	}
+}
+
+func TestSetResourceLocationForAcceptedJob(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.POST("/io/import/jobs", func(c *gin.Context) {
+		SetResourceLocation(c, 42)
+		c.Status(http.StatusAccepted)
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/io/import/jobs", nil))
+
+	if got := resp.Header().Get("Location"); got != "/io/import/jobs/42" {
+		t.Fatalf("Location = %q, want /io/import/jobs/42", got)
 	}
 }
 
@@ -628,11 +935,22 @@ type openAPIDocument struct {
 }
 
 type openAPIComponents struct {
-	Schemas map[string]openAPISchema `yaml:"schemas"`
+	Responses map[string]openAPIResponse `yaml:"responses"`
+	Schemas   map[string]openAPISchema   `yaml:"schemas"`
 }
 
 type openAPISchema struct {
 	Properties map[string]openAPISchema `yaml:"properties"`
+	Ref        string                   `yaml:"$ref"`
 	Enum       []string                 `yaml:"enum"`
 	Required   []string                 `yaml:"required"`
+}
+
+type openAPIResponse struct {
+	Content map[string]openAPIMediaType `yaml:"content"`
+}
+
+type openAPIMediaType struct {
+	Schema  openAPISchema `yaml:"schema"`
+	Example ErrorResponse `yaml:"example"`
 }

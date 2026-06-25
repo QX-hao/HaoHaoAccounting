@@ -61,7 +61,7 @@ test('gitattributes pins text file line endings and binary assets', () => {
 });
 
 test('gitattributes covers current repository text extensions', () => {
-	// 只检查仓库里已经出现的文本类型，新增类型时先明确 LF 规则再提交。
+	// 检查已跟踪和待提交的新文件，新增类型时先明确 LF 规则再提交。
 	for (const extension of repositoryTextExtensions()) {
 		assert.match(gitattributes, new RegExp(`^\\*\\.${escapeRegExp(extension)} text eol=lf$`, 'm'), `*.${extension} must be pinned to LF`);
 	}
@@ -74,7 +74,7 @@ function readRepositoryFile(path) {
 function repositoryTextExtensions() {
 	const binaryExtensions = new Set(['gif', 'ico', 'jpeg', 'jpg', 'otf', 'pdf', 'png', 'ttf', 'webp', 'woff', 'woff2', 'xlsx', 'zip']);
 	const extensions = new Set();
-	for (const file of trackedRepositoryFiles()) {
+	for (const file of repositoryCandidateFiles()) {
 		const extension = path.extname(file).slice(1);
 		if (file.endsWith('.env.example') || path.basename(file).startsWith('Dockerfile')) {
 			continue;
@@ -86,8 +86,8 @@ function repositoryTextExtensions() {
 	return [...extensions].sort();
 }
 
-function trackedRepositoryFiles() {
-	const result = spawnSync('git', ['ls-files', '-z'], { cwd: repositoryRoot, encoding: 'utf8' });
+function repositoryCandidateFiles() {
+	const result = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: repositoryRoot, encoding: 'utf8' });
 	assert.equal(result.status, 0, result.stderr);
 	return result.stdout.split('\0').filter(Boolean);
 }

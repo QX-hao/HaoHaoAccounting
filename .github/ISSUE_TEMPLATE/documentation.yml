@@ -1,0 +1,55 @@
+name: Documentation update
+description: Report missing, unclear, or outdated project documentation.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: 哪部分文档需要更新？
+      options:
+        - Backend API
+        - Web app
+        - Mobile app
+        - Docker / deployment config
+        - OpenAPI / generated client
+        - Middleware / runtime behavior
+        - Repository configuration
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current documentation
+      description: 贴出当前文档位置、链接或相关段落；如果缺失，请说明在哪里找不到。
+      placeholder: |
+        - File or URL:
+        - Current text or missing section:
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: 当前文档哪里不准确、不完整、难理解，或者和代码/API 行为不一致？
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected documentation
+      description: 希望文档补充或修正成什么样？可以写具体命令、接口、配置项或示例。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: 用可验证的条目描述文档修复完成标准。
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true

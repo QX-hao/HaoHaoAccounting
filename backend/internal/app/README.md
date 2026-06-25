@@ -18,6 +18,8 @@
 
 Health probe responses use `Cache-Control: no-cache`, `Pragma: no-cache`, and `Expires: 0` so load balancers and proxies must revalidate process and dependency state before reusing a stored result.
 
+Health probes support both `GET` and `HEAD`; `HEAD` keeps the same status codes and cache headers without returning a JSON body.
+
 All `/api/v1` routes use `NoStore` cache headers. API fallback errors for missing routes and unsupported methods return the shared structured error body with request IDs; API fallback errors also keep `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0`. Non-API health probe fallbacks remain cache-neutral.
 
 Business rules, database mutations, and file parsing should stay in `internal/modules/*` or `internal/shared/*`, not in this package.

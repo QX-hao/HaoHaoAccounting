@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev-pxhao]
   pull_request:
-    branches: [main]
+    branches: [main, dev-pxhao]
   workflow_dispatch:
 
 # CI 只需要读取仓库内容；写权限留给专门的发布流程，降低 PR 或 bot 运行时的凭据风险。

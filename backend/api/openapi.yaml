@@ -77,7 +77,7 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '406':
           $ref: '#/components/responses/NotAcceptable'
         '405':
@@ -86,6 +86,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -128,6 +130,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /auth/logout:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -138,7 +142,24 @@ paths:
       description: Revokes the presented bearer token so it cannot be used for later authenticated requests.
       responses:
         '200':
-          $ref: '#/components/responses/Ok'
+          description: Logout success
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
+            Vary:
+              $ref: '#/components/headers/Vary'
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+            Clear-Site-Data:
+              $ref: '#/components/headers/ClearSiteData'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -149,6 +170,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /me:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -187,6 +210,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /accounts:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -225,6 +250,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [accounts]
       operationId: postAccounts
@@ -258,7 +285,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Account'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -269,6 +296,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -309,7 +338,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Account'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -322,6 +351,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -348,6 +379,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /budgets:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -385,7 +418,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/Budget'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -396,6 +429,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [budgets]
       operationId: postBudgets
@@ -429,7 +464,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Budget'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -442,6 +477,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -482,7 +519,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Budget'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -495,6 +532,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -523,6 +562,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /categories:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -559,7 +600,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/Category'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -570,6 +611,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [categories]
       operationId: postCategories
@@ -603,7 +646,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Category'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -614,6 +657,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -654,7 +699,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Category'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -669,6 +714,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -699,6 +746,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /transactions:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -789,7 +838,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TransactionListResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -800,6 +849,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [transactions]
       operationId: postTransactions
@@ -833,7 +884,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Transaction'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -844,6 +895,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -884,7 +937,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Transaction'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -897,6 +950,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -923,6 +978,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /ai/parse:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -957,7 +1014,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AIParseResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1032,7 +1089,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Summary'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -1043,6 +1100,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /io/import/preview:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -1077,7 +1136,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportPreview'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1122,7 +1181,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1171,6 +1230,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [dataio]
       operationId: postIoImportJobs
@@ -1204,7 +1265,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportJob'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1285,7 +1346,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportPreview'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1330,7 +1391,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1398,7 +1459,7 @@ paths:
                 type: string
                 format: binary
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -1409,6 +1470,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
 components:
   securitySchemes:
     bearerAuth:
@@ -1495,6 +1558,11 @@ components:
       schema:
         type: string
       example: GET, POST
+    ClearSiteData:
+      description: Browser-side data cleared after logout for this origin.
+      schema:
+        type: string
+      example: '"cache", "cookies", "storage"'
     WWWAuthenticate:
       description: Authentication challenge for protected resources. Challenges use realm="haohao-accounting-api"; invalid bearer tokens also include error="invalid_token" and error_description per RFC 6750.
       schema:
@@ -1542,6 +1610,26 @@ components:
           example:
             error: validation failed
             code: bad_request
+            status: 400
+            requestId: api-20260620-example
+    InvalidRequest:
+      description: Request parameters or body failed parsing or binding.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: invalid request body
+            code: invalid_request
             status: 400
             requestId: api-20260620-example
     Unauthorized:
@@ -1757,6 +1845,26 @@ components:
             error: request timed out
             code: request_timeout
             status: 504
+            requestId: api-20260620-example
+    ClientClosedRequest:
+      description: Client canceled the request before the server finished processing.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: client closed request
+            code: client_closed_request
+            status: 499
             requestId: api-20260620-example
     Error:
       description: Error response. Prefer a status-specific response component when possible.
@@ -2427,7 +2535,7 @@ components:
           enum: [bad_request, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, rate_limited, payload_too_large, unsupported_media_type, not_acceptable, request_timeout, client_closed_request, internal_error]
         status:
           type: integer
-          minimum: 100
+          minimum: 400
           maximum: 599
         requestId:
           type: string

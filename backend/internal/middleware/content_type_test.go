@@ -124,6 +124,34 @@ func TestContentTypeRejectsStructuredJSONOutsideApplicationType(t *testing.T) {
 	}
 }
 
+func TestContentTypeRejectsMalformedHeaderParameters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handlerCalled := false
+	router := gin.New()
+	router.Use(ContentType([]ContentTypeRule{{
+		Method:       http.MethodPost,
+		Path:         "/json",
+		AllowedTypes: []string{"application/json"},
+	}}))
+	router.POST("/json", func(c *gin.Context) {
+		handlerCalled = true
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/json", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", `application/json; charset="unterminated`)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415, body = %s", resp.Code, resp.Body.String())
+	}
+	if handlerCalled {
+		t.Fatal("handler ran after malformed Content-Type header")
+	}
+}
+
 func TestContentTypeIgnoresUnmatchedRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -168,11 +196,40 @@ func TestContentTypeIgnoresRulesWithoutValidMediaTypes(t *testing.T) {
 	}
 }
 
+func TestContentTypeIgnoresWildcardAllowedTypes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(ContentType([]ContentTypeRule{{
+		Method:       http.MethodPost,
+		Path:         "/api/v1/example",
+		AllowedTypes: []string{"*/*", "application/*", "application/*+json"},
+	}}))
+	router.POST("/api/v1/example", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/example", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "text/plain")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestNormalizeMediaTypesDeduplicatesAndRejectsInvalidValues(t *testing.T) {
 	got := normalizeMediaTypes([]string{
 		" Application/JSON ",
 		"application/json",
 		"text/csv",
+		"*/*",
+		"application/*",
+		"application/*+json",
+		"application/json; charset=utf-8",
+		"text/csv; header=present",
+		"application/json ; charset=utf-8",
 		"invalid",
 		"",
 		"application/",

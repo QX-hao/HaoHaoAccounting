@@ -17,6 +17,7 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"`RequestID`",
 		"`RequestTimeout`",
 		"structured `504` timeout response",
+		"`499 client_closed_request` response",
 		"`Recovery`",
 		"`SecurityHeaders`",
 		"`BodyLimit`",
@@ -37,6 +38,7 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"already-written response",
 		"http.MaxBytesReader",
 		"application/*+json",
+		"bare concrete types without parameters or wildcards",
 		"normalized, deduplicated",
 		"invalid values are ignored",
 		"structured syntax suffixes",
@@ -53,6 +55,8 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"health probes",
 		"revalidated before reuse",
 		"bearer JWT signature",
+		"RFC 6750 token68 character set",
+		"at most 4096 bytes",
 		"expiration",
 		"issued-at time",
 		"issuer",
@@ -63,9 +67,9 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 			t.Fatalf("README.md is missing middleware guidance %q", want)
 		}
 	}
-	for header := range defaultSecurityHeaders() {
-		if !strings.Contains(source, header) {
-			t.Fatalf("README.md is missing default security header %q", header)
+	for _, header := range defaultSecurityHeaders {
+		if !strings.Contains(source, header.Key) {
+			t.Fatalf("README.md is missing default security header %q", header.Key)
 		}
 	}
 }

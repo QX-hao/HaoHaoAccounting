@@ -162,6 +162,16 @@ function validateErrorResponseSchema(schema) {
       throw new Error(`ErrorResponse.${propertyName} is missing required`);
     }
   }
+  const status = schemaPropertyBlock(schema, 'status');
+  if (!status.includes('type: integer')) {
+    throw new Error('ErrorResponse.status is missing integer schema');
+  }
+  if (!status.includes('minimum: 400')) {
+    throw new Error('ErrorResponse.status is missing minimum: 400');
+  }
+  if (!status.includes('maximum: 599')) {
+    throw new Error('ErrorResponse.status is missing maximum: 599');
+  }
 }
 
 function validateCurrentUserResponseSchema(schema) {
@@ -369,10 +379,6 @@ function validateResponseComponents(openapi) {
   validateRateLimitHeader(openapi, 'RateLimitRemaining', 'Remaining failed login attempts');
   validateRateLimitHeader(openapi, 'RateLimitReset', 'Delay in seconds');
 
-  const importJobAccepted = operationResponseBlockById(openapi, 'postIoImportJobs', '202');
-  if (!importJobAccepted.includes('Location:')) {
-    throw new Error('POST /io/import/jobs 202 response is missing Location header');
-  }
   const location = componentHeaderBlock(openapi, 'Location');
   if (!location.includes('Relative URL') || !location.includes('/api/v1/io/import/jobs/1')) {
     throw new Error('components.headers.Location must document queued resource URLs with an example');
@@ -406,6 +412,15 @@ function validateResponseComponents(openapi) {
   const contentDisposition = componentHeaderBlock(openapi, 'ContentDisposition');
   if (!contentDisposition.includes('filename*')) {
     throw new Error('components.headers.ContentDisposition is missing filename* guidance');
+  }
+
+  const logoutSuccess = operationResponseBlockById(openapi, 'postAuthLogout', '200');
+  if (!logoutSuccess.includes('Clear-Site-Data:')) {
+    throw new Error('POST /auth/logout 200 response is missing Clear-Site-Data header');
+  }
+  const clearSiteData = componentHeaderBlock(openapi, 'ClearSiteData');
+  if (!clearSiteData.includes('Browser-side data cleared after logout') || !clearSiteData.includes('"cache", "cookies", "storage"')) {
+    throw new Error('components.headers.ClearSiteData must document logout browser data clearing directives');
   }
 
   const requestID = componentHeaderBlock(openapi, 'RequestID');
@@ -462,12 +477,36 @@ function validateErrorResponseExamples(openapi) {
         throw new Error(`components.responses.${responseName} example is missing ${field}`);
       }
     }
+    const expected = errorResponseExampleContract()[responseName];
+    if (expected && (!example.includes(`status: ${expected.status}`) || !example.includes(`code: ${expected.code}`))) {
+      throw new Error(`components.responses.${responseName} example must use status ${expected.status} and code ${expected.code}`);
+    }
   }
+}
+
+function errorResponseExampleContract() {
+  return {
+    BadRequest: { status: 400, code: 'bad_request' },
+    InvalidRequest: { status: 400, code: 'invalid_request' },
+    Unauthorized: { status: 401, code: 'unauthorized' },
+    Forbidden: { status: 403, code: 'forbidden' },
+    NotFound: { status: 404, code: 'not_found' },
+    MethodNotAllowed: { status: 405, code: 'method_not_allowed' },
+    RateLimited: { status: 429, code: 'rate_limited' },
+    PayloadTooLarge: { status: 413, code: 'payload_too_large' },
+    UnsupportedMediaType: { status: 415, code: 'unsupported_media_type' },
+    NotAcceptable: { status: 406, code: 'not_acceptable' },
+    InternalError: { status: 500, code: 'internal_error' },
+    GatewayTimeout: { status: 504, code: 'request_timeout' },
+    ClientClosedRequest: { status: 499, code: 'client_closed_request' },
+    Error: { status: 500, code: 'internal_error' },
+  };
 }
 
 function errorResponseNames() {
   return [
     'BadRequest',
+    'InvalidRequest',
     'Unauthorized',
     'Forbidden',
     'NotFound',
@@ -478,6 +517,7 @@ function errorResponseNames() {
     'NotAcceptable',
     'InternalError',
     'GatewayTimeout',
+    'ClientClosedRequest',
     'Error',
   ];
 }
@@ -485,6 +525,7 @@ function errorResponseNames() {
 function noStoreResponseNames() {
   return [
     'BadRequest',
+    'InvalidRequest',
     'Unauthorized',
     'Forbidden',
     'NotFound',
@@ -495,6 +536,7 @@ function noStoreResponseNames() {
     'NotAcceptable',
     'InternalError',
     'GatewayTimeout',
+    'ClientClosedRequest',
     'Error',
     'Ok',
   ];
@@ -679,6 +721,9 @@ function parseEndpoints(openapi) {
       if (tags.length === 0) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing tags`);
       }
+      if (tags.length !== 1) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} must declare exactly one tag for generated client grouping`);
+      }
       for (const tag of tags) {
         if (!declaredTags.has(tag)) {
           throw new Error(`${method.toUpperCase()} ${apiPath} uses undeclared tag ${tag}`);
@@ -696,6 +741,9 @@ function parseEndpoints(openapi) {
       if (responseStatuses.has('500') && !responseStatuses.has('504')) {
         throw new Error(`${method.toUpperCase()} ${apiPath} declares 500 response but is missing 504 timeout response`);
       }
+      if (responseStatuses.has('500') && !responseStatuses.has('499')) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} declares 500 response but is missing 499 client closed response`);
+      }
       if (operationHasSuccessContent(methodBlock, source) && !responseStatuses.has('406')) {
         throw new Error(`${method.toUpperCase()} ${apiPath} returns a response body but is missing 406 response`);
       }
@@ -705,6 +753,7 @@ function parseEndpoints(openapi) {
       validatePathParameters(method, apiPath, parameters);
       validateSuccessResponseHeaders(method, apiPath, methodBlock);
       validateCreatedResponseHeaders(method, apiPath, methodBlock);
+      validateAcceptedResponseHeaders(method, apiPath, methodBlock);
       validateSuccessResponseCacheHeaders(method, apiPath, methodBlock, source);
       validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses);
       if (operationHasRequestBody(methodBlock)) {
@@ -755,6 +804,10 @@ function validateRequestBodyContract(method, apiPath, methodBlock) {
   }
   if (!requestSchema(methodBlock)) {
     throw new Error(`${method.toUpperCase()} ${apiPath} requestBody is missing a component schema reference`);
+  }
+  const badRequest = operationResponseBlocks(methodBlock).find((response) => response.status === '400')?.block || '';
+  if (!badRequest.includes("$ref: '#/components/responses/InvalidRequest'")) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} requestBody 400 response must use InvalidRequest`);
   }
 }
 
@@ -822,6 +875,14 @@ function validateCreatedResponseHeaders(method, apiPath, methodBlock) {
   }
 }
 
+function validateAcceptedResponseHeaders(method, apiPath, methodBlock) {
+  const acceptedResponses = operationResponseBlocks(methodBlock).filter((response) => response.status === '202');
+  for (const response of acceptedResponses) {
+    if (response.block.includes('Location:')) continue;
+    throw new Error(`${method.toUpperCase()} ${apiPath} 202 response is missing Location header`);
+  }
+}
+
 function validateSuccessResponseCacheHeaders(method, apiPath, methodBlock, openapi) {
   const successResponses = operationResponseBlocks(methodBlock).filter((response) => /^2\d\d$/.test(response.status));
   for (const response of successResponses) {
@@ -853,7 +914,7 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
   if (parameters.length === 0) return;
 
   if (apiPath === '/transactions' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
+    require400Response(method, apiPath, responseStatuses, methodBlock);
     requireParameterText(method, apiPath, methodBlock, 'page', 'minimum: 1');
     requireParameterText(method, apiPath, methodBlock, 'page', 'default: 1');
     requireParameterText(method, apiPath, methodBlock, 'page', 'Defaults to 1 when omitted');
@@ -879,19 +940,19 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
     requireParameterText(method, apiPath, methodBlock, 'q', 'example: lunch');
   }
   if (apiPath === '/budgets' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
+    require400Response(method, apiPath, responseStatuses, methodBlock);
     requireParameterText(method, apiPath, methodBlock, 'month', "pattern: '^\\d{4}-\\d{2}$'");
     requireParameterText(method, apiPath, methodBlock, 'month', 'Budget month in YYYY-MM format');
     requireParameterText(method, apiPath, methodBlock, 'month', "example: '2026-06'");
   }
   if (apiPath === '/categories' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
+    require400Response(method, apiPath, responseStatuses, methodBlock);
     requireParameterText(method, apiPath, methodBlock, 'type', "$ref: '#/components/schemas/TransactionType'");
     requireParameterText(method, apiPath, methodBlock, 'type', 'Transaction type filter');
     requireParameterText(method, apiPath, methodBlock, 'type', 'example: expense');
   }
   if (apiPath === '/reports/summary' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
+    require400Response(method, apiPath, responseStatuses, methodBlock);
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
     requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
     requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
@@ -906,7 +967,7 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
     requireParameterText(method, apiPath, methodBlock, 'trend', 'example: month');
   }
   if (apiPath === '/io/export' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
+    require400Response(method, apiPath, responseStatuses, methodBlock);
     requireParameterText(method, apiPath, methodBlock, 'format', 'enum: [csv, xlsx]');
     requireParameterText(method, apiPath, methodBlock, 'format', 'default: csv');
     requireParameterText(method, apiPath, methodBlock, 'format', 'Defaults to csv when omitted');
@@ -919,9 +980,13 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
   }
 }
 
-function require400Response(method, apiPath, responseStatuses) {
+function require400Response(method, apiPath, responseStatuses, methodBlock) {
   if (!responseStatuses.has('400')) {
     throw new Error(`${method.toUpperCase()} ${apiPath} has validated query parameters but is missing 400 response`);
+  }
+  const badRequest = operationResponseBlocks(methodBlock).find((response) => response.status === '400')?.block || '';
+  if (!badRequest.includes("$ref: '#/components/responses/InvalidRequest'")) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} query 400 response must use InvalidRequest`);
   }
 }
 
@@ -1014,6 +1079,9 @@ function declaredOpenAPITags(openapi) {
   for (const tagBlock of tagBlocks) {
     const name = tagBlock.match(/^\s+- name:\s+([A-Za-z][A-Za-z0-9_-]*)/m)?.[1] || '';
     if (!name) continue;
+    if (tags.has(name)) {
+      throw new Error(`OpenAPI tag ${name} is declared more than once`);
+    }
     if (!tagBlock.match(/^\s+description:\s+\S.+$/m)) {
       throw new Error(`OpenAPI tag ${name} is missing description`);
     }
@@ -1142,8 +1210,8 @@ function endpointMethodName(method, apiPath) {
 function groupEndpoints(endpoints) {
   const groups = new Map();
   for (const endpoint of endpoints) {
-    const first = endpoint.path.split('/').filter(Boolean)[0] || 'root';
-    const group = first === 'io' ? 'dataio' : first.replace(/[^A-Za-z0-9]/g, '');
+    // 客户端模块分组以 OpenAPI tag 为准，避免路径前缀调整时生成 API 结构漂移。
+    const group = endpoint.tags[0].replace(/[^A-Za-z0-9]/g, '');
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(endpoint);
   }

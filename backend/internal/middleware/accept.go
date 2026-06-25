@@ -18,9 +18,14 @@ type AcceptRule struct {
 	Offered      func(*gin.Context) []string
 }
 
+type compiledAcceptRule struct {
+	offeredTypes []string
+	offered      func(*gin.Context) []string
+}
+
 // Accept 按路由声明的响应媒体类型检查 Accept 头，拒绝无法协商的请求并补充 Vary: Accept。
 func Accept(rules []AcceptRule) gin.HandlerFunc {
-	lookup := make(map[string][]string, len(rules))
+	lookup := make(map[string]compiledAcceptRule, len(rules))
 	for _, rule := range rules {
 		method := strings.ToUpper(strings.TrimSpace(rule.Method))
 		path := strings.TrimSpace(rule.Path)
@@ -28,25 +33,22 @@ func Accept(rules []AcceptRule) gin.HandlerFunc {
 			continue
 		}
 		if offered := normalizeMediaTypes(rule.OfferedTypes); len(offered) > 0 {
-			lookup[method+" "+path] = offered
+			// 规则在中间件创建时预编译，避免每个请求重复扫描完整规则列表。
+			lookup[method+" "+path] = compiledAcceptRule{offeredTypes: offered, offered: rule.Offered}
 		}
 	}
 
 	return func(c *gin.Context) {
 		key := c.Request.Method + " " + c.FullPath()
-		offered, ok := lookup[key]
+		rule, ok := lookup[key]
 		if !ok {
 			c.Next()
 			return
 		}
-		for _, rule := range rules {
-			method := strings.ToUpper(strings.TrimSpace(rule.Method))
-			path := strings.TrimSpace(rule.Path)
-			if method+" "+path == key && rule.Offered != nil {
-				if dynamicOffered := normalizeMediaTypes(rule.Offered(c)); len(dynamicOffered) > 0 {
-					offered = dynamicOffered
-				}
-				break
+		offered := rule.offeredTypes
+		if rule.offered != nil {
+			if dynamicOffered := normalizeMediaTypes(rule.offered(c)); len(dynamicOffered) > 0 {
+				offered = dynamicOffered
 			}
 		}
 		appendVary(c.Writer.Header(), "Accept")
@@ -102,7 +104,13 @@ func parseAcceptMediaRanges(header string) []acceptMediaRange {
 }
 
 func mediaQuality(params map[string]string) float64 {
-	raw := strings.TrimSpace(params["q"])
+	raw := ""
+	for name, value := range params {
+		if strings.EqualFold(name, "q") {
+			raw = strings.TrimSpace(value)
+			break
+		}
+	}
 	if raw == "" {
 		return 1
 	}

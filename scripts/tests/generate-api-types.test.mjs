@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 const generator = readFileSync(new URL('../generate-api-types.mjs', import.meta.url), 'utf8');
 const openapi = readFileSync(new URL('../../backend/api/openapi.yaml', import.meta.url), 'utf8');
+const healthOpenapi = readFileSync(new URL('../../backend/api/health-openapi.yaml', import.meta.url), 'utf8');
 const generatedClient = readFileSync(new URL('../../web/shared/api/generated-client.ts', import.meta.url), 'utf8');
 const generatedTypes = readFileSync(new URL('../../web/shared/types/api.ts', import.meta.url), 'utf8');
 const webApiClient = readFileSync(new URL('../../web/shared/api/client.ts', import.meta.url), 'utf8');
@@ -56,6 +57,16 @@ function openapiPathBlock(apiPath) {
 	return marker + rest.slice(0, next === -1 ? rest.length : next);
 }
 
+function openAPIOperationBlocks() {
+	const paths = openapi.slice(openapi.indexOf('paths:'), openapi.indexOf('components:'));
+	const matches = [...paths.matchAll(/^    (get|post|put|delete|patch|options|head|trace):$/gm)];
+	return matches.map((match, index) => {
+		const start = match.index;
+		const end = matches[index + 1]?.index ?? paths.length;
+		return paths.slice(start, end);
+	});
+}
+
 function responseBlock(source, status) {
 	const marker = `        '${status}':\n`;
 	const start = source.indexOf(marker);
@@ -77,9 +88,14 @@ function componentResponseBlock(responseName) {
 	return marker + rest.slice(0, next === -1 ? rest.length : next);
 }
 
-test('OpenAPI YAML disallows duplicate mapping keys', () => {
-	const duplicates = duplicateYamlMappingKeys(openapi);
-	assert.deepEqual(duplicates, []);
+test('OpenAPI YAML files disallow duplicate mapping keys', () => {
+	for (const [name, source] of [
+		['backend/api/openapi.yaml', openapi],
+		['backend/api/health-openapi.yaml', healthOpenapi],
+	]) {
+		const duplicates = duplicateYamlMappingKeys(source);
+		assert.deepEqual(duplicates, [], `${name} contains duplicate mapping keys`);
+	}
 });
 
 test('YAML duplicate key scanner treats sequence item maps independently', () => {
@@ -163,7 +179,16 @@ test('OpenAPI top-level tags describe operation groups', () => {
 	assert.match(generator, /validateOpenAPITags\(source\)/);
 	assert.match(generator, /OpenAPI top-level tags must declare API groups/);
 	assert.match(generator, /OpenAPI tag \$\{name\} is missing description/);
+	assert.match(generator, /OpenAPI tag \$\{name\} is declared more than once/);
 	assert.match(generator, /uses undeclared tag/);
+});
+
+test('generated clients use OpenAPI tags as module groups', () => {
+	assert.match(generator, /must declare exactly one tag for generated client grouping/);
+	assert.match(generator, /const group = endpoint\.tags\[0\]\.replace/);
+	assert.doesNotMatch(generator, /const first = endpoint\.path\.split/);
+	assert.match(generatedClient, /auth: \{[\s\S]+getMe:/);
+	assert.doesNotMatch(generatedClient, /me: \{/);
 });
 
 test('API clients send request ids for log correlation', () => {
@@ -260,6 +285,15 @@ test('API clients parse structured JSON error media types', () => {
 	}
 });
 
+test('API clients ignore non-object JSON error bodies', () => {
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /function isObjectRecord\(value: unknown\): value is Record<string, unknown>/);
+		assert.match(source, /const data = await resp\.json\(\)\.catch\(\(\) => \(\{\}\)\);/);
+		assert.match(source, /return isObjectRecord\(data\) \? data as ApiErrorBody : \{\};/);
+		assert.match(source, /!Array\.isArray\(value\)/);
+	}
+});
+
 test('API clients route logout through shared network error handling', () => {
 	assert.match(webApiClient, /await fetchAPI\('\/auth\/logout', \{/);
 	assert.match(mobileApiClient, /await fetchAPI\('\/auth\/logout', \{/);
@@ -318,6 +352,13 @@ test('API clients expose rate limit response headers on errors', () => {
 		assert.match(source, /nonNegativeIntegerHeader\(resp, 'RateLimit-Limit'\)/);
 		assert.match(source, /nonNegativeIntegerHeader\(resp, 'RateLimit-Remaining'\)/);
 		assert.match(source, /nonNegativeIntegerHeader\(resp, 'RateLimit-Reset'\)/);
+	}
+});
+
+test('API clients only trust error-body status values in the error range', () => {
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /status >= 400 && status <= 599/);
+		assert.doesNotMatch(source, /status >= 100 && status <= 599/);
 	}
 });
 
@@ -403,36 +444,44 @@ test('OpenAPI key auth responses include media type examples', () => {
 test('OpenAPI shared error responses include structured examples', () => {
 	assert.match(generator, /validateErrorResponseExamples\(openapi\)/);
 	assert.match(generator, /components\.responses\.\$\{responseName\} example is missing \$\{field\}/);
-	for (const responseName of [
-		'BadRequest',
-		'Unauthorized',
-		'Forbidden',
-		'NotFound',
-		'MethodNotAllowed',
-		'RateLimited',
-		'PayloadTooLarge',
-		'UnsupportedMediaType',
-		'NotAcceptable',
-		'InternalError',
-		'GatewayTimeout',
-		'Error',
-	]) {
+	assert.match(generator, /components\.responses\.\$\{responseName\} example must use status \$\{expected\.status\} and code \$\{expected\.code\}/);
+	const contracts = {
+		BadRequest: [400, 'bad_request'],
+		InvalidRequest: [400, 'invalid_request'],
+		Unauthorized: [401, 'unauthorized'],
+		Forbidden: [403, 'forbidden'],
+		NotFound: [404, 'not_found'],
+		MethodNotAllowed: [405, 'method_not_allowed'],
+		RateLimited: [429, 'rate_limited'],
+		PayloadTooLarge: [413, 'payload_too_large'],
+		UnsupportedMediaType: [415, 'unsupported_media_type'],
+		NotAcceptable: [406, 'not_acceptable'],
+		InternalError: [500, 'internal_error'],
+		GatewayTimeout: [504, 'request_timeout'],
+		ClientClosedRequest: [499, 'client_closed_request'],
+		Error: [500, 'internal_error'],
+	};
+	for (const [responseName, [status, code]] of Object.entries(contracts)) {
 		const response = componentResponseBlock(responseName);
 		assert.match(response, /\$ref: '#\/components\/schemas\/ErrorResponse'/);
 		assert.match(response, /example:[\s\S]+error:/, `${responseName} is missing error example`);
 		assert.match(response, /example:[\s\S]+code:/, `${responseName} is missing code example`);
 		assert.match(response, /example:[\s\S]+status:/, `${responseName} is missing status example`);
 		assert.match(response, /example:[\s\S]+requestId:/, `${responseName} is missing requestId example`);
+		assert.match(response, new RegExp(`example:[\\s\\S]+status: ${status}`), `${responseName} example has wrong status`);
+		assert.match(response, new RegExp(`example:[\\s\\S]+code: ${code}`), `${responseName} example has wrong code`);
 	}
 });
 
 test('ErrorResponse keeps status and request ids as stable response fields', () => {
 	assert.match(generator, /validateErrorResponseSchema/);
 	assert.match(generator, /ErrorResponse\.\$\{propertyName\} is missing required/);
+	assert.match(generator, /ErrorResponse\.status is missing minimum: 400/);
+	assert.match(generator, /ErrorResponse\.status is missing maximum: 599/);
 	const schema = openapiSchema('ErrorResponse');
 	assert.match(schema, /required: \[[^\]]*status[^\]]*\]/);
 	assert.match(schema, /required: \[[^\]]*requestId[^\]]*\]/);
-	assert.match(schema, /status:\n\s+type: integer\n\s+minimum: 100\n\s+maximum: 599/);
+	assert.match(schema, /status:\n\s+type: integer\n\s+minimum: 400\n\s+maximum: 599/);
 	assert.match(generatedTypes, /status: number;/);
 	assert.doesNotMatch(generatedTypes, /status\?: number;/);
 	assert.match(generatedTypes, /requestId: string;/);
@@ -606,6 +655,14 @@ test('generator requires method-not-allowed responses for operations', () => {
 
 test('generator requires timeout responses when internal errors are declared', () => {
 	assert.match(generator, /declares 500 response but is missing 504 timeout response/);
+	assert.match(generator, /declares 500 response but is missing 499 client closed response/);
+	for (const operation of openAPIOperationBlocks()) {
+		if (!operation.includes("'500':")) {
+			continue;
+		}
+		assert.match(operation, /'504':[\s\S]+\$ref: '#\/components\/responses\/GatewayTimeout'/);
+		assert.match(operation, /'499':[\s\S]+\$ref: '#\/components\/responses\/ClientClosedRequest'/);
+	}
 });
 
 test('generator requires body error responses for every request body operation', () => {
@@ -613,6 +670,7 @@ test('generator requires body error responses for every request body operation',
 		generator,
 		/if \(operationHasRequestBody\(methodBlock\)\) \{[\s\S]+is missing 400 response[\s\S]+is missing 413 response[\s\S]+is missing 415 response/,
 	);
+	assert.doesNotMatch(generator, /operationResponseBlock\(methodBlock/);
 });
 
 test('OpenAPI request bodies match generated client assumptions', () => {
@@ -622,6 +680,7 @@ test('OpenAPI request bodies match generated client assumptions', () => {
 	assert.match(generator, /requestBody must use application\/json or multipart\/form-data/);
 	assert.match(generator, /requestBody must not mix JSON and multipart content/);
 	assert.match(generator, /requestBody is missing a component schema reference/);
+	assert.match(generator, /requestBody 400 response must use InvalidRequest/);
 
 	const requestBodies = [...openapi.matchAll(/\n      requestBody:\n([\s\S]*?)(?=\n      responses:)/g)];
 	assert.ok(requestBodies.length > 0, 'OpenAPI should contain request bodies');
@@ -630,6 +689,12 @@ test('OpenAPI request bodies match generated client assumptions', () => {
 		assert.match(requestBody, /required: true/);
 		assert.match(requestBody, /(application\/json|multipart\/form-data):/);
 		assert.match(requestBody, /\$ref: '#\/components\/schemas\/[A-Za-z][A-Za-z0-9]*'/);
+	}
+	for (const operation of openAPIOperationBlocks()) {
+		if (!operation.includes('requestBody:')) {
+			continue;
+		}
+		assert.match(operation, /'400':\n\s+\$ref: '#\/components\/responses\/InvalidRequest'/);
 	}
 });
 
@@ -687,8 +752,9 @@ test('generator requires Retry-After header on rate-limited response', () => {
 	assert.match(openapi, /RateLimited:[\s\S]+RateLimit-Limit:[\s\S]+RateLimit-Remaining:[\s\S]+RateLimit-Reset:/);
 });
 
-test('generator requires Location header on accepted import jobs', () => {
-	assert.match(generator, /POST \/io\/import\/jobs 202 response is missing Location header/);
+test('generator requires Location header on accepted async resources', () => {
+	assert.match(generator, /validateAcceptedResponseHeaders/);
+	assert.match(generator, /\$\{method\.toUpperCase\(\)\} \$\{apiPath\} 202 response is missing Location header/);
 	assert.match(generator, /components\.headers\.Location must document queued resource URLs with an example/);
 	assert.match(openapi, /Location:[\s\S]+Relative URL of the created or queued API resource/);
 	assert.match(openapi, /postIoImportJobs[\s\S]+'202':[\s\S]+Location:[\s\S]+\$ref: '#\/components\/headers\/Location'/);
@@ -730,6 +796,7 @@ test('generator requires documented accepted datetime query formats', () => {
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'trend', 'example: month'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'Category id filter'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'Account id filter'\)/);
+	assert.match(generator, /query 400 response must use InvalidRequest/);
 	assert.match(openapi, /name: categoryId\n\s+in: query\n\s+description: Category id filter\.[\s\S]+example: 1/);
 	assert.match(openapi, /name: accountId\n\s+in: query\n\s+description: Account id filter\.[\s\S]+example: 1/);
 	assert.match(openapi, /name: trend\n\s+in: query\n\s+description: Trend aggregation granularity\. Defaults to month when omitted\.[\s\S]+default: month/);
@@ -738,6 +805,12 @@ test('generator requires documented accepted datetime query formats', () => {
 	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'month', "example: '2026-06'"\)/);
 	assert.match(openapi, /name: month\n\s+in: query\n\s+description: Budget month in YYYY-MM format\.[\s\S]+pattern: '\^\\d\{4\}-\\d\{2\}\$'/);
 	assert.match(openapi, /name: month[\s\S]+example: '2026-06'/);
+	for (const operation of openAPIOperationBlocks()) {
+		if (!operation.includes('in: query')) {
+			continue;
+		}
+		assert.match(operation, /'400':\n\s+\$ref: '#\/components\/responses\/InvalidRequest'/);
+	}
 });
 
 test('generator requires documented download filename headers', () => {
@@ -766,6 +839,14 @@ test('generator requires documented download filename headers', () => {
 		assert.match(source, /return safeDecodeURIComponent\(match\[2\]\);/);
 		assert.match(source, /catch \{\n\s+return '';\n\s+\}/);
 	}
+});
+
+test('generator requires browser data clearing headers on logout success', () => {
+	assert.match(generator, /POST \/auth\/logout 200 response is missing Clear-Site-Data header/);
+	assert.match(generator, /components\.headers\.ClearSiteData must document logout browser data clearing directives/);
+	assert.match(openapi, /postAuthLogout[\s\S]+'200':[\s\S]+Clear-Site-Data:[\s\S]+\$ref: '#\/components\/headers\/ClearSiteData'/);
+	assert.match(openapi, /ClearSiteData:[\s\S]+Browser-side data cleared after logout/);
+	assert.match(openapi, /ClearSiteData:[\s\S]+example: '"cache", "cookies", "storage"'/);
 });
 
 test('generator requires documented import headers', () => {

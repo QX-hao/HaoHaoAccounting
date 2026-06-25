@@ -4,9 +4,16 @@ import { test } from 'node:test';
 
 // 这些测试把 GitHub 协作模板当成仓库契约，防止后续改动丢掉复现、验收和测试信息。
 const bugReport = readRepositoryFile('.github/ISSUE_TEMPLATE/bug_report.yml');
+const documentationRequest = readRepositoryFile('.github/ISSUE_TEMPLATE/documentation.yml');
 const featureRequest = readRepositoryFile('.github/ISSUE_TEMPLATE/feature_request.yml');
 const issueTemplateConfig = readRepositoryFile('.github/ISSUE_TEMPLATE/config.yml');
 const pullRequestTemplate = readRepositoryFile('.github/PULL_REQUEST_TEMPLATE.md');
+const securityPolicy = readRepositoryFile('SECURITY.md');
+const contributingGuide = readRepositoryFile('CONTRIBUTING.md');
+const codeowners = readRepositoryFile('.github/CODEOWNERS');
+const ciWorkflow = readRepositoryFile('.github/workflows/ci.yaml');
+const codeqlWorkflow = readRepositoryFile('.github/workflows/codeql.yaml');
+const rootReadme = readRepositoryFile('readme.md');
 
 const issueAreaOptions = [
 	'Backend API',
@@ -17,8 +24,8 @@ const issueAreaOptions = [
 	'Other',
 ];
 
-test('pull request template asks reviewers for scope, tests, risk, and rollback details', () => {
-	for (const heading of ['## Summary', '## Changes', '## Tests', '## Risk And Rollback', '## Checklist']) {
+test('pull request template asks reviewers for scope, tests, review focus, risk, and rollback details', () => {
+	for (const heading of ['## Summary', '## Changes', '## Reviewer Notes', '## Tests', '## Risk And Rollback', '## Checklist']) {
 		assert.match(pullRequestTemplate, new RegExp(`^${escapeRegExp(heading)}$`, 'm'));
 	}
 
@@ -33,6 +40,10 @@ test('pull request template asks reviewers for scope, tests, risk, and rollback 
 	}
 
 	for (const requiredPrompt of [
+		'Related issue:',
+		'Review focus:',
+		'Screenshots or recording:',
+		'Security, dependency, or Dependabot notes:',
 		'Risk level: Low / Medium / High',
 		'User-facing or API compatibility impact:',
 		'Config, migration, or deployment notes:',
@@ -48,6 +59,7 @@ test('pull request template asks reviewers for scope, tests, risk, and rollback 
 test('issue forms keep the GitHub-required top-level shape and repository defaults', () => {
 	for (const [name, source] of [
 		['bug report', bugReport],
+		['documentation update', documentationRequest],
 		['feature request', featureRequest],
 	]) {
 		assert.match(source, /^name:\s+\S/m, `${name} issue form must define a display name`);
@@ -58,6 +70,30 @@ test('issue forms keep the GitHub-required top-level shape and repository defaul
 		assert.match(source, /^  - type: (?!markdown\b)[a-z]+$/m, `${name} issue form must collect user input`);
 		assertUniqueIds(name, source);
 	}
+});
+
+test('documentation form requires affected area, current docs, problem, expected update, and acceptance criteria', () => {
+	for (const option of [
+		'Backend API',
+		'Web app',
+		'Mobile app',
+		'Docker / deployment config',
+		'OpenAPI / generated client',
+		'Middleware / runtime behavior',
+		'Repository configuration',
+		'Other',
+	]) {
+		assert.match(issueBlock(documentationRequest, 'area'), new RegExp(`- ${escapeRegExp(option)}`));
+	}
+
+	for (const requiredField of ['area', 'current', 'problem', 'expected', 'acceptance']) {
+		assertRequired(documentationRequest, requiredField);
+	}
+
+	assert.match(documentationRequest, /^labels:\s+\["documentation"\]$/m);
+	assert.match(issueBlock(documentationRequest, 'current'), /File or URL:/);
+	assert.match(issueBlock(documentationRequest, 'expected'), /命令、接口、配置项或示例/);
+	assert.match(issueBlock(documentationRequest, 'acceptance'), /placeholder:\s+\|[\s\S]+- \[ \] \.\.\./);
 });
 
 test('bug report form requires enough information to reproduce and diagnose defects', () => {
@@ -87,6 +123,139 @@ test('feature request form requires problem, proposal, ownership area, and accep
 
 test('blank issue creation stays disabled so contributors choose a structured form', () => {
 	assert.match(issueTemplateConfig, /^blank_issues_enabled: false$/m);
+});
+
+test('issue chooser routes security reports and questions away from public issues', () => {
+	for (const requiredText of [
+		'contact_links:',
+		'Security vulnerability report',
+		'/security/advisories/new',
+		'suspected vulnerabilities privately',
+		'Questions and discussions',
+		'/discussions',
+		'API contract documentation',
+		'/tree/main/backend/api',
+		'OpenAPI contracts',
+	]) {
+		assert.match(issueTemplateConfig, new RegExp(escapeRegExp(requiredText)));
+	}
+});
+
+test('security policy documents private vulnerability reporting and supported branches', () => {
+	for (const heading of ['## Supported Versions', '## Reporting a Vulnerability', '## Triage Expectations', '## Scope']) {
+		assert.match(securityPolicy, new RegExp(`^${escapeRegExp(heading)}$`, 'm'));
+	}
+
+	for (const requiredText of [
+		'`main`',
+		'`dev-pxhao`',
+		'Do not open a public issue',
+		'GitHub private vulnerability reporting',
+		'Affected branch or commit.',
+		'Steps to reproduce.',
+		'Impact and affected data or capability.',
+		'Confirmed vulnerabilities should stay private',
+		'Authentication, authorization, token handling',
+		'Docker, CI, Dependabot, and deployment configuration',
+	]) {
+		assert.match(securityPolicy, new RegExp(escapeRegExp(requiredText)));
+	}
+});
+
+test('contributing guide documents branch flow, issue triage, verification, contracts, and security reporting', () => {
+	for (const heading of ['## Branch And Pull Request Flow', '## Issue Triage', '## Local Verification', '## API And Runtime Contracts', '## Security']) {
+		assert.match(contributingGuide, new RegExp(`^${escapeRegExp(heading)}$`, 'm'));
+	}
+
+	for (const requiredText of [
+		'`dev-pxhao`',
+		'pull request template',
+		'npm run verify:compose',
+		'npm run verify:api-contract',
+		'npm run verify:backend',
+		'npm run verify:web',
+		'npm run verify:mobile',
+		'npm run verify:web:e2e',
+		'npm run generate:api-types',
+		'backend/api/openapi.yaml',
+		'backend/api/health-openapi.yaml',
+		'.env.example',
+		'SECURITY.md',
+		'GitHub issue chooser',
+		'private vulnerability reporting',
+		'OpenAPI contract directory',
+		'bug report form',
+		'feature request form',
+		'documentation form',
+		'reproducible defects',
+		'README, OpenAPI, middleware, deployment, or repository configuration guidance',
+	]) {
+		assert.match(contributingGuide, new RegExp(escapeRegExp(requiredText)));
+	}
+});
+
+test('codeowners routes critical areas to the repository owner', () => {
+	assert.match(codeowners, /^\* @QX-hao$/m);
+
+	for (const path of [
+		'/.github/',
+		'/backend/api/',
+		'/scripts/generate-api-types.mjs',
+		'/backend/cmd/server/',
+		'/backend/internal/middleware/',
+		'/backend/internal/config/',
+		'/docker-compose.yaml',
+		'/Dockerfile.*',
+	]) {
+		assert.match(codeowners, new RegExp(`^${escapeRegExp(path)}\\s+@QX-hao$`, 'm'), `${path} must be owned`);
+	}
+
+	for (const line of codeowners.split(/\r?\n/)) {
+		if (!line.trim() || line.trimStart().startsWith('#')) continue;
+		assert.match(line, /^\S+\s+@\S+$/, `CODEOWNERS line must include path and owner: ${line}`);
+	}
+});
+
+test('root readme links collaboration, security, ownership, and API contract entrypoints', () => {
+	for (const requiredText of [
+		'## 协作与安全',
+		'CONTRIBUTING.md',
+		'SECURITY.md',
+		'.github/CODEOWNERS',
+		'backend/api/openapi.yaml',
+		'backend/api/health-openapi.yaml',
+		'npm run verify:api-contract',
+		'CodeQL',
+		'Go 和 JavaScript/TypeScript',
+	]) {
+		assert.match(rootReadme, new RegExp(escapeRegExp(requiredText)));
+	}
+});
+
+test('ci runs on main and active development branch pushes', () => {
+	assert.match(ciWorkflow, /^  push:\n    branches: \[main, dev-pxhao\]$/m);
+	assert.match(ciWorkflow, /^  pull_request:\n    branches: \[main, dev-pxhao\]$/m);
+});
+
+test('ci cancels superseded runs on the same workflow ref', () => {
+	assert.match(ciWorkflow, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: true$/m);
+});
+
+test('codeql workflow scans Go and TypeScript with least required permissions', () => {
+	assert.match(codeqlWorkflow, /^name: CodeQL$/m);
+	assert.match(codeqlWorkflow, /^  push:\n    branches: \[main, dev-pxhao\]$/m);
+	assert.match(codeqlWorkflow, /^  pull_request:\n    branches: \[main, dev-pxhao\]$/m);
+	assert.match(codeqlWorkflow, /^  schedule:\n    - cron: '[^']+'$/m);
+	assert.match(codeqlWorkflow, /^permissions:\n  contents: read\n  security-events: write$/m);
+	assert.match(codeqlWorkflow, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: true$/m);
+	assert.match(codeqlWorkflow, /runs-on: ubuntu-24\.04/);
+	assert.match(codeqlWorkflow, /timeout-minutes: 20/);
+	assert.match(codeqlWorkflow, /language: go[\s\S]+build-mode: autobuild/);
+	assert.match(codeqlWorkflow, /language: javascript-typescript[\s\S]+build-mode: none/);
+	assert.match(codeqlWorkflow, /actions\/checkout@v4[\s\S]+persist-credentials: false/);
+	assert.match(codeqlWorkflow, /github\/codeql-action\/init@v3/);
+	assert.match(codeqlWorkflow, /queries: security-extended/);
+	assert.match(codeqlWorkflow, /github\/codeql-action\/analyze@v3/);
 });
 
 function readRepositoryFile(path) {

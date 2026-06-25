@@ -290,6 +290,7 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 	t.Setenv("HTTP_READ_TIMEOUT", "not-a-duration")
 	t.Setenv("HTTP_REQUEST_TIMEOUT", "-1s")
 	t.Setenv("HTTP_METRICS_ENABLED", "not-a-bool")
+	t.Setenv("HTTP_METRICS_TOKEN", "contains space")
 	t.Setenv("HTTP_HSTS_INCLUDE_SUBDOMAINS", "not-a-bool")
 	t.Setenv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY", "same-origin")
 	t.Setenv("JWT_TTL", "0s")
@@ -305,6 +306,7 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 		"HTTP_READ_TIMEOUT",
 		"HTTP_REQUEST_TIMEOUT",
 		"HTTP_METRICS_ENABLED",
+		"HTTP_METRICS_TOKEN",
 		"HTTP_HSTS_INCLUDE_SUBDOMAINS",
 		"HTTP_CROSS_ORIGIN_EMBEDDER_POLICY",
 		"JWT_TTL",
@@ -446,6 +448,11 @@ func TestHTTPConfigValidate(t *testing.T) {
 	paddingOnlyMetricsToken.MetricsToken = "=="
 	if err := paddingOnlyMetricsToken.Validate(); err == nil {
 		t.Fatal("expected padding-only metrics token error")
+	}
+	tooLongMetricsToken := valid
+	tooLongMetricsToken.MetricsToken = strings.Repeat("a", 4097)
+	if err := tooLongMetricsToken.Validate(); err == nil {
+		t.Fatal("expected overlong metrics token error")
 	}
 	for _, policy := range []string{"require-corp", "credentialless", "unsafe-none", " REQUIRE-CORP "} {
 		t.Run("valid COEP "+policy, func(t *testing.T) {
@@ -667,6 +674,54 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+func TestConfigValidateRejectsDevelopmentSecretsForPublicOrigins(t *testing.T) {
+	valid := Config{
+		Port:           "8080",
+		Database:       validDatabaseConfig(),
+		Redis:          RedisConfig{Addr: "redis:6379", Password: "redis-secret", DB: 0},
+		HTTP:           validHTTPConfig(),
+		LoginRateLimit: LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		Admin:          AdminConfig{Username: "admin", Password: "admin-secret"},
+		JWT:            JWTConfig{Secret: "jwt-secret-with-at-least-32-characters", TTL: time.Hour, Issuer: "issuer", Audience: "api"},
+	}
+	valid.HTTP.CORSAllowOrigins = []string{"https://app.example.com"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid public config error: %v", err)
+	}
+
+	insecure := valid
+	insecure.Redis.Password = developmentRedisPassword
+	insecure.Admin.Password = developmentAdminPassword
+	insecure.JWT.Secret = developmentJWTSecret
+	if err := insecure.Validate(); err == nil {
+		t.Fatal("expected development secret error for public origin")
+	} else {
+		message := err.Error()
+		for _, want := range []string{"JWT_SECRET", "ADMIN_PASSWORD", "REDIS_PASSWORD"} {
+			if !strings.Contains(message, want) {
+				t.Fatalf("validation error %q does not mention %s", message, want)
+			}
+		}
+	}
+}
+
+func TestConfigValidateAllowsDevelopmentSecretsForLocalOrigins(t *testing.T) {
+	cfg := Config{
+		Port:           "8080",
+		Database:       validDatabaseConfig(),
+		Redis:          RedisConfig{Addr: "127.0.0.1:6379", Password: developmentRedisPassword, DB: 0},
+		HTTP:           validHTTPConfig(),
+		LoginRateLimit: LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		Admin:          AdminConfig{Username: "admin", Password: developmentAdminPassword},
+		JWT:            JWTConfig{Secret: developmentJWTSecret, TTL: time.Hour, Issuer: "issuer", Audience: "api"},
+	}
+	cfg.HTTP.CORSAllowOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("local development config error: %v", err)
+	}
+}
+
 func TestConfigEnvironmentKeysStayDocumented(t *testing.T) {
 	sourceKeys := configSourceEnvKeys(t)
 	exampleKeys := envExampleKeys(t)
@@ -749,6 +804,26 @@ func TestEnvExampleDocumentsCrossOriginEmbedderPolicy(t *testing.T) {
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("backend/.env.example is missing COEP guidance %q", want)
+		}
+	}
+}
+
+func TestEnvExampleDocumentsLoginRateLimitDisableValues(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".env.example"))
+	if err != nil {
+		t.Fatalf("read backend/.env.example: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"Login rate limiting is enabled when both values are positive",
+		"Set either value",
+		"0s only for trusted local debugging",
+		"LOGIN_RATE_LIMIT_MAX_FAILURES=5",
+		"LOGIN_RATE_LIMIT_WINDOW=10m",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("backend/.env.example is missing login rate limit guidance %q", want)
 		}
 	}
 }
@@ -856,6 +931,8 @@ func TestProductionComposeDocumentsMetricsToken(t *testing.T) {
 	for _, want := range []string{
 		"HTTP_METRICS_TOKEN",
 		"Authorization: Bearer",
+		"RFC 6750 token68",
+		"最长 4096 字节",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("readme.md is missing metrics token guidance %q", want)

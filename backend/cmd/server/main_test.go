@@ -93,6 +93,53 @@ func TestRequestLogFormatterDropsQueryString(t *testing.T) {
 	}
 }
 
+func TestRequestLogFormatterUsesRootForEmptyPath(t *testing.T) {
+	for _, path := range []string{"", "?token=secret"} {
+		t.Run(path, func(t *testing.T) {
+			line := requestLogFormatter(gin.LogFormatterParams{
+				TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+				StatusCode: 200,
+				Latency:    10 * time.Millisecond,
+				ClientIP:   "127.0.0.1",
+				Method:     "GET",
+				Path:       path,
+			})
+
+			if !strings.Contains(line, `path="/"`) {
+				t.Fatalf("log line = %q, missing root path placeholder", line)
+			}
+			if strings.Contains(line, "token=secret") {
+				t.Fatalf("log line leaked query string: %q", line)
+			}
+		})
+	}
+}
+
+func TestRequestLogFormatterEscapesClientControlledFields(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+	req.Header.Set("User-Agent", "HaoHao\nMobile")
+
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:      req,
+		TimeStamp:    time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode:   500,
+		Latency:      10 * time.Millisecond,
+		ClientIP:     "127.0.0.1",
+		Method:       "GET",
+		Path:         "/api/v1/accounts\nforged",
+		ErrorMessage: "db\nfailed",
+	})
+
+	for _, want := range []string{`path="/api/v1/accounts\nforged"`, `user_agent="HaoHao\nMobile"`, `error="db\nfailed"`} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("log line = %q, missing escaped field %s", line, want)
+		}
+	}
+	if strings.Count(line, "\n") != 1 || !strings.HasSuffix(line, "\n") {
+		t.Fatalf("log line should stay single-line: %q", line)
+	}
+}
+
 func TestRequestLogFormatterIncludesProtocolAndUserAgent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
 	req.Header.Set("User-Agent", "HaoHaoMobile/1.0")
@@ -253,7 +300,10 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`CORS_ALLOW_ORIGINS`",
 		"explicit `http` or `https` origins",
 		"wildcards",
-		"trimmed and deduplicated",
+		"trimmed, normalized",
+		"deduplicated",
+		"normalized to browser `Origin` header form",
+		"lowercase scheme/host and default ports removed",
 		"credentials disabled",
 		"`gin-contrib/cors`",
 		"queued resource locations",
@@ -416,6 +466,26 @@ func TestMetricsEndpointCanRequireBearerToken(t *testing.T) {
 	}
 }
 
+func TestConstantTimeTokenEqualMatchesExactTokenOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+		ok   bool
+	}{
+		{name: "same", got: "scrape-secret", want: "scrape-secret", ok: true},
+		{name: "different same length", got: "scrape-secret", want: "scrape-secreu", ok: false},
+		{name: "different shorter", got: "short", want: "scrape-secret", ok: false},
+		{name: "different longer", got: "scrape-secret-extra", want: "scrape-secret", ok: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := constantTimeTokenEqual(tc.got, tc.want); got != tc.ok {
+				t.Fatalf("constantTimeTokenEqual(%q, %q) = %v, want %v", tc.got, tc.want, got, tc.ok)
+			}
+		})
+	}
+}
+
 func TestMetricsEndpointIsRegisteredOnlyWhenEnabled(t *testing.T) {
 	previousMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
@@ -541,6 +611,9 @@ func TestNewCORSConfigIncludesRequestIDHeader(t *testing.T) {
 	if !slices.Contains(corsConfig.ExposeHeaders, "Allow") {
 		t.Fatalf("ExposeHeaders = %#v, missing Allow", corsConfig.ExposeHeaders)
 	}
+	if !slices.Contains(corsConfig.ExposeHeaders, "Clear-Site-Data") {
+		t.Fatalf("ExposeHeaders = %#v, missing Clear-Site-Data", corsConfig.ExposeHeaders)
+	}
 	if !slices.Contains(corsConfig.ExposeHeaders, "Location") {
 		t.Fatalf("ExposeHeaders = %#v, missing Location", corsConfig.ExposeHeaders)
 	}
@@ -623,6 +696,25 @@ func TestNormalizedCORSOriginsTrimsEmptyAndDeduplicatesInOrder(t *testing.T) {
 	}
 }
 
+func TestNormalizedCORSOriginsCanonicalizesBrowserOriginForm(t *testing.T) {
+	got := normalizedCORSOrigins([]string{
+		" https://APP.example.com:443 ",
+		"https://app.example.com",
+		"HTTP://LOCALHOST:80",
+		"http://localhost",
+		"http://127.0.0.1:3000",
+	})
+	want := []string{
+		"https://app.example.com",
+		"http://localhost",
+		"http://127.0.0.1:3000",
+	}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("normalizedCORSOrigins() = %#v, want %#v", got, want)
+	}
+}
+
 func TestCORSAllowMethodsCoverRegisteredAPIMethods(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -669,6 +761,37 @@ func TestCORSAllowMethodsStayMinimalAndDeduplicated(t *testing.T) {
 	}
 	if len(corsConfig.AllowMethods) != len(slices.Compact(slices.Clone(corsConfig.AllowMethods))) {
 		t.Fatalf("AllowMethods = %#v, contains duplicates", corsConfig.AllowMethods)
+	}
+}
+
+func TestCORSAllowsCanonicalizedConfiguredOrigins(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	cfg := config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://APP.example.com:443"},
+			MaxBodyBytes:     6 * 1024 * 1024,
+		},
+	}
+	router := gin.New()
+	applyGlobalMiddleware(router, cfg, middleware.NewHTTPMetrics(prometheus.NewRegistry()))
+	router.GET("/api/v1/me", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
 	}
 }
 
@@ -1140,7 +1263,7 @@ func TestCORSAllowedOriginExposesClientHeaders(t *testing.T) {
 		t.Fatalf("Access-Control-Allow-Credentials = %q, want empty", got)
 	}
 	exposeHeaders := resp.Header().Get("Access-Control-Expose-Headers")
-	for _, header := range []string{"Allow", "Content-Disposition", "Link", "Location", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "WWW-Authenticate", "Retry-After", "X-Total-Count", middleware.RequestIDHeader} {
+	for _, header := range []string{"Allow", "Clear-Site-Data", "Content-Disposition", "Link", "Location", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "WWW-Authenticate", "Retry-After", "X-Total-Count", middleware.RequestIDHeader} {
 		if !headerHasToken(exposeHeaders, header) {
 			t.Fatalf("Access-Control-Expose-Headers = %q, missing %s", exposeHeaders, header)
 		}

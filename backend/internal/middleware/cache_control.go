@@ -19,6 +19,10 @@ func NoStore() gin.HandlerFunc {
 func NoStoreAPI(prefix string) gin.HandlerFunc {
 	prefix = strings.TrimRight(prefix, "/")
 	return func(c *gin.Context) {
+		if prefix == "" {
+			c.Next()
+			return
+		}
 		path := c.Request.URL.Path
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			SetNoStore(c.Writer.Header())

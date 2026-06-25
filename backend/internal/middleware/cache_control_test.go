@@ -62,6 +62,50 @@ func TestNoStoreAPIOnlyAppliesToAPIPrefix(t *testing.T) {
 	}
 }
 
+func TestNoStoreAPITrimsConfiguredPrefixTrailingSlash(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(NoStoreAPI("/api/v1/"))
+	router.GET("/api/v1/me", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/v1/me", nil))
+
+	if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+func TestNoStoreAPIWithEmptyOrRootPrefixIsNoop(t *testing.T) {
+	for _, prefix := range []string{"", "/"} {
+		t.Run(prefix, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+
+			router := gin.New()
+			router.Use(NoStoreAPI(prefix))
+			router.GET("/livez", func(c *gin.Context) {
+				c.Status(http.StatusNoContent)
+			})
+
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/livez", nil))
+
+			if got := resp.Header().Get("Cache-Control"); got != "" {
+				t.Fatalf("Cache-Control = %q, want empty", got)
+			}
+			if got := resp.Header().Get("Pragma"); got != "" {
+				t.Fatalf("Pragma = %q, want empty", got)
+			}
+			if got := resp.Header().Get("Expires"); got != "" {
+				t.Fatalf("Expires = %q, want empty", got)
+			}
+		})
+	}
+}
+
 func TestSetNoStore(t *testing.T) {
 	headers := http.Header{}
 	SetNoStore(headers)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +24,9 @@ const (
 	defaultHTTPRequestTimeout = 60 * time.Second
 	minJWTSecretLength        = 32
 	hstsPreloadMinMaxAge      = 31536000
+	developmentJWTSecret      = "haohao-dev-jwt-secret-change-me-32chars"
+	developmentAdminPassword  = "haohao123"
+	developmentRedisPassword  = "haohao123"
 )
 
 type Config struct {
@@ -288,7 +292,52 @@ func (c Config) Validate() error {
 	if err := c.Admin.Validate(); err != nil {
 		errs = append(errs, err)
 	}
+	if err := c.validatePublicDeploymentSecrets(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+func (c Config) validatePublicDeploymentSecrets() error {
+	if !hasPublicCORSOrigin(c.HTTP.CORSAllowOrigins) {
+		return nil
+	}
+	var errs []error
+	if c.JWT.Secret == developmentJWTSecret {
+		errs = append(errs, errors.New("JWT_SECRET must not use the development example value when CORS_ALLOW_ORIGINS contains a public origin"))
+	}
+	if c.Admin.Password == developmentAdminPassword {
+		errs = append(errs, errors.New("ADMIN_PASSWORD must not use the development example value when CORS_ALLOW_ORIGINS contains a public origin"))
+	}
+	if c.Redis.Password == developmentRedisPassword && !redisAddrIsLoopback(c.Redis.Addr) {
+		errs = append(errs, errors.New("REDIS_PASSWORD must not use the development example value when Redis is remote and CORS_ALLOW_ORIGINS contains a public origin"))
+	}
+	return errors.Join(errs...)
+}
+
+func hasPublicCORSOrigin(origins []string) bool {
+	for _, origin := range origins {
+		if originHostIsPublic(origin) {
+			return true
+		}
+	}
+	return false
+}
+
+func originHostIsPublic(origin string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(origin))
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	addr, err := netip.ParseAddr(host)
+	return err != nil || !addr.IsLoopback()
 }
 
 func validatePort(port string) error {
@@ -325,6 +374,7 @@ func validateEnvValues() error {
 		validateBoolEnv("HTTP_HSTS_PRELOAD"),
 		validateCrossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
 		validateBoolEnv("HTTP_METRICS_ENABLED"),
+		validateBearerTokenEnv("HTTP_METRICS_TOKEN"),
 		validateNonNegativeIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES"),
 		validateNonNegativeDurationEnv("LOGIN_RATE_LIMIT_WINDOW"),
 		validatePositiveDurationEnv("JWT_TTL"),
@@ -511,6 +561,11 @@ func isLoopbackRedisHost(host string) bool {
 	return err == nil && addr.IsLoopback()
 }
 
+func redisAddrIsLoopback(addr string) bool {
+	host, err := redisHost(addr)
+	return err == nil && isLoopbackRedisHost(host)
+}
+
 func (c HTTPConfig) Validate() error {
 	var errs []error
 	switch strings.ToLower(strings.TrimSpace(c.GinMode)) {
@@ -546,7 +601,7 @@ func (c HTTPConfig) Validate() error {
 		errs = append(errs, errors.New("HTTP_REQUEST_TIMEOUT must be non-negative"))
 	}
 	if c.MetricsToken != "" && !middleware.ValidBearerTokenValue(c.MetricsToken) {
-		errs = append(errs, errors.New("HTTP_METRICS_TOKEN must contain only RFC 6750 bearer token characters"))
+		errs = append(errs, errors.New("HTTP_METRICS_TOKEN must be a RFC 6750 bearer token value up to 4096 bytes"))
 	}
 	if !validCrossOriginEmbedderPolicy(c.CrossOriginEmbedderPolicy) {
 		errs = append(errs, errors.New("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY must be empty or one of: require-corp, credentialless, unsafe-none"))
@@ -575,6 +630,19 @@ func validateCrossOriginEmbedderPolicyEnv(key string) func() error {
 		}
 		if !validCrossOriginEmbedderPolicy(os.Getenv(key)) {
 			return fmt.Errorf("%s must be empty or one of: require-corp, credentialless, unsafe-none", key)
+		}
+		return nil
+	}
+}
+
+func validateBearerTokenEnv(key string) func() error {
+	return func() error {
+		value, exists := os.LookupEnv(key)
+		if !exists || strings.TrimSpace(value) == "" {
+			return nil
+		}
+		if !middleware.ValidBearerTokenValue(strings.TrimSpace(value)) {
+			return fmt.Errorf("%s must be a RFC 6750 bearer token value up to 4096 bytes", key)
 		}
 		return nil
 	}

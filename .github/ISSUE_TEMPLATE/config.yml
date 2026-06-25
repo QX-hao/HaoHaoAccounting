@@ -1,1 +1,11 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability report
+    url: https://github.com/QX-hao/HaoHaoAccounting/security/advisories/new
+    about: Please report suspected vulnerabilities privately instead of opening a public issue.
+  - name: Questions and discussions
+    url: https://github.com/QX-hao/HaoHaoAccounting/discussions
+    about: Please use discussions for usage questions, deployment help, and design ideas.
+  - name: API contract documentation
+    url: https://github.com/QX-hao/HaoHaoAccounting/tree/main/backend/api
+    about: Check the OpenAPI contracts before reporting API or generated-client differences.

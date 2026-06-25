@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,6 +24,26 @@ import (
 )
 
 var errFailingWrite = errors.New("write failed")
+
+func TestReadmeDocumentsExportDownloadAndSpreadsheetSafetyContracts(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"`Content-Disposition`",
+		"`filename`",
+		"`filename*`",
+		"`safeCSVCell`",
+		"formula prefixes",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("README.md is missing dataio maintenance guidance %q", want)
+		}
+	}
+}
 
 func TestExportRejectsInvalidQueryParameters(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -76,6 +97,31 @@ func TestWriteCSVReturnsWriterError(t *testing.T) {
 
 	if err := writeCSV(c, nil); !errors.Is(err, errFailingWrite) {
 		t.Fatalf("writeCSV error = %v, want %v", err, errFailingWrite)
+	}
+}
+
+func TestAttachmentDispositionIncludesFallbackAndEncodedFilename(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{
+			name:     "ascii",
+			filename: "transactions.csv",
+			want:     `attachment; filename="transactions.csv"; filename*=UTF-8''transactions.csv`,
+		},
+		{
+			name:     "non-ascii",
+			filename: "交易记录.csv",
+			want:     `attachment; filename="交易记录.csv"; filename*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95.csv`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := attachmentDisposition(tc.filename); got != tc.want {
+				t.Fatalf("attachmentDisposition(%q) = %q, want %q", tc.filename, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -259,6 +305,31 @@ func TestMultipartImportRejectsInvalidSkipDuplicates(t *testing.T) {
 			if resp.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
 			}
+			assertErrorCode(t, resp, httputil.CodeInvalidRequest)
+		})
+	}
+}
+
+func TestMultipartImportRejectsMissingFileAsInvalidRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	store := testutil.NewStore(t)
+	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group(""))
+
+	for _, path := range []string{"/io/import/preview", "/io/import", "/io/import/jobs"} {
+		t.Run(path, func(t *testing.T) {
+			body, contentType := multipartFieldsOnly(t, map[string]string{
+				"skipDuplicates": "true",
+			})
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+			req.Header.Set("Content-Type", contentType)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+			}
+			assertErrorCode(t, resp, httputil.CodeInvalidRequest)
 		})
 	}
 }
@@ -374,6 +445,32 @@ func multipartBodyWithFields(t *testing.T, fieldName string, fileName string, co
 		t.Fatalf("close multipart writer: %v", err)
 	}
 	return body.Bytes(), writer.FormDataContentType()
+}
+
+func multipartFieldsOnly(t *testing.T, fields map[string]string) ([]byte, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for name, value := range fields {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatalf("write multipart field %s: %v", name, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	return body.Bytes(), writer.FormDataContentType()
+}
+
+func assertErrorCode(t *testing.T, resp *httptest.ResponseRecorder, want string) {
+	t.Helper()
+	var errorBody httputil.ErrorResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &errorBody); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if errorBody.Code != want {
+		t.Fatalf("code = %q, want %q", errorBody.Code, want)
+	}
 }
 
 type failingResponseWriter struct {
