@@ -240,6 +240,29 @@ func TestCreateImportJobReturnsLocationHeader(t *testing.T) {
 	}
 }
 
+func TestMultipartImportRejectsInvalidSkipDuplicates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	store := testutil.NewStore(t)
+	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group(""))
+
+	for _, path := range []string{"/io/import", "/io/import/jobs"} {
+		t.Run(path, func(t *testing.T) {
+			body, contentType := multipartBodyWithFields(t, "file", "transactions.csv", "occurred_at,type,amount,category,account,note,tags\n", map[string]string{
+				"skipDuplicates": "maybe",
+			})
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+			req.Header.Set("Content-Type", contentType)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+			}
+		})
+	}
+}
+
 func TestImportTextRejectsInvalidRequestBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -266,6 +289,31 @@ func TestImportTextRejectsInvalidRequestBody(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestParseBoolDefaultRequiresValidExplicitValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		fallback  bool
+		wantValue bool
+		wantOK    bool
+	}{
+		{name: "empty true default", value: "", fallback: true, wantValue: true, wantOK: true},
+		{name: "empty false default", value: " ", fallback: false, wantValue: false, wantOK: true},
+		{name: "explicit true", value: "true", fallback: false, wantValue: true, wantOK: true},
+		{name: "explicit false", value: "false", fallback: true, wantValue: false, wantOK: true},
+		{name: "invalid", value: "maybe", fallback: true, wantValue: false, wantOK: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotValue, gotOK := parseBoolDefault(tc.value, tc.fallback)
+			if gotValue != tc.wantValue || gotOK != tc.wantOK {
+				t.Fatalf("parseBoolDefault(%q, %v) = (%v, %v), want (%v, %v)", tc.value, tc.fallback, gotValue, gotOK, tc.wantValue, tc.wantOK)
+			}
+		})
 	}
 }
 
@@ -303,7 +351,11 @@ func TestMultipartImportMapsStreamingBodyLimitToPayloadTooLarge(t *testing.T) {
 
 func multipartBody(t *testing.T, fieldName string, fileName string, content string) ([]byte, string) {
 	t.Helper()
+	return multipartBodyWithFields(t, fieldName, fileName, content, nil)
+}
 
+func multipartBodyWithFields(t *testing.T, fieldName string, fileName string, content string, fields map[string]string) ([]byte, string) {
+	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	part, err := writer.CreateFormFile(fieldName, fileName)
@@ -312,6 +364,11 @@ func multipartBody(t *testing.T, fieldName string, fileName string, content stri
 	}
 	if _, err := part.Write([]byte(content)); err != nil {
 		t.Fatalf("write multipart file: %v", err)
+	}
+	for name, value := range fields {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatalf("write multipart field %s: %v", name, err)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close multipart writer: %v", err)

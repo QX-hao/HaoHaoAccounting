@@ -76,9 +76,14 @@ func (h *Handler) importData(c *gin.Context) {
 		httputil.BadRequest(c, "file is required")
 		return
 	}
+	skipDuplicates, ok := parseBoolDefault(c.PostForm("skipDuplicates"), true)
+	if !ok {
+		httputil.InvalidRequest(c, "skipDuplicates must be a boolean")
+		return
+	}
 
 	result, err := h.service.ImportWithOptions(c.Request.Context(), uid, file, ImportOptions{
-		SkipDuplicates: parseBoolDefault(c.PostForm("skipDuplicates"), true),
+		SkipDuplicates: skipDuplicates,
 	})
 	if err != nil {
 		httputil.BadRequest(c, err.Error())
@@ -116,9 +121,14 @@ func (h *Handler) createImportJob(c *gin.Context) {
 		httputil.BadRequest(c, "file is required")
 		return
 	}
+	skipDuplicates, ok := parseBoolDefault(c.PostForm("skipDuplicates"), true)
+	if !ok {
+		httputil.InvalidRequest(c, "skipDuplicates must be a boolean")
+		return
+	}
 
 	job, err := h.service.StartImportJob(c.Request.Context(), uid, file, ImportOptions{
-		SkipDuplicates: parseBoolDefault(c.PostForm("skipDuplicates"), true),
+		SkipDuplicates: skipDuplicates,
 	})
 	if err != nil {
 		httputil.BadRequest(c, err.Error())
@@ -203,14 +213,15 @@ func importLineError(index int, err error) string {
 	return fmt.Sprintf("line %d: %v", index+2, err)
 }
 
-func parseBoolDefault(value string, fallback bool) bool {
+// parseBoolDefault 只在字段缺省时使用默认值；显式传入非法布尔值时返回 ok=false。
+func parseBoolDefault(value string, fallback bool) (parsed bool, ok bool) {
 	clean := strings.TrimSpace(value)
 	if clean == "" {
-		return fallback
+		return fallback, true
 	}
 	parsed, err := strconv.ParseBool(clean)
 	if err != nil {
-		return fallback
+		return false, false
 	}
-	return parsed
+	return parsed, true
 }
