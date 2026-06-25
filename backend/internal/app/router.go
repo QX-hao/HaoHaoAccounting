@@ -157,7 +157,8 @@ func readyzWithDependencies(database pinger, redis pinger) gin.HandlerFunc {
 func dependencyStatus(status string, err error) gin.H {
 	result := gin.H{"status": status}
 	if err != nil {
-		result["error"] = err.Error()
+		// 健康探针只暴露依赖状态，避免把 DSN、主机名或内部网络错误回传给外部探针。
+		result["error"] = "unavailable"
 	}
 	return result
 }

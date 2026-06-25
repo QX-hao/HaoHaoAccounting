@@ -14,7 +14,7 @@
 
 `/livez` only reports process liveness and returns `{"status":"ok"}` without dependency checks.
 
-`/readyz` and `/health` check the database and optional Redis cache with a 2 second dependency budget. Database failures return `503` with `status: unavailable`; Redis is reported as `disabled` when no enabled cache is configured.
+`/readyz` and `/health` check the database and optional Redis cache with a 2 second dependency budget. Database or Redis failures return `503` with `status: unavailable` and do not expose raw dependency error details; Redis is reported as `disabled` when no enabled cache is configured.
 
 Health probe responses use `Cache-Control: no-cache`, `Pragma: no-cache`, and `Expires: 0` so load balancers and proxies must revalidate process and dependency state before reusing a stored result.
 

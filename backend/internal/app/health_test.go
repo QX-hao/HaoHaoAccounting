@@ -64,7 +64,8 @@ func TestReadmeDocumentsRouteContracts(t *testing.T) {
 		"`/readyz` and `/health` check the database and optional Redis cache",
 		"`/metrics` owned by the server entrypoint",
 		"2 second dependency budget",
-		"Database failures return `503` with `status: unavailable`",
+		"Database or Redis failures return `503` with `status: unavailable`",
+		"do not expose raw dependency error details",
 		"Redis is reported as `disabled`",
 		"All `/api/v1` routes use `NoStore` cache headers",
 		"API fallback errors for missing routes and unsupported methods",
@@ -282,9 +283,11 @@ func TestReadyzReturnsOKWhenDatabaseIsReadyAndRedisDisabled(t *testing.T) {
 }
 
 func TestReadyzReturnsUnavailableWhenDatabaseFails(t *testing.T) {
+	const internalError = "database down host=db.internal password=secret"
+
 	router := gin.New()
 	router.GET("/readyz", readyzWithDependencies(pingFunc(func(context.Context) error {
-		return errors.New("database down")
+		return errors.New(internalError)
 	}), nil))
 
 	resp := httptest.NewRecorder()
@@ -294,17 +297,22 @@ func TestReadyzReturnsUnavailableWhenDatabaseFails(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
 	}
 	body := parseHealthBody(t, resp)
-	if body.Status != "unavailable" || body.Checks["database"]["status"] != "error" || body.Checks["database"]["error"] != "database down" {
+	if body.Status != "unavailable" || body.Checks["database"]["status"] != "error" || body.Checks["database"]["error"] != "unavailable" {
 		t.Fatalf("body = %#v", body)
+	}
+	if strings.Contains(resp.Body.String(), internalError) || strings.Contains(resp.Body.String(), "secret") {
+		t.Fatalf("health response leaked internal dependency error: %s", resp.Body.String())
 	}
 	assertNoCacheHeaders(t, resp)
 }
 
 func TestReadyzReturnsUnavailableWhenRedisFails(t *testing.T) {
+	const internalError = "redis down addr=redis.internal password=secret"
+
 	router := gin.New()
 	router.GET("/readyz", readyzWithDependencies(
 		pingFunc(func(context.Context) error { return nil }),
-		pingFunc(func(context.Context) error { return errors.New("redis down") }),
+		pingFunc(func(context.Context) error { return errors.New(internalError) }),
 	))
 
 	resp := httptest.NewRecorder()
@@ -314,8 +322,11 @@ func TestReadyzReturnsUnavailableWhenRedisFails(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
 	}
 	body := parseHealthBody(t, resp)
-	if body.Status != "unavailable" || body.Checks["redis"]["status"] != "error" || body.Checks["redis"]["error"] != "redis down" {
+	if body.Status != "unavailable" || body.Checks["redis"]["status"] != "error" || body.Checks["redis"]["error"] != "unavailable" {
 		t.Fatalf("body = %#v", body)
+	}
+	if strings.Contains(resp.Body.String(), internalError) || strings.Contains(resp.Body.String(), "secret") {
+		t.Fatalf("health response leaked internal dependency error: %s", resp.Body.String())
 	}
 	assertNoCacheHeaders(t, resp)
 }
