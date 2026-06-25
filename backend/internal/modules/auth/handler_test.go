@@ -181,6 +181,26 @@ func TestLoginPreservesPasswordWhitespace(t *testing.T) {
 	}
 }
 
+func TestLoginUsesGenericFailurePathForMissingUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	limiter := newLoginLimiter(1, time.Minute)
+	handler := &Handler{store: testutil.NewStore(t), loginLimiter: limiter, tokenService: testTokenService(t)}
+	handler.RegisterPublic(router.Group("/api/v1"))
+
+	resp := postLogin(t, router, `{"username":"missing","password":"secret-password"}`)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); !strings.Contains(got, "用户名或密码错误") {
+		t.Fatalf("body = %s", got)
+	}
+	if limiter.Allow(loginLimiterKey("192.0.2.1", "missing")) {
+		t.Fatal("expected missing-user failure to count toward rate limit")
+	}
+}
+
 func TestLoginRejectsMissingCredentialsAtBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -202,6 +222,19 @@ func TestLoginRejectsMissingCredentialsAtBinding(t *testing.T) {
 				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
 			}
 		})
+	}
+}
+
+func TestVerifyPasswordOrDummyUsesDummyHashForMissingUsers(t *testing.T) {
+	if verifyPasswordOrDummy("", "secret-password") {
+		t.Fatal("dummy password hash should not verify caller-provided passwords")
+	}
+	hash, err := hashPassword("secret-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verifyPasswordOrDummy(hash, "secret-password") {
+		t.Fatal("real password hash should verify")
 	}
 }
 

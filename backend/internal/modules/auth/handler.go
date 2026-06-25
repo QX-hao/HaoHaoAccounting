@@ -72,6 +72,7 @@ func (h *Handler) login(c *gin.Context) {
 	var user models.User
 	err := h.store.DB.Where("username = ?", req.Username).First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		_ = verifyPasswordOrDummy("", req.Password)
 		h.recordLoginFailure(limiterKey)
 		httputil.Unauthorized(c, "用户名或密码错误")
 		return
@@ -79,7 +80,7 @@ func (h *Handler) login(c *gin.Context) {
 		httputil.InternalError(c, err)
 		return
 	}
-	if !verifyPassword(user.PasswordHash, req.Password) {
+	if !verifyPasswordOrDummy(user.PasswordHash, req.Password) {
 		h.recordLoginFailure(limiterKey)
 		httputil.Unauthorized(c, "用户名或密码错误")
 		return
