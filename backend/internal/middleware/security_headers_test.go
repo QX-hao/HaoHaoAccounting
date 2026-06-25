@@ -58,7 +58,7 @@ func TestSecurityHeadersSetsConfiguredCrossOriginEmbedderPolicy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(SecurityHeaders(SecurityHeadersConfig{
-		CrossOriginEmbedderPolicy: "require-corp",
+		CrossOriginEmbedderPolicy: " Require-Corp ",
 	}))
 	router.GET("/ping", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
@@ -69,5 +69,23 @@ func TestSecurityHeadersSetsConfiguredCrossOriginEmbedderPolicy(t *testing.T) {
 
 	if got := recorder.Result().Header.Get("Cross-Origin-Embedder-Policy"); got != "require-corp" {
 		t.Fatalf("Cross-Origin-Embedder-Policy = %q, want require-corp", got)
+	}
+}
+
+func TestSecurityHeadersRejectsUnknownCrossOriginEmbedderPolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(SecurityHeaders(SecurityHeadersConfig{
+		CrossOriginEmbedderPolicy: "same-origin",
+	}))
+	router.GET("/ping", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ping", nil))
+
+	if got := recorder.Result().Header.Get("Cross-Origin-Embedder-Policy"); got != "" {
+		t.Fatalf("Cross-Origin-Embedder-Policy = %q, want empty for unknown policy", got)
 	}
 }

@@ -145,6 +145,45 @@ func TestContentTypeIgnoresUnmatchedRoutes(t *testing.T) {
 	}
 }
 
+func TestContentTypeIgnoresRulesWithoutValidMediaTypes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(ContentType([]ContentTypeRule{{
+		Method:       http.MethodPost,
+		Path:         "/api/v1/example",
+		AllowedTypes: []string{"invalid", "application/"},
+	}}))
+	router.POST("/api/v1/example", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/example", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "text/plain")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestNormalizeMediaTypesDeduplicatesAndRejectsInvalidValues(t *testing.T) {
+	got := normalizeMediaTypes([]string{
+		" Application/JSON ",
+		"application/json",
+		"text/csv",
+		"invalid",
+		"",
+		"application/",
+	})
+	want := []string{"application/json", "text/csv"}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeMediaTypes() = %#v, want %#v", got, want)
+	}
+}
+
 func TestAPIMediaTypeRulesCoverRequestBodyOperations(t *testing.T) {
 	got := mediaTypeRulesByOperation(t, APIMediaTypeRules())
 	want := openAPIRequestBodyMediaTypes(t)
@@ -243,11 +282,15 @@ type openAPIComponents struct {
 }
 
 type openAPIPathItem struct {
-	Delete *openAPIOperation `yaml:"delete"`
-	Get    *openAPIOperation `yaml:"get"`
-	Patch  *openAPIOperation `yaml:"patch"`
-	Post   *openAPIOperation `yaml:"post"`
-	Put    *openAPIOperation `yaml:"put"`
+	// 覆盖 OpenAPI Path Item 的标准 HTTP 操作，避免契约测试漏掉未来新增的方法。
+	Delete  *openAPIOperation `yaml:"delete"`
+	Get     *openAPIOperation `yaml:"get"`
+	Head    *openAPIOperation `yaml:"head"`
+	Options *openAPIOperation `yaml:"options"`
+	Patch   *openAPIOperation `yaml:"patch"`
+	Post    *openAPIOperation `yaml:"post"`
+	Put     *openAPIOperation `yaml:"put"`
+	Trace   *openAPIOperation `yaml:"trace"`
 }
 
 type openAPIOperation struct {
@@ -277,9 +320,12 @@ func (item openAPIPathItem) operations() []openAPIOperationWithMethod {
 	}{
 		{method: http.MethodDelete, operation: item.Delete},
 		{method: http.MethodGet, operation: item.Get},
+		{method: http.MethodHead, operation: item.Head},
+		{method: http.MethodOptions, operation: item.Options},
 		{method: http.MethodPatch, operation: item.Patch},
 		{method: http.MethodPost, operation: item.Post},
 		{method: http.MethodPut, operation: item.Put},
+		{method: http.MethodTrace, operation: item.Trace},
 	}
 
 	result := make([]openAPIOperationWithMethod, 0, len(operations))

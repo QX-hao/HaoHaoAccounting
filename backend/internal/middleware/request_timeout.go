@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RequestTimeout adds a deadline to the request context without writing a timeout response.
+// RequestTimeout 给请求 context 设置截止时间；handler 未写响应时把超时统一转换成结构化 504。
 func RequestTimeout(timeout time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if timeout <= 0 {

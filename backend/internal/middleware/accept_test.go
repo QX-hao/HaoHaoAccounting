@@ -120,6 +120,82 @@ func TestAcceptAddsVaryOnSuccessfulNegotiatedResponse(t *testing.T) {
 	}
 }
 
+func TestAcceptNormalizesConfiguredOfferedTypesBeforeErrorMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(Accept([]AcceptRule{{
+		Method:       http.MethodGet,
+		Path:         "/api/v1/example",
+		OfferedTypes: []string{" Application/JSON ", "application/json", "invalid"},
+	}}))
+	router.GET("/api/v1/example", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/example", nil)
+	req.Header.Set("Accept", "text/csv")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotAcceptable {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if strings.Count(resp.Body.String(), "application/json") != 1 {
+		t.Fatalf("body = %s, want one normalized application/json value", resp.Body.String())
+	}
+	if strings.Contains(resp.Body.String(), "invalid") {
+		t.Fatalf("body = %s, leaked invalid offered type", resp.Body.String())
+	}
+}
+
+func TestAcceptIgnoresRulesWithoutValidMediaTypes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(Accept([]AcceptRule{{
+		Method:       http.MethodGet,
+		Path:         "/api/v1/example",
+		OfferedTypes: []string{"invalid", "application/"},
+	}}))
+	router.GET("/api/v1/example", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/example", nil)
+	req.Header.Set("Accept", "text/csv")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestAcceptFallsBackToStaticOfferedTypesWhenDynamicListIsEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(Accept([]AcceptRule{{
+		Method:       http.MethodGet,
+		Path:         "/api/v1/example",
+		OfferedTypes: []string{"application/json"},
+		Offered:      func(*gin.Context) []string { return []string{" ", ""} },
+	}}))
+	router.GET("/api/v1/example", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/example", nil)
+	req.Header.Set("Accept", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestAppendVaryPreservesExistingFieldsAndAvoidsDuplicates(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("Vary", "Origin")

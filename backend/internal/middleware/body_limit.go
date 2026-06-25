@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// BodyLimit 统一限制请求体大小：已知 Content-Length 超限时直接拒绝，流式请求交给 MaxBytesReader 在读取时拦截。
 func BodyLimit(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if maxBytes <= 0 {
@@ -25,6 +26,7 @@ func BodyLimit(maxBytes int64) gin.HandlerFunc {
 	}
 }
 
+// HandleBodyReadError 把 MaxBytesReader 返回的超限错误映射成统一的 413 JSON 响应。
 func HandleBodyReadError(c *gin.Context, err error) bool {
 	var maxBytesErr *http.MaxBytesError
 	if errors.As(err, &maxBytesErr) {

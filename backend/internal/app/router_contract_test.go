@@ -409,11 +409,15 @@ type openAPISecurityScheme struct {
 }
 
 type openAPIPathItem struct {
-	Delete *openAPIOperation `yaml:"delete"`
-	Get    *openAPIOperation `yaml:"get"`
-	Patch  *openAPIOperation `yaml:"patch"`
-	Post   *openAPIOperation `yaml:"post"`
-	Put    *openAPIOperation `yaml:"put"`
+	// 覆盖 OpenAPI Path Item 的标准 HTTP 操作，避免路由契约测试漏掉未来新增的方法。
+	Delete  *openAPIOperation `yaml:"delete"`
+	Get     *openAPIOperation `yaml:"get"`
+	Head    *openAPIOperation `yaml:"head"`
+	Options *openAPIOperation `yaml:"options"`
+	Patch   *openAPIOperation `yaml:"patch"`
+	Post    *openAPIOperation `yaml:"post"`
+	Put     *openAPIOperation `yaml:"put"`
+	Trace   *openAPIOperation `yaml:"trace"`
 }
 
 type openAPIOperation struct {
@@ -462,9 +466,12 @@ func (item openAPIPathItem) operations() []openAPIOperationWithMethod {
 	}{
 		{method: http.MethodDelete, operation: item.Delete},
 		{method: http.MethodGet, operation: item.Get},
+		{method: http.MethodHead, operation: item.Head},
+		{method: http.MethodOptions, operation: item.Options},
 		{method: http.MethodPatch, operation: item.Patch},
 		{method: http.MethodPost, operation: item.Post},
 		{method: http.MethodPut, operation: item.Put},
+		{method: http.MethodTrace, operation: item.Trace},
 	}
 
 	result := make([]openAPIOperationWithMethod, 0, len(operations))

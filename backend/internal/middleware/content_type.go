@@ -16,6 +16,7 @@ type ContentTypeRule struct {
 	AllowedTypes []string
 }
 
+// ContentType 按路由声明的请求体媒体类型检查 Content-Type，避免 handler 处理未声明格式。
 func ContentType(rules []ContentTypeRule) gin.HandlerFunc {
 	lookup := make(map[string][]string, len(rules))
 	for _, rule := range rules {
@@ -24,7 +25,9 @@ func ContentType(rules []ContentTypeRule) gin.HandlerFunc {
 		if method == "" || path == "" || len(rule.AllowedTypes) == 0 {
 			continue
 		}
-		lookup[method+" "+path] = normalizeMediaTypes(rule.AllowedTypes)
+		if allowed := normalizeMediaTypes(rule.AllowedTypes); len(allowed) > 0 {
+			lookup[method+" "+path] = allowed
+		}
 	}
 
 	return func(c *gin.Context) {
@@ -47,10 +50,17 @@ func ContentType(rules []ContentTypeRule) gin.HandlerFunc {
 
 func normalizeMediaTypes(values []string) []string {
 	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		if clean := strings.ToLower(strings.TrimSpace(value)); clean != "" {
-			result = append(result, clean)
+		clean := strings.ToLower(strings.TrimSpace(value))
+		if _, _, ok := splitMediaType(clean); !ok {
+			continue
 		}
+		if _, exists := seen[clean]; exists {
+			continue
+		}
+		seen[clean] = struct{}{}
+		result = append(result, clean)
 	}
 	return result
 }
@@ -76,6 +86,7 @@ func unsupportedMediaTypeMessage(allowed []string) string {
 	return fmt.Sprintf("unsupported media type: expected %s", strings.Join(allowed, " or "))
 }
 
+// APIMediaTypeRules 从当前 API/OpenAPI 契约整理有请求体路由的 Content-Type 白名单。
 func APIMediaTypeRules() []ContentTypeRule {
 	return []ContentTypeRule{
 		{Method: http.MethodPost, Path: "/api/v1/auth/login", AllowedTypes: []string{"application/json"}},

@@ -11,6 +11,9 @@ const clientOutputPaths = [
   path.join(root, 'web/shared/api/generated-client.ts'),
   path.join(root, 'mobile/src/shared/api/generated-client.ts'),
 ];
+// OpenAPI 3.x Path Item 的标准操作方法都要扫描，避免新增接口时被生成器静默跳过。
+const openAPIHTTPMethods = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
+const openAPIHTTPMethodPattern = openAPIHTTPMethods.join('|');
 
 const source = fs.readFileSync(openapiPath, 'utf8');
 const schemasSource = source.slice(source.indexOf('  schemas:'));
@@ -19,6 +22,8 @@ const duplicateSchemaNames = schemaNames.filter((name, index) => schemaNames.ind
 if (duplicateSchemaNames.length > 0) {
   throw new Error(`Duplicate schemas: ${[...new Set(duplicateSchemaNames)].join(', ')}`);
 }
+
+// 生成前先把 OpenAPI 当作接口契约做静态校验，避免错误规范继续生成到前端客户端。
 const schemas = Object.fromEntries(schemaNames.map((name, index) => {
   const marker = `    ${name}:`;
   const start = schemasSource.indexOf(marker);
@@ -35,6 +40,7 @@ validateParameterConstraints(source);
 validateResponseComponents(source);
 validateSecuritySchemes(source);
 
+// 类型文件只从 components.schemas 生成，保证 Web 和 Mobile 使用同一份 API 数据结构。
 const generated = [
   '// Generated from backend/api/openapi.yaml. Do not edit by hand.',
   '',
@@ -47,6 +53,7 @@ for (const outputPath of typeOutputPaths) {
   fs.writeFileSync(outputPath, generated);
 }
 
+// 客户端方法从 paths 解析，并在解析阶段继续校验 operationId、认证、响应头和请求体契约。
 const endpoints = parseEndpoints(source);
 const client = emitClient(endpoints);
 for (const outputPath of clientOutputPaths) {
@@ -627,6 +634,7 @@ function methodArgs(args, optionalParams) {
   return [`${paramsArg} = {}`, ...rest].join(', ');
 }
 
+// parseEndpoints 同时承担解析和契约验证：任何 OpenAPI 漂移都应在生成客户端前失败。
 function parseEndpoints(openapi) {
   const pathsBlock = openapi.slice(openapi.indexOf('paths:'), openapi.indexOf('components:'));
   const pathMatches = [...pathsBlock.matchAll(/^  (\/[^:]+):$/gm)];
@@ -639,7 +647,7 @@ function parseEndpoints(openapi) {
     const end = pathMatches[index + 1]?.index ?? pathsBlock.length;
     const pathBlock = pathsBlock.slice(start, end);
     const pathParameters = parseOperationParameters(pathLevelBlock(pathBlock));
-    const methodMatches = [...pathBlock.matchAll(/^    (get|post|put|delete):$/gm)];
+    const methodMatches = openAPIMethodMatches(pathBlock);
     for (const [methodIndex, methodMatch] of methodMatches.entries()) {
       const method = methodMatch[1];
       const methodStart = methodMatch.index;
@@ -653,6 +661,10 @@ function parseEndpoints(openapi) {
       const parameters = [...pathParameters, ...parseOperationParameters(methodBlock)];
       if (!operationId) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing operationId`);
+      }
+      const expectedOperationId = endpointMethodName(method, apiPath);
+      if (operationId !== expectedOperationId) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} operationId must be ${expectedOperationId}`);
       }
       if (!summary) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing summary`);
@@ -723,6 +735,7 @@ function parseEndpoints(openapi) {
   return result.filter((endpoint) => endpoint.jsonClientEndpoint);
 }
 
+// 请求体契约必须显式描述、必填，并且只使用 JSON 或 multipart 其中一种格式。
 function validateRequestBodyContract(method, apiPath, methodBlock) {
   const requestBlock = nestedBlock(methodBlock, 'requestBody:');
   if (!requestBlock.match(/^\s+description:\s+\S.+$/m)) {
@@ -1033,7 +1046,7 @@ function operationBlockById(openapi, operationId) {
     const pathStart = pathMatch.index;
     const pathEnd = pathMatches[pathIndex + 1]?.index ?? pathsBlock.length;
     const pathBlock = pathsBlock.slice(pathStart, pathEnd);
-    const methodMatches = [...pathBlock.matchAll(/^    (get|post|put|delete):$/gm)];
+    const methodMatches = openAPIMethodMatches(pathBlock);
     for (const [methodIndex, methodMatch] of methodMatches.entries()) {
       const methodStart = methodMatch.index;
       const methodEnd = methodMatches[methodIndex + 1]?.index ?? pathBlock.length;
@@ -1066,8 +1079,16 @@ function operationTags(block) {
 }
 
 function pathLevelBlock(pathBlock) {
-  const firstMethodIndex = pathBlock.search(/^    (get|post|put|delete):/m);
+  const firstMethodIndex = pathBlock.search(openAPIMethodLineRegexp());
   return firstMethodIndex === -1 ? pathBlock : pathBlock.slice(0, firstMethodIndex);
+}
+
+function openAPIMethodMatches(pathBlock) {
+  return [...pathBlock.matchAll(new RegExp(`^    (${openAPIHTTPMethodPattern}):$`, 'gm'))];
+}
+
+function openAPIMethodLineRegexp() {
+  return new RegExp(`^    (${openAPIHTTPMethodPattern}):`, 'm');
 }
 
 function parseOperationParameters(block) {
@@ -1115,8 +1136,7 @@ function endpointMethodName(method, apiPath) {
   const cleanPath = apiPath.replace(/^\//, '').replace(/\{id\}/g, 'by-id');
   const words = cleanPath.split(/[\/-]/).filter(Boolean);
   const base = words.map((word, index) => index === 0 ? word : upperFirst(word)).join('');
-  const prefix = method === 'get' ? 'get' : method === 'post' ? 'post' : method === 'put' ? 'put' : 'delete';
-  return `${prefix}${upperFirst(base)}`;
+  return `${method}${upperFirst(base)}`;
 }
 
 function groupEndpoints(endpoints) {

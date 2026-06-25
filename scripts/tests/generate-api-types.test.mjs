@@ -340,6 +340,26 @@ test('generator rejects duplicate OpenAPI operationId values', () => {
 	assert.match(generator, /is used by both/);
 });
 
+test('generator requires operation ids to match generated client method names', () => {
+	assert.match(generator, /const expectedOperationId = endpointMethodName\(method, apiPath\);/);
+	assert.match(generator, /operationId must be \$\{expectedOperationId\}/);
+
+	for (const operation of openapiOperations(openapi)) {
+		assert.equal(
+			operation.operationId,
+			expectedOperationId(operation.method, operation.path),
+			`${operation.method.toUpperCase()} ${operation.path} operationId drifted`,
+		);
+	}
+});
+
+test('generator scans every OpenAPI path item HTTP operation instead of silently ignoring it', () => {
+	assert.match(generator, /const openAPIHTTPMethods = \['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'\];/);
+	assert.match(generator, /function openAPIMethodMatches\(pathBlock\)/);
+	assert.match(generator, /function openAPIMethodLineRegexp\(\)/);
+	assert.doesNotMatch(generator, /\(get\|post\|put\|delete\)/);
+});
+
 test('generator requires human-readable operation summaries', () => {
 	assert.match(generator, /operationSummary\(methodBlock\)/);
 	assert.match(generator, /is missing summary/);
@@ -421,6 +441,17 @@ test('ErrorResponse keeps status and request ids as stable response fields', () 
 	assert.match(goHTTPUtilResponses, /RequestID\s+string\s+`json:"requestId"`/);
 	assert.doesNotMatch(goHTTPUtilResponses, /Status\s+int\s+`json:"status,omitempty"`/);
 	assert.doesNotMatch(goHTTPUtilResponses, /RequestID\s+string\s+`json:"requestId,omitempty"`/);
+});
+
+test('OpenAPI ErrorResponse code enum stays aligned with Go response constants', () => {
+	const schema = openapiSchema('ErrorResponse');
+	const enumValues = schema.match(/code:[\s\S]+?enum: \[([^\]]+)\]/)?.[1]
+		.split(',')
+		.map((value) => value.trim());
+	const goCodes = [...goHTTPUtilResponses.matchAll(/Code[A-Za-z]+\s+=\s+"([^"]+)"/g)].map((match) => match[1]);
+
+	assert.ok(enumValues, 'ErrorResponse.code must declare an enum');
+	assert.deepEqual(new Set(enumValues), new Set(goCodes));
 });
 
 test('generator requires a 2xx success response for every operation', () => {
@@ -829,4 +860,37 @@ function duplicateYamlMappingKeys(source) {
 
 function escapeRegExp(value) {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function expectedOperationId(method, apiPath) {
+	const cleanPath = apiPath.replace(/^\//, '').replace(/\{id\}/g, 'by-id');
+	const words = cleanPath.split(/[/-]/).filter(Boolean);
+	const base = words.map((word, index) => (index === 0 ? word : upperFirst(word))).join('');
+	return `${method}${upperFirst(base)}`;
+}
+
+function openapiOperations(source) {
+	const pathsBlock = source.slice(source.indexOf('paths:'), source.indexOf('components:'));
+	const pathMatches = [...pathsBlock.matchAll(/^  (\/[^:]+):$/gm)];
+	const operations = [];
+	for (const [pathIndex, pathMatch] of pathMatches.entries()) {
+		const path = pathMatch[1];
+		const pathStart = pathMatch.index;
+		const pathEnd = pathMatches[pathIndex + 1]?.index ?? pathsBlock.length;
+		const pathBlock = pathsBlock.slice(pathStart, pathEnd);
+		const methodMatches = [...pathBlock.matchAll(/^    (get|put|post|delete|options|head|patch|trace):$/gm)];
+		for (const [methodIndex, methodMatch] of methodMatches.entries()) {
+			const method = methodMatch[1];
+			const methodStart = methodMatch.index;
+			const methodEnd = methodMatches[methodIndex + 1]?.index ?? pathBlock.length;
+			const methodBlock = pathBlock.slice(methodStart, methodEnd);
+			const operationId = methodBlock.match(/operationId:\s+([A-Za-z][A-Za-z0-9]*)/)?.[1] || '';
+			operations.push({ method, operationId, path });
+		}
+	}
+	return operations;
+}
+
+function upperFirst(value) {
+	return value.charAt(0).toUpperCase() + value.slice(1);
 }

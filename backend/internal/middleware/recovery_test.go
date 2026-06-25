@@ -103,6 +103,57 @@ func TestRecoveryPanicLogOmitsQueryString(t *testing.T) {
 	}
 }
 
+func TestRecoveryPanicLogBoundsPanicValueLength(t *testing.T) {
+	gin.SetMode(gin.ReleaseMode)
+	t.Cleanup(func() { gin.SetMode(gin.TestMode) })
+
+	var panicLog bytes.Buffer
+	router := gin.New()
+	router.Use(RequestID(), recoveryWithWriter(&panicLog))
+	router.GET("/panic", func(*gin.Context) {
+		panic(strings.Repeat("a", maxLoggedPanicValueLength+20))
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/panic", nil))
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	want := strings.Repeat("a", maxLoggedPanicValueLength-3) + "..."
+	logOutput := panicLog.String()
+	if !strings.Contains(logOutput, `panic_value="`+want+`"`) {
+		t.Fatalf("panic log = %q, missing truncated panic value", logOutput)
+	}
+	if strings.Contains(logOutput, strings.Repeat("a", maxLoggedPanicValueLength+1)) {
+		t.Fatalf("panic log contains unbounded panic value: %q", logOutput)
+	}
+}
+
+func TestRecoveryPanicLogTruncatesPanicValueOnCharacterBoundary(t *testing.T) {
+	gin.SetMode(gin.ReleaseMode)
+	t.Cleanup(func() { gin.SetMode(gin.TestMode) })
+
+	var panicLog bytes.Buffer
+	router := gin.New()
+	router.Use(RequestID(), recoveryWithWriter(&panicLog))
+	router.GET("/panic", func(*gin.Context) {
+		panic(strings.Repeat("好", maxLoggedPanicValueLength+20))
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/panic", nil))
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	want := strings.Repeat("好", maxLoggedPanicValueLength-3) + "..."
+	logOutput := panicLog.String()
+	if !strings.Contains(logOutput, `panic_value="`+want+`"`) {
+		t.Fatalf("panic log = %q, missing character-safe truncated panic value", logOutput)
+	}
+}
+
 func TestRecoveryDoesNotLeakPanicDetailsOutsideRelease(t *testing.T) {
 	gin.SetMode(gin.DebugMode)
 	t.Cleanup(func() { gin.SetMode(gin.TestMode) })

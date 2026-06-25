@@ -89,6 +89,7 @@ type JWTConfig struct {
 	Audience  string
 }
 
+// LoadDotEnv 从 dotenv 文件补齐尚未显式设置的环境变量，缺失文件会被视为无操作。
 func LoadDotEnv(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -195,6 +196,7 @@ func isDotEnvSpace(char rune) bool {
 	return char == ' ' || char == '\t'
 }
 
+// Load 按环境变量和本地开发默认值构造配置；非法环境值会先回退，严格校验交给 LoadStrict。
 func Load() Config {
 	driver := stringEnv("DB_DRIVER", "postgres")
 	return Config{
@@ -250,6 +252,7 @@ func Load() Config {
 	}
 }
 
+// LoadStrict 先解析环境变量格式，再校验完整配置，适合服务启动时失败退出。
 func LoadStrict() (Config, error) {
 	cfg := Load()
 	if err := validateEnvValues(); err != nil {
@@ -261,6 +264,7 @@ func LoadStrict() (Config, error) {
 	return cfg, nil
 }
 
+// Validate 聚合所有配置段错误，让启动失败时一次性看到所有不合法项。
 func (c Config) Validate() error {
 	var errs []error
 	if err := validatePort(c.Port); err != nil {
@@ -658,6 +662,7 @@ func (c JWTConfig) Validate() error {
 	return nil
 }
 
+// ExplicitDatabaseDSN 返回调用方显式提供的 DB_DSN，用于区分默认本地 DSN 和真实配置。
 func ExplicitDatabaseDSN() string {
 	return strings.TrimSpace(os.Getenv("DB_DSN"))
 }

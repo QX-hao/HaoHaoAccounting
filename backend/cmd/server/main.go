@@ -17,6 +17,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/stringutil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -188,7 +189,7 @@ func storeConfig(cfg config.DatabaseConfig) store.Config {
 
 func newCORSConfig(cfg config.Config) cors.Config {
 	return cors.Config{
-		AllowOrigins: cfg.HTTP.CORSAllowOrigins,
+		AllowOrigins: normalizedCORSOrigins(cfg.HTTP.CORSAllowOrigins),
 		AllowMethods: []string{
 			http.MethodGet,
 			http.MethodPost,
@@ -222,17 +223,33 @@ func newCORSConfig(cfg config.Config) cors.Config {
 }
 
 func validateCORSConfig(cfg config.Config) error {
-	for _, origin := range cfg.HTTP.CORSAllowOrigins {
+	origins := normalizedCORSOrigins(cfg.HTTP.CORSAllowOrigins)
+	for _, origin := range origins {
 		if err := validateExplicitCORSOrigin(origin); err != nil {
 			return err
 		}
 	}
 
-	corsConfig := newCORSConfig(cfg)
+	corsConfig := newCORSConfig(config.Config{HTTP: config.HTTPConfig{CORSAllowOrigins: origins}})
 	if err := corsConfig.Validate(); err != nil {
 		return fmt.Errorf("CORS config: %w", err)
 	}
 	return nil
+}
+
+func normalizedCORSOrigins(origins []string) []string {
+	result := make([]string, 0, len(origins))
+	seen := make(map[string]struct{}, len(origins))
+	for _, origin := range origins {
+		if clean := strings.TrimSpace(origin); clean != "" {
+			if _, exists := seen[clean]; exists {
+				continue
+			}
+			seen[clean] = struct{}{}
+			result = append(result, clean)
+		}
+	}
+	return result
 }
 
 func validateExplicitCORSOrigin(origin string) error {
@@ -306,12 +323,6 @@ func requestLogFormatter(param gin.LogFormatterParams) string {
 	if param.Latency > time.Minute {
 		param.Latency = param.Latency.Truncate(time.Second)
 	}
-	requestID := "-"
-	if value, ok := param.Keys[middleware.RequestIDContextKey]; ok {
-		if id, ok := value.(string); ok && id != "" {
-			requestID = id
-		}
-	}
 
 	return fmt.Sprintf(
 		"time=%q status=%d latency=%q client_ip=%q method=%q path=%q proto=%q user_agent=%q request_id=%q bytes=%d error=%q\n",
@@ -323,11 +334,16 @@ func requestLogFormatter(param gin.LogFormatterParams) string {
 		logPath(param.Path),
 		logProto(param.Request),
 		logUserAgent(param.Request),
-		requestID,
+		logRequestID(param.Keys),
 		param.BodySize,
-		param.ErrorMessage,
+		logErrorMessage(param.ErrorMessage),
 	)
 }
+
+const (
+	maxLoggedUserAgentLength = 256
+	maxLoggedErrorLength     = 512
+)
 
 func logProto(request *http.Request) string {
 	if request == nil || request.Proto == "" {
@@ -344,7 +360,7 @@ func logUserAgent(request *http.Request) string {
 	if userAgent == "" {
 		return "-"
 	}
-	return userAgent
+	return stringutil.TruncateRunes(userAgent, maxLoggedUserAgentLength)
 }
 
 func logPath(path string) string {
@@ -352,4 +368,21 @@ func logPath(path string) string {
 		return beforeQuery
 	}
 	return path
+}
+
+func logRequestID(keys map[string]any) string {
+	if value, ok := keys[middleware.RequestIDContextKey]; ok {
+		if id, ok := value.(string); ok && middleware.ValidRequestID(id) {
+			return id
+		}
+	}
+	return "-"
+}
+
+func logErrorMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return ""
+	}
+	return stringutil.TruncateRunes(message, maxLoggedErrorLength)
 }

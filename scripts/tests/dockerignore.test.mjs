@@ -142,6 +142,16 @@ test('CI workflow runs the same verification commands documented for local check
 	assert.match(ciWorkflow, /actions\/setup-go@v5/);
 });
 
+test('CI workflow keeps pull request checks on read-only credentials', () => {
+	assert.match(ciWorkflow, /permissions:\n(?:\s+# .+\n)?\s+contents: read/);
+	assert.doesNotMatch(ciWorkflow, /pull_request_target:/);
+	assert.doesNotMatch(ciWorkflow, /^\s+[a-z-]+:\s+write$/m);
+});
+
+test('CI run steps use explicit bash defaults for pipefail semantics', () => {
+	assert.match(ciWorkflow, /defaults:\n\s+run:\n\s+shell: bash/);
+});
+
 test('CI workflow only runs branch events that can affect main', () => {
 	assert.match(ciWorkflow, /on:\n\s+push:\n\s+branches: \[main\]\n\s+pull_request:\n\s+branches: \[main\]\n\s+workflow_dispatch:/);
 });
@@ -151,6 +161,18 @@ test('CI jobs pin the hosted runner image instead of following latest', () => {
 	assert.deepEqual(floatingRunners, []);
 	const pinnedRunners = [...ciWorkflow.matchAll(/runs-on:\s+ubuntu-24\.04/g)];
 	assert.equal(pinnedRunners.length, 5);
+});
+
+test('CI jobs set bounded timeouts instead of using the GitHub default', () => {
+	const jobs = ciJobBlocks();
+	assert.deepEqual([...jobs.keys()].sort(), ['api-contract', 'backend', 'deployment-config', 'mobile', 'web']);
+	for (const [job, block] of jobs) {
+		const match = block.match(/^\s+timeout-minutes:\s+(\d+)$/m);
+		assert.ok(match, `${job} job must set timeout-minutes`);
+		const timeoutMinutes = Number(match[1]);
+		assert.ok(timeoutMinutes > 0, `${job} timeout-minutes must be positive`);
+		assert.ok(timeoutMinutes <= 20, `${job} timeout-minutes must stay below the repository CI budget`);
+	}
 });
 
 test('CI checkout steps avoid persisting write-capable credentials', () => {
@@ -331,6 +353,20 @@ function redisComposeCommandBlock(redis) {
 function ciStepFrom(start) {
 	const nextStep = ciWorkflow.indexOf('\n      - ', start + 1);
 	return ciWorkflow.slice(start, nextStep === -1 ? undefined : nextStep);
+}
+
+function ciJobBlocks() {
+	// GitHub 默认 job 超时是 360 分钟，这里把每个 CI job 的较短上限固定成仓库契约。
+	const jobs = new Map();
+	const jobsStart = ciWorkflow.indexOf('\njobs:\n');
+	assert.notEqual(jobsStart, -1, 'CI workflow must define jobs');
+	const jobsSource = ciWorkflow.slice(jobsStart + '\njobs:\n'.length);
+	const jobMatches = [...jobsSource.matchAll(/^  ([A-Za-z0-9_-]+):\n/gm)];
+	for (const [index, match] of jobMatches.entries()) {
+		const end = jobMatches[index + 1]?.index ?? jobsSource.length;
+		jobs.set(match[1], jobsSource.slice(match.index, end));
+	}
+	return jobs;
 }
 
 function dependabotDirectories(ecosystem) {

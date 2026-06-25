@@ -114,13 +114,13 @@ func TestRequestIDReplacesInvalidCallerHeaderEverywhere(t *testing.T) {
 }
 
 func TestValidRequestIDRejectsUnsafeValues(t *testing.T) {
-	if validRequestID("") {
+	if ValidRequestID("") {
 		t.Fatal("empty request id should be invalid")
 	}
-	if validRequestID("bad\nid") {
+	if ValidRequestID("bad\nid") {
 		t.Fatal("request id with control characters should be invalid")
 	}
-	if validRequestID("bad id") {
+	if ValidRequestID("bad id") {
 		t.Fatal("request id with spaces should be invalid")
 	}
 }

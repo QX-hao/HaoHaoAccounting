@@ -14,6 +14,7 @@ type HTTPMetrics struct {
 	duration *prometheus.HistogramVec
 }
 
+// NewHTTPMetrics 注册低基数 HTTP 指标，标签只包含方法、Gin 路由模板和状态码。
 func NewHTTPMetrics(registry *prometheus.Registry) *HTTPMetrics {
 	metrics := &HTTPMetrics{
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -30,13 +31,14 @@ func NewHTTPMetrics(registry *prometheus.Registry) *HTTPMetrics {
 	return metrics
 }
 
+// Middleware 在请求结束后记录指标；未匹配路由统一归为 unmatched，避免原始 URL 进入 label。
 func (metrics *HTTPMetrics) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		started := time.Now()
 		c.Next()
 
 		method := normalizedMetricMethod(c.Request.Method)
-		status := strconv.Itoa(c.Writer.Status())
+		status := normalizedMetricStatus(c.Writer.Status())
 		route := c.FullPath()
 		if route == "" {
 			route = "unmatched"
@@ -54,4 +56,11 @@ func normalizedMetricMethod(method string) string {
 	default:
 		return "UNKNOWN"
 	}
+}
+
+func normalizedMetricStatus(status int) string {
+	if status < 100 || status > 599 {
+		return "000"
+	}
+	return strconv.Itoa(status)
 }

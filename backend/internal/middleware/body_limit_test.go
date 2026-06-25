@@ -14,9 +14,11 @@ import (
 func TestBodyLimitRejectsOversizedContentLength(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	handlerCalled := false
 	router := gin.New()
 	router.Use(RequestID(), BodyLimit(4))
 	router.POST("/echo", func(c *gin.Context) {
+		handlerCalled = true
 		c.String(http.StatusOK, "ok")
 	})
 
@@ -27,6 +29,9 @@ func TestBodyLimitRejectsOversizedContentLength(t *testing.T) {
 
 	if resp.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if handlerCalled {
+		t.Fatal("handler ran after oversized Content-Length rejection")
 	}
 	if got := resp.Header().Get(RequestIDHeader); got != "request-123" {
 		t.Fatalf("request id header = %q", got)

@@ -102,6 +102,26 @@ func TestHTTPMetricsNormalizesUnknownMethods(t *testing.T) {
 	}
 }
 
+func TestNormalizedMetricStatusBoundsHTTPStatusLabels(t *testing.T) {
+	tests := []struct {
+		status int
+		want   string
+	}{
+		{status: 99, want: "000"},
+		{status: 100, want: "100"},
+		{status: 204, want: "204"},
+		{status: 599, want: "599"},
+		{status: 600, want: "000"},
+		{status: 0, want: "000"},
+	}
+
+	for _, tt := range tests {
+		if got := normalizedMetricStatus(tt.status); got != tt.want {
+			t.Fatalf("normalizedMetricStatus(%d) = %q, want %q", tt.status, got, tt.want)
+		}
+	}
+}
+
 func hasMetricWithLabels(families []*dto.MetricFamily, name string, labels map[string]string) bool {
 	for _, family := range families {
 		if family.GetName() != name {

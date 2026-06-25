@@ -27,12 +27,12 @@ type pinger interface {
 	Ping(context.Context) error
 }
 
-// RegisterRoutes is the only place that knows the public HTTP route tree.
-// Modules own their handlers and business behavior; this layer only composes them.
+// RegisterRoutes 是 HTTP 路由树的统一入口；模块负责 handler 和业务逻辑，这里只负责组合。
 func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisCache) error {
 	return RegisterRoutesWithConfig(engine, s, redisCache, config.Load())
 }
 
+// RegisterRoutesWithConfig 注册健康检查、API 分组、公开登录路由和受 Bearer 认证保护的私有路由。
 func RegisterRoutesWithConfig(engine *gin.Engine, s *store.Store, redisCache *cache.RedisCache, cfg config.Config) error {
 	registerFallbackRoutes(engine)
 	registerHealthRoutes(engine, s, redisCache)

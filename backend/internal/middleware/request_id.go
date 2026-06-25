@@ -16,10 +16,11 @@ const (
 
 type requestIDStdContextKey struct{}
 
+// RequestID 统一生成或复用请求相关 id，并把同一个值写入响应头、Gin context 和标准 context。
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := strings.TrimSpace(c.GetHeader(RequestIDHeader))
-		if !validRequestID(requestID) {
+		if !ValidRequestID(requestID) {
 			requestID = newRequestID()
 		}
 
@@ -32,6 +33,7 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
+// RequestIDFromContext 从 Gin context 读取当前请求 id，主要供响应构造和日志字段复用。
 func RequestIDFromContext(c *gin.Context) string {
 	value, ok := c.Get(RequestIDContextKey)
 	if !ok {
@@ -41,6 +43,7 @@ func RequestIDFromContext(c *gin.Context) string {
 	return requestID
 }
 
+// RequestIDFromStdContext 从标准 context.Context 读取请求 id，方便服务层脱离 Gin 也能关联日志。
 func RequestIDFromStdContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -49,7 +52,8 @@ func RequestIDFromStdContext(ctx context.Context) string {
 	return requestID
 }
 
-func validRequestID(value string) bool {
+// ValidRequestID 只接受 1 到 128 字节的可见 ASCII，避免空白、换行或超长值污染日志。
+func ValidRequestID(value string) bool {
 	if value == "" || len(value) > 128 {
 		return false
 	}

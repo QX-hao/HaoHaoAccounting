@@ -45,6 +45,36 @@ func TestRequestLogFormatterIncludesRequestID(t *testing.T) {
 	}
 }
 
+func TestRequestLogFormatterRejectsUnsafeRequestID(t *testing.T) {
+	for _, requestID := range []string{
+		strings.Repeat("a", 129),
+		"bad\nid",
+		"bad id",
+	} {
+		t.Run(requestID, func(t *testing.T) {
+			line := requestLogFormatter(gin.LogFormatterParams{
+				TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+				StatusCode: 200,
+				Latency:    10 * time.Millisecond,
+				ClientIP:   "127.0.0.1",
+				Method:     "GET",
+				Path:       "/health",
+				BodySize:   32,
+				Keys: map[string]any{
+					middleware.RequestIDContextKey: requestID,
+				},
+			})
+
+			if !strings.Contains(line, `request_id="-"`) {
+				t.Fatalf("log line = %q, want unsafe request id placeholder", line)
+			}
+			if strings.Contains(line, requestID) {
+				t.Fatalf("log line leaked unsafe request id: %q", line)
+			}
+		})
+	}
+}
+
 func TestRequestLogFormatterDropsQueryString(t *testing.T) {
 	line := requestLogFormatter(gin.LogFormatterParams{
 		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
@@ -81,6 +111,104 @@ func TestRequestLogFormatterIncludesProtocolAndUserAgent(t *testing.T) {
 		if !strings.Contains(line, want) {
 			t.Fatalf("log line = %q, missing %s", line, want)
 		}
+	}
+}
+
+func TestRequestLogFormatterBoundsUserAgentLength(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+	req.Header.Set("User-Agent", strings.Repeat("a", maxLoggedUserAgentLength+20))
+
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:    req,
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts",
+	})
+
+	want := strings.Repeat("a", maxLoggedUserAgentLength-3) + "..."
+	if !strings.Contains(line, `user_agent="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated user agent", line)
+	}
+	if strings.Contains(line, strings.Repeat("a", maxLoggedUserAgentLength+1)) {
+		t.Fatalf("log line contains unbounded user agent: %q", line)
+	}
+}
+
+func TestRequestLogFormatterTruncatesUserAgentOnCharacterBoundary(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+	req.Header.Set("User-Agent", strings.Repeat("好", maxLoggedUserAgentLength+20))
+
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:    req,
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts",
+	})
+
+	want := strings.Repeat("好", maxLoggedUserAgentLength-3) + "..."
+	if !strings.Contains(line, `user_agent="`+want+`"`) {
+		t.Fatalf("log line = %q, missing character-safe truncated user agent", line)
+	}
+}
+
+func TestRequestLogFormatterUsesPlaceholderForMissingUserAgent(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:    httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil),
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts",
+	})
+
+	if !strings.Contains(line, `user_agent="-"`) {
+		t.Fatalf("log line = %q, missing empty user agent placeholder", line)
+	}
+}
+
+func TestRequestLogFormatterBoundsErrorLength(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:      httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil),
+		TimeStamp:    time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode:   500,
+		Latency:      10 * time.Millisecond,
+		ClientIP:     "127.0.0.1",
+		Method:       "GET",
+		Path:         "/api/v1/accounts",
+		ErrorMessage: strings.Repeat("a", maxLoggedErrorLength+20),
+	})
+
+	want := strings.Repeat("a", maxLoggedErrorLength-3) + "..."
+	if !strings.Contains(line, `error="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated error", line)
+	}
+	if strings.Contains(line, strings.Repeat("a", maxLoggedErrorLength+1)) {
+		t.Fatalf("log line contains unbounded error: %q", line)
+	}
+}
+
+func TestRequestLogFormatterTruncatesErrorOnCharacterBoundary(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:      httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil),
+		TimeStamp:    time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode:   500,
+		Latency:      10 * time.Millisecond,
+		ClientIP:     "127.0.0.1",
+		Method:       "GET",
+		Path:         "/api/v1/accounts",
+		ErrorMessage: strings.Repeat("好", maxLoggedErrorLength+20),
+	})
+
+	want := strings.Repeat("好", maxLoggedErrorLength-3) + "..."
+	if !strings.Contains(line, `error="`+want+`"`) {
+		t.Fatalf("log line = %q, missing character-safe truncated error", line)
 	}
 }
 
@@ -125,6 +253,7 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`CORS_ALLOW_ORIGINS`",
 		"explicit `http` or `https` origins",
 		"wildcards",
+		"trimmed and deduplicated",
 		"credentials disabled",
 		"`gin-contrib/cors`",
 		"queued resource locations",
@@ -136,6 +265,8 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`HTTP_REQUEST_TIMEOUT` defaults to `60s`",
 		"`0s`",
 		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
+		"`user_agent` values are trimmed to 256 characters before logging",
+		"`error` values are trimmed to 512 characters before logging",
 		"`HTTP_METRICS_ENABLED=true`",
 		"`HTTP_METRICS_TOKEN`",
 		"`/metrics`",
@@ -415,10 +546,52 @@ func TestNewCORSConfigIncludesRequestIDHeader(t *testing.T) {
 	}
 }
 
+func TestCORSHeaderListsStayMinimalAndDeduplicated(t *testing.T) {
+	corsConfig := newCORSConfig(config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+		},
+	})
+
+	wantAllowHeaders := []string{
+		"Origin",
+		"Content-Type",
+		"Accept",
+		"Authorization",
+		middleware.RequestIDHeader,
+	}
+	if !slices.Equal(corsConfig.AllowHeaders, wantAllowHeaders) {
+		t.Fatalf("AllowHeaders = %#v, want %#v", corsConfig.AllowHeaders, wantAllowHeaders)
+	}
+
+	for name, headers := range map[string][]string{
+		"AllowHeaders":  corsConfig.AllowHeaders,
+		"ExposeHeaders": corsConfig.ExposeHeaders,
+	} {
+		if duplicates := duplicateHeaderNames(headers); len(duplicates) > 0 {
+			t.Fatalf("%s = %#v, duplicate headers = %#v", name, headers, duplicates)
+		}
+	}
+
+	if hasHeaderName(corsConfig.AllowHeaders, "X-Admin-Override") {
+		t.Fatalf("AllowHeaders = %#v, should not allow internal admin override header", corsConfig.AllowHeaders)
+	}
+	for _, header := range []string{"Set-Cookie", "Cookie", "Authorization"} {
+		if hasHeaderName(corsConfig.ExposeHeaders, header) {
+			t.Fatalf("ExposeHeaders = %#v, should not expose %s", corsConfig.ExposeHeaders, header)
+		}
+	}
+}
+
 func TestNewCORSConfigKeepsExplicitOriginsAndNoCredentials(t *testing.T) {
 	cfg := config.Config{
 		HTTP: config.HTTPConfig{
-			CORSAllowOrigins: []string{"https://app.example.com"},
+			CORSAllowOrigins: []string{
+				" https://app.example.com ",
+				"",
+				" http://localhost:3000 ",
+				"https://app.example.com",
+			},
 		},
 	}
 
@@ -430,8 +603,23 @@ func TestNewCORSConfigKeepsExplicitOriginsAndNoCredentials(t *testing.T) {
 	if corsConfig.AllowCredentials {
 		t.Fatal("AllowCredentials must stay disabled")
 	}
-	if got := corsConfig.AllowOrigins; !slices.Equal(got, []string{"https://app.example.com"}) {
+	if got := corsConfig.AllowOrigins; !slices.Equal(got, []string{"https://app.example.com", "http://localhost:3000"}) {
 		t.Fatalf("AllowOrigins = %#v", got)
+	}
+}
+
+func TestNormalizedCORSOriginsTrimsEmptyAndDeduplicatesInOrder(t *testing.T) {
+	got := normalizedCORSOrigins([]string{
+		" https://app.example.com ",
+		"",
+		"http://localhost:3000",
+		"https://app.example.com",
+		" http://localhost:3000 ",
+	})
+	want := []string{"https://app.example.com", "http://localhost:3000"}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("normalizedCORSOrigins() = %#v, want %#v", got, want)
 	}
 }
 
@@ -456,6 +644,31 @@ func TestCORSAllowMethodsCoverRegisteredAPIMethods(t *testing.T) {
 		if !slices.Contains(corsConfig.AllowMethods, route.Method) {
 			t.Fatalf("AllowMethods = %#v, missing %s for %s", corsConfig.AllowMethods, route.Method, route.Path)
 		}
+	}
+}
+
+func TestCORSAllowMethodsStayMinimalAndDeduplicated(t *testing.T) {
+	corsConfig := newCORSConfig(config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+		},
+	})
+
+	want := []string{
+		http.MethodGet,
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodDelete,
+		http.MethodOptions,
+	}
+	if !slices.Equal(corsConfig.AllowMethods, want) {
+		t.Fatalf("AllowMethods = %#v, want %#v", corsConfig.AllowMethods, want)
+	}
+	if slices.Contains(corsConfig.AllowMethods, http.MethodTrace) || slices.Contains(corsConfig.AllowMethods, http.MethodConnect) {
+		t.Fatalf("AllowMethods = %#v, must not expose TRACE or CONNECT", corsConfig.AllowMethods)
+	}
+	if len(corsConfig.AllowMethods) != len(slices.Compact(slices.Clone(corsConfig.AllowMethods))) {
+		t.Fatalf("AllowMethods = %#v, contains duplicates", corsConfig.AllowMethods)
 	}
 }
 
@@ -571,11 +784,15 @@ type serverTestOpenAPIComponents struct {
 }
 
 type serverTestOpenAPIPathItem struct {
-	Delete *serverTestOpenAPIOperation `yaml:"delete"`
-	Get    *serverTestOpenAPIOperation `yaml:"get"`
-	Patch  *serverTestOpenAPIOperation `yaml:"patch"`
-	Post   *serverTestOpenAPIOperation `yaml:"post"`
-	Put    *serverTestOpenAPIOperation `yaml:"put"`
+	// 覆盖 OpenAPI Path Item 的标准 HTTP 操作，避免 CORS 响应头契约漏检。
+	Delete  *serverTestOpenAPIOperation `yaml:"delete"`
+	Get     *serverTestOpenAPIOperation `yaml:"get"`
+	Head    *serverTestOpenAPIOperation `yaml:"head"`
+	Options *serverTestOpenAPIOperation `yaml:"options"`
+	Patch   *serverTestOpenAPIOperation `yaml:"patch"`
+	Post    *serverTestOpenAPIOperation `yaml:"post"`
+	Put     *serverTestOpenAPIOperation `yaml:"put"`
+	Trace   *serverTestOpenAPIOperation `yaml:"trace"`
 }
 
 type serverTestOpenAPIOperation struct {
@@ -588,7 +805,16 @@ type serverTestOpenAPIResponse struct {
 }
 
 func (item serverTestOpenAPIPathItem) operations() []*serverTestOpenAPIOperation {
-	operations := []*serverTestOpenAPIOperation{item.Delete, item.Get, item.Patch, item.Post, item.Put}
+	operations := []*serverTestOpenAPIOperation{
+		item.Delete,
+		item.Get,
+		item.Head,
+		item.Options,
+		item.Patch,
+		item.Post,
+		item.Put,
+		item.Trace,
+	}
 	result := make([]*serverTestOpenAPIOperation, 0, len(operations))
 	for _, operation := range operations {
 		if operation != nil {
@@ -636,6 +862,7 @@ func TestValidateCORSConfig(t *testing.T) {
 		{"https://app.example.com:bad"},
 		{"https:///app.example.com"},
 		{},
+		{" ", ""},
 	} {
 		t.Run(strings.Join(origins, ","), func(t *testing.T) {
 			cfg := config.Config{HTTP: config.HTTPConfig{CORSAllowOrigins: origins}}
@@ -1070,6 +1297,26 @@ func headerHasToken(value, token string) bool {
 		}
 	}
 	return false
+}
+
+func hasHeaderName(headers []string, name string) bool {
+	return slices.ContainsFunc(headers, func(header string) bool {
+		return strings.EqualFold(strings.TrimSpace(header), name)
+	})
+}
+
+func duplicateHeaderNames(headers []string) []string {
+	seen := make(map[string]struct{}, len(headers))
+	var duplicates []string
+	for _, header := range headers {
+		normalized := strings.ToLower(strings.TrimSpace(header))
+		if _, ok := seen[normalized]; ok {
+			duplicates = append(duplicates, header)
+			continue
+		}
+		seen[normalized] = struct{}{}
+	}
+	return duplicates
 }
 
 func TestFallbackResponsesKeepGlobalMiddlewareHeaders(t *testing.T) {

@@ -18,6 +18,7 @@ type AcceptRule struct {
 	Offered      func(*gin.Context) []string
 }
 
+// Accept 按路由声明的响应媒体类型检查 Accept 头，拒绝无法协商的请求并补充 Vary: Accept。
 func Accept(rules []AcceptRule) gin.HandlerFunc {
 	lookup := make(map[string][]string, len(rules))
 	for _, rule := range rules {
@@ -26,7 +27,9 @@ func Accept(rules []AcceptRule) gin.HandlerFunc {
 		if method == "" || path == "" || len(rule.OfferedTypes) == 0 {
 			continue
 		}
-		lookup[method+" "+path] = normalizeMediaTypes(rule.OfferedTypes)
+		if offered := normalizeMediaTypes(rule.OfferedTypes); len(offered) > 0 {
+			lookup[method+" "+path] = offered
+		}
 	}
 
 	return func(c *gin.Context) {
@@ -40,7 +43,9 @@ func Accept(rules []AcceptRule) gin.HandlerFunc {
 			method := strings.ToUpper(strings.TrimSpace(rule.Method))
 			path := strings.TrimSpace(rule.Path)
 			if method+" "+path == key && rule.Offered != nil {
-				offered = normalizeMediaTypes(rule.Offered(c))
+				if dynamicOffered := normalizeMediaTypes(rule.Offered(c)); len(dynamicOffered) > 0 {
+					offered = dynamicOffered
+				}
 				break
 			}
 		}
@@ -205,6 +210,7 @@ func appendVary(headers http.Header, field string) {
 	headers.Set("Vary", current+", "+field)
 }
 
+// APIAcceptRules 从当前 API/OpenAPI 契约整理响应媒体类型规则，文件下载接口按 format 动态收窄类型。
 func APIAcceptRules() []AcceptRule {
 	rules := []AcceptRule{
 		{

@@ -12,9 +12,13 @@ import (
 	"syscall"
 
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/stringutil"
 	"github.com/gin-gonic/gin"
 )
 
+const maxLoggedPanicValueLength = 512
+
+// Recovery 捕获 handler panic，记录受控日志，并在响应尚未写出时返回统一的 500 JSON。
 func Recovery() gin.HandlerFunc {
 	return recoveryWithWriter(gin.DefaultErrorWriter)
 }
@@ -47,6 +51,7 @@ func logRecoveredPanic(out io.Writer, c *gin.Context, recovered any) {
 	if out == nil {
 		return
 	}
+	panicValue := logPanicValue(recovered)
 	if isBrokenPipe(recovered) {
 		fmt.Fprintf(
 			out,
@@ -56,7 +61,7 @@ func logRecoveredPanic(out io.Writer, c *gin.Context, recovered any) {
 			c.ClientIP(),
 			RequestIDFromContext(c),
 			fmt.Sprintf("%T", recovered),
-			fmt.Sprint(recovered),
+			panicValue,
 		)
 		return
 	}
@@ -68,9 +73,14 @@ func logRecoveredPanic(out io.Writer, c *gin.Context, recovered any) {
 		c.ClientIP(),
 		RequestIDFromContext(c),
 		fmt.Sprintf("%T", recovered),
-		fmt.Sprint(recovered),
+		panicValue,
 		string(debug.Stack()),
 	)
+}
+
+func logPanicValue(recovered any) string {
+	// panic 值可能是很长的字符串或错误对象，日志里保留前缀即可定位问题。
+	return stringutil.TruncateRunes(fmt.Sprint(recovered), maxLoggedPanicValueLength)
 }
 
 func isBrokenPipe(recovered any) bool {
