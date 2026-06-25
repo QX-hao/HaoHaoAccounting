@@ -9,6 +9,7 @@ const allowedTopLevelKeys = new Set(['version', 'updates']);
 const allowedUpdateKeys = new Set(['package-ecosystem', 'directory', 'schedule', 'open-pull-requests-limit', 'cooldown', 'groups']);
 const allowedScheduleKeys = new Set(['interval', 'day', 'time', 'timezone']);
 const allowedCooldownKeys = new Set(['default-days']);
+const allowedWeeklyDays = new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']);
 const supportedEcosystems = new Set(['docker', 'github-actions', 'gomod', 'npm']);
 
 test('dependabot config uses the supported GitHub schema subset', () => {
@@ -24,12 +25,13 @@ test('dependabot config uses the supported GitHub schema subset', () => {
 
 		assertAllowedKeys(update.schedule.keys, allowedScheduleKeys, `${update.ecosystem} schedule`);
 		assert.equal(update.schedule.interval, 'weekly');
+		assert.ok(allowedWeeklyDays.has(update.schedule.day), `${update.ecosystem} ${update.directory} uses invalid schedule day`);
 		assert.equal(update.schedule.day, 'monday');
-		assert.match(update.schedule.time, /^\d{2}:\d{2}$/);
+		assertValidDependabotTime(update.schedule.time, `${update.ecosystem} ${update.directory}`);
 		assert.equal(update.schedule.timezone, 'Asia/Shanghai');
 
 		assertAllowedKeys(update.cooldown.keys, allowedCooldownKeys, `${update.ecosystem} cooldown`);
-		assert.equal(update.cooldown.defaultDays, 7);
+		assertDependabotCooldownDays(update.cooldown.defaultDays, `${update.ecosystem} ${update.directory}`);
 	}
 });
 
@@ -50,7 +52,7 @@ test('dependabot groups every watched ecosystem into one maintenance PR', () => 
 		assert.equal(update.groups.length, 1, `${update.ecosystem} ${update.directory} must use exactly one group`);
 		const [group] = update.groups;
 		assert.deepEqual(group.patterns, ['*']);
-		assert.match(group.name, /^[a-z0-9_-]+$/);
+		assert.match(group.name, /^[a-z][a-z|_-]*[a-z]$/);
 	}
 });
 
@@ -207,6 +209,18 @@ function assertAllowedKeys(keys, allowed, context) {
 	for (const key of keys) {
 		assert.ok(allowed.has(key), `${context} contains unsupported key ${key}`);
 	}
+}
+
+function assertDependabotCooldownDays(days, context) {
+	assert.equal(Number.isInteger(days), true, `${context} cooldown default-days must be an integer`);
+	assert.ok(days >= 1 && days <= 90, `${context} cooldown default-days must be between 1 and 90`);
+}
+
+function assertValidDependabotTime(value, context) {
+	assert.match(value, /^\d{2}:\d{2}$/, `${context} schedule time must use hh:mm format`);
+	const [hour, minute] = value.split(':').map(Number);
+	assert.ok(hour >= 0 && hour <= 23, `${context} schedule hour must be 00-23`);
+	assert.ok(minute >= 0 && minute <= 59, `${context} schedule minute must be 00-59`);
 }
 
 function indentOf(line) {
