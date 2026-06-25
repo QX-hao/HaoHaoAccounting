@@ -239,8 +239,8 @@ func Load() Config {
 			Name:     stringEnv("ADMIN_NAME", "好好用户"),
 		},
 		LoginRateLimit: LoginRateLimitConfig{
-			MaxFailures: intEnv("LOGIN_RATE_LIMIT_MAX_FAILURES", 5),
-			Window:      durationEnv("LOGIN_RATE_LIMIT_WINDOW", 10*time.Minute),
+			MaxFailures: nonNegativeIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES", 5),
+			Window:      nonNegativeDurationEnv("LOGIN_RATE_LIMIT_WINDOW", 10*time.Minute),
 		},
 		JWT: JWTConfig{
 			Secret:    strings.TrimSpace(os.Getenv("JWT_SECRET")),
@@ -325,8 +325,8 @@ func validateEnvValues() error {
 		validateBoolEnv("HTTP_HSTS_PRELOAD"),
 		validateCrossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
 		validateBoolEnv("HTTP_METRICS_ENABLED"),
-		validatePositiveIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES"),
-		validatePositiveDurationEnv("LOGIN_RATE_LIMIT_WINDOW"),
+		validateNonNegativeIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES"),
+		validateNonNegativeDurationEnv("LOGIN_RATE_LIMIT_WINDOW"),
 		validatePositiveDurationEnv("JWT_TTL"),
 		validateNonNegativeDurationEnv("JWT_CLOCK_SKEW"),
 	}
@@ -631,11 +631,11 @@ func (c AdminConfig) Validate() error {
 
 func (c LoginRateLimitConfig) Validate() error {
 	var errs []error
-	if c.MaxFailures <= 0 {
-		errs = append(errs, errors.New("LOGIN_RATE_LIMIT_MAX_FAILURES must be positive"))
+	if c.MaxFailures < 0 {
+		errs = append(errs, errors.New("LOGIN_RATE_LIMIT_MAX_FAILURES must be non-negative"))
 	}
-	if c.Window <= 0 {
-		errs = append(errs, errors.New("LOGIN_RATE_LIMIT_WINDOW must be positive"))
+	if c.Window < 0 {
+		errs = append(errs, errors.New("LOGIN_RATE_LIMIT_WINDOW must be non-negative"))
 	}
 	return errors.Join(errs...)
 }

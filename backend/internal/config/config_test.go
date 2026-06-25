@@ -331,6 +331,23 @@ func TestLoadStrictValidatesLoadedConfig(t *testing.T) {
 	}
 }
 
+func TestLoadStrictAllowsDisabledLoginRateLimiter(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ADMIN_USERNAME", "admin")
+	t.Setenv("ADMIN_PASSWORD", "password")
+	t.Setenv("JWT_SECRET", "jwt-secret-with-at-least-32-characters")
+	t.Setenv("LOGIN_RATE_LIMIT_MAX_FAILURES", "0")
+	t.Setenv("LOGIN_RATE_LIMIT_WINDOW", "0s")
+
+	cfg, err := LoadStrict()
+	if err != nil {
+		t.Fatalf("LoadStrict disabled login limiter: %v", err)
+	}
+	if cfg.LoginRateLimit.MaxFailures != 0 || cfg.LoginRateLimit.Window != 0 {
+		t.Fatalf("LoginRateLimit = %#v", cfg.LoginRateLimit)
+	}
+}
+
 func TestJWTConfigValidate(t *testing.T) {
 	if err := (JWTConfig{}).Validate(); err == nil {
 		t.Fatal("expected missing secret error")
@@ -576,10 +593,16 @@ func TestLoginRateLimitConfigValidate(t *testing.T) {
 	if err := (LoginRateLimitConfig{MaxFailures: 1, Window: time.Minute}).Validate(); err != nil {
 		t.Fatalf("valid login rate limit error: %v", err)
 	}
-	if err := (LoginRateLimitConfig{MaxFailures: 0, Window: time.Minute}).Validate(); err == nil {
+	if err := (LoginRateLimitConfig{MaxFailures: 0, Window: time.Minute}).Validate(); err != nil {
+		t.Fatalf("zero max failures should disable limiter: %v", err)
+	}
+	if err := (LoginRateLimitConfig{MaxFailures: 1, Window: 0}).Validate(); err != nil {
+		t.Fatalf("zero window should disable limiter: %v", err)
+	}
+	if err := (LoginRateLimitConfig{MaxFailures: -1, Window: time.Minute}).Validate(); err == nil {
 		t.Fatal("expected invalid max failures error")
 	}
-	if err := (LoginRateLimitConfig{MaxFailures: 1, Window: 0}).Validate(); err == nil {
+	if err := (LoginRateLimitConfig{MaxFailures: 1, Window: -time.Second}).Validate(); err == nil {
 		t.Fatal("expected invalid window error")
 	}
 }
@@ -631,7 +654,7 @@ func TestConfigValidate(t *testing.T) {
 	multipleInvalid := valid
 	multipleInvalid.Database.MaxOpenConns = 0
 	multipleInvalid.HTTP.MaxBodyBytes = 0
-	multipleInvalid.LoginRateLimit.Window = 0
+	multipleInvalid.LoginRateLimit.Window = -time.Second
 	if err := multipleInvalid.Validate(); err == nil {
 		t.Fatal("expected multiple validation errors")
 	} else {
