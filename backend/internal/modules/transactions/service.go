@@ -78,7 +78,7 @@ func (s *Service) List(ctx context.Context, userID uint, filter ListFilter) ([]m
 // Create 在一个数据库事务里写入交易并更新账户余额，保证账单和账户不会只成功一半。
 func (s *Service) Create(ctx context.Context, userID uint, req Request) (models.Transaction, error) {
 	var tx models.Transaction
-	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
+	if err := s.store.Transaction(ctx, func(dbtx *gorm.DB) error {
 		next, err := s.createWithDB(dbtx, userID, req)
 		if err != nil {
 			return err
@@ -101,7 +101,7 @@ func (s *Service) CreateMany(ctx context.Context, userID uint, requests []Reques
 	}
 
 	created := make([]models.Transaction, 0, len(requests))
-	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
+	if err := s.store.Transaction(ctx, func(dbtx *gorm.DB) error {
 		next, err := s.CreateManyWithDB(dbtx, userID, requests)
 		if err != nil {
 			return err
@@ -211,7 +211,7 @@ func (s *Service) Update(ctx context.Context, userID, id uint, req Request) (mod
 	updated.Source = stringutil.FallbackName(req.Source, existing.Source)
 
 	// 修改交易时要围绕“旧值”和“新值”重新对账，否则账户余额会重复累加或漏减。
-	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
+	if err := s.store.Transaction(ctx, func(dbtx *gorm.DB) error {
 		if err := revertAccountDelta(dbtx, existing.AccountID, existing.Type, existing.AmountCents); err != nil {
 			return err
 		}
@@ -235,7 +235,7 @@ func (s *Service) Delete(ctx context.Context, userID, id uint) error {
 		return errors.New("transaction not found")
 	}
 
-	if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
+	if err := s.store.Transaction(ctx, func(dbtx *gorm.DB) error {
 		if err := revertAccountDelta(dbtx, tx.AccountID, tx.Type, tx.AmountCents); err != nil {
 			return err
 		}
@@ -254,10 +254,7 @@ func (s *Service) ensureCategoryAndAccount(ctx context.Context, userID uint, txT
 }
 
 func (s *Service) db(ctx context.Context) *gorm.DB {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.store.DB.WithContext(ctx)
+	return s.store.DBWithContext(ctx)
 }
 
 func (s *Service) invalidateUser(ctx context.Context, userID uint) {
