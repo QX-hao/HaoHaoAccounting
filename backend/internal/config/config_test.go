@@ -104,6 +104,59 @@ func TestLoadDotEnvParsesCommonDotEnvSyntax(t *testing.T) {
 	}
 }
 
+func TestLoadDotEnvIgnoresInvalidKeys(t *testing.T) {
+	keys := []string{
+		"LOAD_DOTENV_VALID",
+		"LOAD_DOTENV_VALID_2",
+		"LOAD DOTTENV BAD",
+		"1LOAD_DOTENV_BAD",
+		"LOAD-DOTENV-BAD",
+	}
+	for _, key := range keys {
+		restoreEnv(t, key)
+	}
+
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(`
+LOAD_DOTENV_VALID=ok
+LOAD_DOTENV_VALID_2=ok2
+LOAD DOTTENV BAD=space
+1LOAD_DOTENV_BAD=leading-number
+LOAD-DOTENV-BAD=dash
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadDotEnv(path); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+
+	if got := os.Getenv("LOAD_DOTENV_VALID"); got != "ok" {
+		t.Fatalf("LOAD_DOTENV_VALID = %q", got)
+	}
+	if got := os.Getenv("LOAD_DOTENV_VALID_2"); got != "ok2" {
+		t.Fatalf("LOAD_DOTENV_VALID_2 = %q", got)
+	}
+	for _, key := range []string{"LOAD DOTTENV BAD", "1LOAD_DOTENV_BAD", "LOAD-DOTENV-BAD"} {
+		if got := os.Getenv(key); got != "" {
+			t.Fatalf("%s = %q, want unset", key, got)
+		}
+	}
+}
+
+func TestValidDotEnvKeyUsesShellCompatibleNames(t *testing.T) {
+	for _, key := range []string{"A", "_", "APP_ENV", "_APP_ENV", "APP_ENV_2", "app_env"} {
+		if !validDotEnvKey(key) {
+			t.Fatalf("validDotEnvKey(%q) = false, want true", key)
+		}
+	}
+	for _, key := range []string{"", "1APP_ENV", "APP-ENV", "APP ENV", "APP.ENV", "APP/ENV", "应用"} {
+		if validDotEnvKey(key) {
+			t.Fatalf("validDotEnvKey(%q) = true, want false", key)
+		}
+	}
+}
+
 func TestLoadDotEnvIgnoresMissingFile(t *testing.T) {
 	if err := LoadDotEnv(filepath.Join(t.TempDir(), "missing.env")); err != nil {
 		t.Fatalf("LoadDotEnv missing file: %v", err)

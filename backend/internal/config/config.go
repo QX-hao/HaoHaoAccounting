@@ -116,9 +116,12 @@ func LoadDotEnv(path string) error {
 			continue
 		}
 		key = strings.TrimSpace(key)
+		if !validDotEnvKey(key) {
+			continue
+		}
 		value = parseDotEnvValue(value)
 		// 显式环境变量优先级高于 .env；即使值为空，也视为调用方主动设置。
-		if _, exists := os.LookupEnv(key); key == "" || exists {
+		if _, exists := os.LookupEnv(key); exists {
 			continue
 		}
 		if err := os.Setenv(key, value); err != nil {
@@ -136,6 +139,23 @@ func trimDotEnvExportPrefix(line string) string {
 		return line
 	}
 	return strings.TrimSpace(line[len("export"):])
+}
+
+// dotenv key 按 shell 环境变量名收紧，避免空格、短横线等误写被注入进进程环境。
+func validDotEnvKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for index, char := range key {
+		if char == '_' || char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' {
+			continue
+		}
+		if index > 0 && char >= '0' && char <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func parseDotEnvValue(value string) string {
