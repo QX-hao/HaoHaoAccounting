@@ -31,6 +31,21 @@ func TestNoStore(t *testing.T) {
 	}
 }
 
+func TestNoCache(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(NoCache())
+	router.GET("/metrics", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+
+	assertNoCacheHeaders(t, resp.Header())
+}
+
 func TestNoStoreAPIOnlyAppliesToAPIPrefix(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -124,6 +139,12 @@ func TestSetNoStore(t *testing.T) {
 func TestSetNoCache(t *testing.T) {
 	headers := http.Header{}
 	SetNoCache(headers)
+
+	assertNoCacheHeaders(t, headers)
+}
+
+func assertNoCacheHeaders(t *testing.T, headers http.Header) {
+	t.Helper()
 
 	if got := headers.Get("Cache-Control"); got != "no-cache" {
 		t.Fatalf("Cache-Control = %q", got)

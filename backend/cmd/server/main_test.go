@@ -328,7 +328,7 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"Keep it disabled unless the backend port is protected",
 		"registered before API middleware",
 		"not affected by API `Accept` and `Content-Type` negotiation",
-		"still applies `RequestID`, `Recovery`, and `SecurityHeaders`",
+		"still applies `RequestID`, `Recovery`, `SecurityHeaders`, and `NoCache` revalidation headers",
 		"method, Gin route pattern, and status",
 		"early rejections",
 		"`X-Request-ID`",
@@ -377,6 +377,7 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	if !middleware.ValidRequestID(secondMetricsResp.Header().Get(middleware.RequestIDHeader)) {
 		t.Fatalf("metrics response missing valid request id header: %#v", secondMetricsResp.Header())
 	}
+	assertMetricsNoCacheHeaders(t, secondMetricsResp)
 	assertMetricsSecurityHeaders(t, secondMetricsResp)
 	body := secondMetricsResp.Body.String()
 	for _, want := range []string{
@@ -479,8 +480,22 @@ func TestMetricsEndpointCanRequireBearerToken(t *testing.T) {
 			if !middleware.ValidRequestID(resp.Header().Get(middleware.RequestIDHeader)) {
 				t.Fatalf("metrics response missing valid request id header: %#v", resp.Header())
 			}
+			assertMetricsNoCacheHeaders(t, resp)
 			assertMetricsSecurityHeaders(t, resp)
 		})
+	}
+}
+
+func assertMetricsNoCacheHeaders(t *testing.T, resp *httptest.ResponseRecorder) {
+	t.Helper()
+	for header, want := range map[string]string{
+		"Cache-Control": "no-cache",
+		"Pragma":        "no-cache",
+		"Expires":       "0",
+	} {
+		if got := resp.Header().Get(header); got != want {
+			t.Fatalf("%s = %q, want %q", header, got, want)
+		}
 	}
 }
 

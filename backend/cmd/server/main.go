@@ -140,6 +140,7 @@ func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry, cfg
 		middleware.RequestID(),
 		middleware.Recovery(),
 		middleware.SecurityHeaders(securityHeadersConfig(cfg)),
+		middleware.NoCache(),
 	}
 	if cfg.HTTP.MetricsToken != "" {
 		handlers = append(handlers, requireMetricsToken(cfg.HTTP.MetricsToken))
