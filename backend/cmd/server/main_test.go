@@ -308,6 +308,9 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`gin-contrib/cors`",
 		"queued resource locations",
 		"`TRUSTED_PROXIES`",
+		"Leave it empty for direct traffic",
+		"client-supplied `X-Forwarded-*` headers are ignored",
+		"trusted reverse proxy IPs or CIDRs",
 		"`RequestID` -> `HTTPMetrics` -> `RequestTimeout` -> logger -> `Recovery` -> `SecurityHeaders` -> CORS -> `NoStoreAPI` -> `BodyLimit` -> `ContentType` -> `Accept`",
 		"no-store API cache headers",
 		"being counted by request metrics",
@@ -606,6 +609,44 @@ func TestApplyGinMode(t *testing.T) {
 	applyGinMode(config.Config{HTTP: config.HTTPConfig{GinMode: gin.TestMode}})
 	if gin.Mode() != gin.TestMode {
 		t.Fatalf("gin.Mode = %q", gin.Mode())
+	}
+}
+
+func TestTrustedProxiesControlForwardedClientIP(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	for _, tc := range []struct {
+		name           string
+		trustedProxies []string
+		wantClientIP   string
+	}{
+		{name: "untrusted direct client", wantClientIP: "198.51.100.10"},
+		{name: "trusted reverse proxy", trustedProxies: []string{"198.51.100.10"}, wantClientIP: "203.0.113.42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			if err := router.SetTrustedProxies(tc.trustedProxies); err != nil {
+				t.Fatalf("SetTrustedProxies: %v", err)
+			}
+			router.GET("/client-ip", func(c *gin.Context) {
+				c.String(http.StatusOK, c.ClientIP())
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/client-ip", nil)
+			req.RemoteAddr = "198.51.100.10:12345"
+			req.Header.Set("X-Forwarded-For", "203.0.113.42")
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+			}
+			if got := resp.Body.String(); got != tc.wantClientIP {
+				t.Fatalf("ClientIP = %q, want %q", got, tc.wantClientIP)
+			}
+		})
 	}
 }
 
