@@ -731,8 +731,14 @@ test('OpenAPI request bodies match generated client assumptions', () => {
 	assert.match(generator, /requestBody must be required/);
 	assert.match(generator, /requestBody must use application\/json or multipart\/form-data/);
 	assert.match(generator, /requestBody must not mix JSON and multipart content/);
+	assert.match(generator, /JSON requestBody must document Content-Type parameter handling/);
+	assert.match(generator, /JSON requestBody must document structured JSON media type handling/);
+	assert.match(generator, /multipart requestBody must document boundary parameter handling/);
+	assert.match(generator, /multipart requestBody must document required file field/);
 	assert.match(generator, /requestBody is missing a component schema reference/);
 	assert.match(generator, /requestBody 400 response must use InvalidRequest/);
+	assert.match(openapi, /application\/json:[\s\S]+description: 'Accepts `Content-Type: application\/json`, optional media type parameters such as `charset=utf-8`, and `application\/\*\+json` structured JSON media types\.'/);
+	assert.match(openapi, /multipart\/form-data:[\s\S]+description: 'Accepts `Content-Type: multipart\/form-data; boundary=<boundary>` with a required `file` field\.'/);
 
 	const requestBodies = [...openapi.matchAll(/\n      requestBody:\n([\s\S]*?)(?=\n      responses:)/g)];
 	assert.ok(requestBodies.length > 0, 'OpenAPI should contain request bodies');
@@ -906,9 +912,14 @@ test('generator requires documented import headers', () => {
 	assert.match(generator, /ImportTextRequest', 'occurred_at,type,amount,category,account,note,tags'/);
 	assert.match(generator, /ImportFileRequest', 'occurred_at,type,amount,category,account,note,tags'/);
 	assert.match(generator, /ImportTextRequest', 'UTF-8 BOM'/);
+	assert.match(generator, /ImportTextRequest', 'skipDuplicates defaults to true'/);
 	assert.match(generator, /ImportFileRequest', 'UTF-8 BOM'/);
+	assert.match(generator, /ImportFileRequest', 'skipDuplicates defaults to true'/);
+	assert.match(generator, /ImportFileRequest', 'invalid values return invalid_request'/);
 	assert.match(openapi, /ImportTextRequest:[\s\S]+UTF-8 BOM on the first header is accepted/);
+	assert.match(openapi, /ImportTextRequest:[\s\S]+skipDuplicates:[\s\S]+description: skipDuplicates defaults to true when omitted\.[\s\S]+default: true/);
 	assert.match(openapi, /ImportFileRequest:[\s\S]+UTF-8 BOM on the first header is accepted/);
+	assert.match(openapi, /ImportFileRequest:[\s\S]+skipDuplicates:[\s\S]+description: skipDuplicates defaults to true when omitted; invalid values return invalid_request\.[\s\S]+default: true/);
 });
 
 test('generator requires bounded pagination response schema', () => {
@@ -958,7 +969,9 @@ test('generator requires explicit auth security contract', () => {
 	assert.match(generator, /validateSecuritySchemes\(source\)/);
 	assert.match(generator, /components\.securitySchemes\.bearerAuth must document HTTP bearer JWT auth/);
 	assert.match(generator, /components\.securitySchemes\.bearerAuth is missing Authorization header guidance/);
-	assert.match(openapi, /bearerAuth:[\s\S]+scheme: bearer[\s\S]+bearerFormat: JWT[\s\S]+Authorization: Bearer <JWT>/);
+	assert.match(generator, /components\.securitySchemes\.bearerAuth is missing repeated Authorization header guidance/);
+	assert.match(generator, /components\.securitySchemes\.bearerAuth is missing JWT not-before claim guidance/);
+	assert.match(openapi, /bearerAuth:[\s\S]+scheme: bearer[\s\S]+bearerFormat: JWT[\s\S]+Authorization: Bearer <JWT>[\s\S]+repeated `Authorization` headers are rejected[\s\S]+`nbf` not-before claim/);
 });
 
 function duplicateYamlMappingKeys(source) {

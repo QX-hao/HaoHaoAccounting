@@ -12,7 +12,7 @@ Gin middleware and auth token helpers.
 
 `BodyLimit` rejects oversized requests before handlers run when `Content-Length` is known, and wraps streaming request bodies with `http.MaxBytesReader` so JSON and multipart handlers can map over-limit reads to the same structured payload-too-large response.
 
-`ContentType` enforces declared request media types on routes with bodies, including structured `application/*+json` variants for JSON endpoints and multipart form data for import endpoints. Configured media types must be bare concrete types without parameters or wildcards; they are normalized, deduplicated, and invalid values are ignored before request checks run.
+`ContentType` enforces declared request media types on routes with bodies, including structured `application/*+json` variants for JSON endpoints and multipart form data for import endpoints. JSON requests may include Content-Type parameters such as `charset=utf-8`; configured media types must still be bare concrete types without parameters or wildcards. Rules are normalized, deduplicated, and invalid values are ignored before request checks run.
 
 `Accept` enforces declared response media types for API routes, supports compatible media ranges and structured syntax suffixes, ensures repeated `Accept` header fields are combined before negotiation, treats `q=0` media ranges as explicit exclusions, and appends `Vary: Accept` on negotiated routes. Offered media types use the same normalization as request media types so duplicate or invalid rule entries do not leak into negotiation errors.
 

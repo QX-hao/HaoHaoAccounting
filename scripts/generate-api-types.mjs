@@ -116,8 +116,11 @@ function validateSchemaConstraints(allSchemas) {
     ['ImportTextRequest', 'maxLength: 5242880'],
     ['ImportTextRequest', 'occurred_at,type,amount,category,account,note,tags'],
     ['ImportTextRequest', 'UTF-8 BOM'],
+    ['ImportTextRequest', 'skipDuplicates defaults to true'],
     ['ImportFileRequest', 'occurred_at,type,amount,category,account,note,tags'],
     ['ImportFileRequest', 'UTF-8 BOM'],
+    ['ImportFileRequest', 'skipDuplicates defaults to true'],
+    ['ImportFileRequest', 'invalid values return invalid_request'],
   ];
   for (const [schemaName, requiredText] of checks) {
     if (!allSchemas[schemaName]?.includes(requiredText)) {
@@ -462,6 +465,13 @@ function validateSecuritySchemes(openapi) {
   }
   if (!bearerAuth.includes('Authorization: Bearer <JWT>')) {
     throw new Error('components.securitySchemes.bearerAuth is missing Authorization header guidance');
+  }
+  // 认证文档要覆盖运行时安全边界，避免客户端只按 OpenAPI 调用时踩到隐藏规则。
+  if (!bearerAuth.includes('repeated `Authorization` headers are rejected')) {
+    throw new Error('components.securitySchemes.bearerAuth is missing repeated Authorization header guidance');
+  }
+  if (!bearerAuth.includes('`nbf` not-before claim')) {
+    throw new Error('components.securitySchemes.bearerAuth is missing JWT not-before claim guidance');
   }
 }
 
@@ -829,6 +839,26 @@ function validateRequestBodyContract(method, apiPath, methodBlock) {
   }
   if (hasJSON && hasMultipart) {
     throw new Error(`${method.toUpperCase()} ${apiPath} requestBody must not mix JSON and multipart content`);
+  }
+  if (hasJSON) {
+    const jsonBlock = nestedBlock(requestBlock, 'application/json:');
+    // 中间件允许 JSON Content-Type 参数和 application/*+json，这些运行时兼容性也要写进 OpenAPI。
+    if (!jsonBlock.includes('Content-Type: application/json') || !jsonBlock.includes('charset=utf-8')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} JSON requestBody must document Content-Type parameter handling`);
+    }
+    if (!jsonBlock.includes('application/*+json')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} JSON requestBody must document structured JSON media type handling`);
+    }
+  }
+  if (hasMultipart) {
+    const multipartBlock = nestedBlock(requestBlock, 'multipart/form-data:');
+    // multipart 请求依赖 boundary 和 file 表单字段，OpenAPI 必须把客户端要构造的格式写清楚。
+    if (!multipartBlock.includes('Content-Type: multipart/form-data; boundary=<boundary>')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} multipart requestBody must document boundary parameter handling`);
+    }
+    if (!multipartBlock.includes('required `file` field')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} multipart requestBody must document required file field`);
+    }
   }
   if (!requestSchema(methodBlock)) {
     throw new Error(`${method.toUpperCase()} ${apiPath} requestBody is missing a component schema reference`);

@@ -38,6 +38,8 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"connection reset",
 		"already-written response",
 		"http.MaxBytesReader",
+		"`charset=utf-8`",
+		"Content-Type parameters",
 		"application/*+json",
 		"bare concrete types without parameters or wildcards",
 		"normalized, deduplicated",

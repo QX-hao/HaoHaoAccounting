@@ -40,6 +40,8 @@ func TestReadmeDocumentsExportDownloadAndSpreadsheetSafetyContracts(t *testing.T
 		"case normalization",
 		"`invalid_request`",
 		"formula prefixes",
+		"`skipDuplicates`",
+		"defaults to true",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("README.md is missing dataio maintenance guidance %q", want)

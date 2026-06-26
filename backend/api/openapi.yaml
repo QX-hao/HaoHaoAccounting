@@ -43,6 +43,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/LoginRequest'
       responses:
@@ -262,6 +263,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/AccountRequest'
       responses:
@@ -317,6 +319,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/AccountRequest'
       responses:
@@ -441,6 +444,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/BudgetRequest'
       responses:
@@ -498,6 +502,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/BudgetRequest'
       responses:
@@ -623,6 +628,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/CategoryRequest'
       responses:
@@ -678,6 +684,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/CategoryRequest'
       responses:
@@ -861,6 +868,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/TransactionRequest'
       responses:
@@ -916,6 +924,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/TransactionRequest'
       responses:
@@ -993,6 +1002,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/AIParseRequest'
       responses:
@@ -1115,6 +1125,7 @@ paths:
         required: true
         content:
           multipart/form-data:
+            description: 'Accepts `Content-Type: multipart/form-data; boundary=<boundary>` with a required `file` field.'
             schema:
               $ref: '#/components/schemas/ImportFileRequest'
       responses:
@@ -1160,6 +1171,7 @@ paths:
         required: true
         content:
           multipart/form-data:
+            description: 'Accepts `Content-Type: multipart/form-data; boundary=<boundary>` with a required `file` field.'
             schema:
               $ref: '#/components/schemas/ImportFileRequest'
       responses:
@@ -1242,6 +1254,7 @@ paths:
         required: true
         content:
           multipart/form-data:
+            description: 'Accepts `Content-Type: multipart/form-data; boundary=<boundary>` with a required `file` field.'
             schema:
               $ref: '#/components/schemas/ImportFileRequest'
       responses:
@@ -1325,6 +1338,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/ImportTextRequest'
       responses:
@@ -1370,6 +1384,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/ImportTextRequest'
       responses:
@@ -1478,7 +1493,8 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: 'Send the access token as `Authorization: Bearer <JWT>`.'
+      description: >
+        Send the access token as `Authorization: Bearer <JWT>`. At runtime, repeated `Authorization` headers are rejected, and issued JWTs include an `nbf` not-before claim.
   parameters:
     Id:
       name: id
@@ -2400,6 +2416,8 @@ components:
           description: CSV or XLSX file. The first row must start with occurred_at,type,amount,category,account,note,tags; a UTF-8 BOM on the first header is accepted.
         skipDuplicates:
           type: boolean
+          description: skipDuplicates defaults to true when omitted; invalid values return invalid_request.
+          default: true
     ImportTextRequest:
       type: object
       additionalProperties: false
@@ -2414,6 +2432,8 @@ components:
           maxLength: 5242880
         skipDuplicates:
           type: boolean
+          description: skipDuplicates defaults to true when omitted.
+          default: true
     ImportPreviewRow:
       type: object
       additionalProperties: false

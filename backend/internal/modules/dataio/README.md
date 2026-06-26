@@ -24,5 +24,5 @@ This module owns CSV/XLSX import and export.
   neutralize spreadsheet formula prefixes.
 - Import totals count non-empty data rows only. Blank rows are ignored, while reported row
   numbers still point to the original source file lines.
-- Imports skip duplicate rows by default. Duplicate checks compare user, time, type, amount, category, account, note, and tags.
+- Imports skip duplicate rows by default; `skipDuplicates` defaults to true for both file and text imports. Duplicate checks compare user, time, type, amount, category, account, note, and tags.
 - Large file imports should use `/io/import/jobs`; the synchronous `/io/import` endpoint remains for compatibility.
