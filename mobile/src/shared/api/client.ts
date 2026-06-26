@@ -126,7 +126,7 @@ export async function download(path: string, accept = '*/*'): Promise<DownloadRe
   const resp = await downloadResponse(path, accept);
   return {
     bytes: new Uint8Array(await resp.arrayBuffer()),
-    filename: filenameFromDisposition(resp.headers.get('Content-Disposition')),
+    filename: filenameFromDisposition(resp.headers.get('Content-Disposition')) || 'download',
     contentType: resp.headers.get('Content-Type') || accept,
   };
 }
