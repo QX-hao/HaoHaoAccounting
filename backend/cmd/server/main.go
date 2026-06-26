@@ -158,7 +158,12 @@ func newMetricsRegistry() *prometheus.Registry {
 
 func requireMetricsToken(want string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token, ok := middleware.BearerToken(c.GetHeader("Authorization"))
+		values := c.Request.Header.Values("Authorization")
+		token := ""
+		ok := false
+		if len(values) == 1 {
+			token, ok = middleware.BearerToken(values[0])
+		}
 		if !ok || !constantTimeTokenEqual(token, want) {
 			httputil.Unauthorized(c, "invalid metrics token")
 			c.Abort()

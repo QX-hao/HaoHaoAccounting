@@ -1510,7 +1510,7 @@ components:
         pattern: '^[!-~]+$'
       example: client-request-123
     Link:
-      description: RFC 8288 pagination links for first, previous, next, and last pages when available.
+      description: RFC 8288 pagination links for first, previous, next, and last pages when available; sensitive query parameters are omitted from generated links.
       schema:
         type: string
       example: </api/v1/transactions?page=2&pageSize=20>; rel="next", </api/v1/transactions?page=5&pageSize=20>; rel="last"

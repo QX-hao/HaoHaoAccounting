@@ -130,6 +130,32 @@ func TestRecoveryPanicLogBoundsPanicValueLength(t *testing.T) {
 	}
 }
 
+func TestRecoveryPanicLogEscapesPanicValue(t *testing.T) {
+	gin.SetMode(gin.ReleaseMode)
+	t.Cleanup(func() { gin.SetMode(gin.TestMode) })
+
+	var panicLog bytes.Buffer
+	router := gin.New()
+	router.Use(RequestID(), recoveryWithWriter(&panicLog))
+	router.GET("/panic", func(*gin.Context) {
+		panic("first line\nsecond \"quoted\" line")
+	})
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/panic", nil))
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	logOutput := panicLog.String()
+	if !strings.Contains(logOutput, `panic_value="first line\nsecond \"quoted\" line"`) {
+		t.Fatalf("panic log = %q, missing escaped panic value", logOutput)
+	}
+	if strings.Count(logOutput, "\n") != 1 || !strings.HasSuffix(logOutput, "\n") {
+		t.Fatalf("panic log should stay single-line: %q", logOutput)
+	}
+}
+
 func TestRecoveryPanicLogTruncatesPanicValueOnCharacterBoundary(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 	t.Cleanup(func() { gin.SetMode(gin.TestMode) })

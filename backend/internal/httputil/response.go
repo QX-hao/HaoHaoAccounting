@@ -233,6 +233,7 @@ func paginationLinkHeader(requestURL *url.URL, total int64, page, pageSize int) 
 		}
 		u := *requestURL
 		query := u.Query()
+		removeSensitiveQueryParams(query)
 		query.Set("page", strconv.FormatInt(targetPage, 10))
 		query.Set("pageSize", strconv.Itoa(pageSize))
 		u.RawQuery = query.Encode()
@@ -250,6 +251,23 @@ func paginationLinkHeader(requestURL *url.URL, total int64, page, pageSize int) 
 	}
 
 	return strings.Join(links, ", ")
+}
+
+func removeSensitiveQueryParams(query url.Values) {
+	for key := range query {
+		if sensitiveQueryParam(key) {
+			delete(query, key)
+		}
+	}
+}
+
+func sensitiveQueryParam(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "access_token", "auth_token", "authorization", "jwt", "password", "secret", "token":
+		return true
+	default:
+		return false
+	}
 }
 
 func codeForStatus(status int) string {

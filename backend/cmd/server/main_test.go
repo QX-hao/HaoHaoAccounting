@@ -140,6 +140,24 @@ func TestRequestLogFormatterEscapesClientControlledFields(t *testing.T) {
 	}
 }
 
+func TestRequestLogFormatterEscapesMethod(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET\nFORGED",
+		Path:       "/api/v1/accounts",
+	})
+
+	if !strings.Contains(line, `method="GET\nFORGED"`) {
+		t.Fatalf("log line = %q, missing escaped method", line)
+	}
+	if strings.Count(line, "\n") != 1 || !strings.HasSuffix(line, "\n") {
+		t.Fatalf("log line should stay single-line: %q", line)
+	}
+}
+
 func TestRequestLogFormatterIncludesProtocolAndUserAgent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
 	req.Header.Set("User-Agent", "HaoHaoMobile/1.0")
@@ -317,6 +335,11 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"per-request",
 		"`HTTP_REQUEST_TIMEOUT` defaults to `60s`",
 		"`0s`",
+		"`SecurityHeaders` writes baseline browser security headers",
+		"`HTTP_HSTS_MAX_AGE_SECONDS`",
+		"`HTTP_HSTS_PRELOAD=true` requires `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`",
+		"`HTTP_CROSS_ORIGIN_EMBEDDER_POLICY`",
+		"`require-corp`, `credentialless`, or `unsafe-none`",
 		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
 		"`user_agent` values are trimmed to 256 characters before logging",
 		"`error` values are trimmed to 512 characters before logging",
@@ -484,6 +507,33 @@ func TestMetricsEndpointCanRequireBearerToken(t *testing.T) {
 			assertMetricsSecurityHeaders(t, resp)
 		})
 	}
+}
+
+func TestMetricsEndpointRejectsDuplicateAuthorizationHeaders(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	router := gin.New()
+	installMetrics(router, config.Config{HTTP: config.HTTPConfig{
+		MetricsEnabled: true,
+		MetricsToken:   "scrape-secret",
+	}})
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Add("Authorization", "Bearer scrape-secret")
+	req.Header.Add("Authorization", "Bearer scrape-secret")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if !middleware.ValidRequestID(resp.Header().Get(middleware.RequestIDHeader)) {
+		t.Fatalf("metrics response missing valid request id header: %#v", resp.Header())
+	}
+	assertMetricsNoCacheHeaders(t, resp)
+	assertMetricsSecurityHeaders(t, resp)
 }
 
 func assertMetricsNoCacheHeaders(t *testing.T, resp *httptest.ResponseRecorder) {

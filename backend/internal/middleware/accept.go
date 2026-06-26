@@ -53,13 +53,24 @@ func Accept(rules []AcceptRule) gin.HandlerFunc {
 		}
 		appendVary(c.Writer.Header(), "Accept")
 
-		if !acceptsAnyOfferedType(c.GetHeader("Accept"), offered) {
+		if !acceptsAnyOfferedType(combinedHeaderValue(c.Request.Header.Values("Accept")), offered) {
 			httputil.NotAcceptable(c, notAcceptableMessage(offered))
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
+}
+
+func combinedHeaderValue(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 func acceptsAnyOfferedType(header string, offered []string) bool {

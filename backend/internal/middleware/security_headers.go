@@ -62,7 +62,7 @@ func strictTransportSecurityValue(cfg SecurityHeadersConfig) string {
 		return ""
 	}
 	directives := []string{"max-age=" + strconv.Itoa(cfg.HSTSMaxAgeSeconds)}
-	if cfg.HSTSIncludeSubDomains {
+	if cfg.HSTSIncludeSubDomains || cfg.HSTSPreload {
 		directives = append(directives, "includeSubDomains")
 	}
 	if cfg.HSTSPreload {

@@ -724,6 +724,30 @@ func TestSetPaginationHeaders(t *testing.T) {
 	}
 }
 
+func TestSetPaginationHeadersDropsSensitiveQueryParameters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET("/transactions", func(c *gin.Context) {
+		SetPaginationHeaders(c, 45, 2, 20)
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/transactions?page=2&pageSize=20&type=expense&access_token=secret&token=secret&password=secret", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	link := resp.Header().Get("Link")
+	for _, leaked := range []string{"access_token=", "token=", "password=", "secret"} {
+		if strings.Contains(link, leaked) {
+			t.Fatalf("Link header leaked sensitive query parameter %q: %s", leaked, link)
+		}
+	}
+	if !strings.Contains(link, "type=expense") {
+		t.Fatalf("Link header dropped non-sensitive query parameter: %s", link)
+	}
+}
+
 func testContextWithBody(body string) *gin.Context {
 	resp := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(resp)

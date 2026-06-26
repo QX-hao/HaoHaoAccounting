@@ -78,6 +78,26 @@ func TestSecurityHeadersSetsConfiguredHSTS(t *testing.T) {
 	}
 }
 
+func TestSecurityHeadersHSTSPreloadIncludesSubDomains(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(SecurityHeaders(SecurityHeadersConfig{
+		HSTSMaxAgeSeconds: 31536000,
+		HSTSPreload:       true,
+	}))
+	router.GET("/ping", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ping", nil))
+
+	want := "max-age=31536000; includeSubDomains; preload"
+	if got := recorder.Result().Header.Get("Strict-Transport-Security"); got != want {
+		t.Fatalf("Strict-Transport-Security = %q, want %q", got, want)
+	}
+}
+
 func TestSecurityHeadersSetsConfiguredCrossOriginEmbedderPolicy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

@@ -941,6 +941,7 @@ test('generator requires bounded pagination response schema', () => {
 	assert.match(openapi, /name: q\n\s+in: query\n\s+description: Keyword filter matched against transaction notes and tags\. Maximum 100 characters\.[\s\S]+maxLength: 100/);
 	assert.match(openapi, /name: q[\s\S]+example: lunch/);
 	assert.match(openapi, /Link:[\s\S]+example: <\/api\/v1\/transactions\?page=2&pageSize=20>; rel="next"/);
+	assert.match(openapi, /Link:[\s\S]+sensitive query parameters are omitted from generated links/);
 	assert.match(openapi, /TotalCount:[\s\S]+example: 95/);
 });
 

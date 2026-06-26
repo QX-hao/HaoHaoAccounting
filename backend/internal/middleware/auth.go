@@ -84,6 +84,7 @@ func (s *TokenService) BuildTokenWithTTL(userID uint, ttl time.Duration) (string
 			Issuer:    s.issuer,
 			Audience:  jwt.ClaimStrings{s.audience},
 			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
 	}

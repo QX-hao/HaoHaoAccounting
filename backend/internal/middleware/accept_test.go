@@ -55,6 +55,33 @@ func TestAcceptRejectsUnsupportedResponseMediaType(t *testing.T) {
 	}
 }
 
+func TestAcceptCombinesRepeatedHeaderValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(Accept([]AcceptRule{{
+		Method:       http.MethodGet,
+		Path:         "/api/v1/example",
+		OfferedTypes: []string{"application/json"},
+	}}))
+	router.GET("/api/v1/example", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/example", nil)
+	req.Header.Add("Accept", "text/csv")
+	req.Header.Add("Accept", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Vary"); got != "Accept" {
+		t.Fatalf("Vary = %q", got)
+	}
+}
+
 func TestAcceptAllowsCompatibleMediaRanges(t *testing.T) {
 	for _, header := range []string{
 		"",

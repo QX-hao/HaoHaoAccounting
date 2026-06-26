@@ -54,6 +54,31 @@ func TestBuildAndParseToken(t *testing.T) {
 	}
 }
 
+func TestBuildTokenIncludesNotBeforeClaim(t *testing.T) {
+	tokenService := testTokenService(t)
+
+	before := time.Now().Add(-time.Second)
+	token, err := tokenService.BuildToken(42)
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+	after := time.Now().Add(time.Second)
+
+	claims, err := tokenService.parseClaims(token)
+	if err != nil {
+		t.Fatalf("parse token claims: %v", err)
+	}
+	if claims.NotBefore == nil {
+		t.Fatal("token NotBefore claim is missing")
+	}
+	if claims.NotBefore.Time.Before(before) || claims.NotBefore.Time.After(after) {
+		t.Fatalf("notBefore = %s, want between %s and %s", claims.NotBefore.Time, before, after)
+	}
+	if claims.IssuedAt == nil {
+		t.Fatal("token IssuedAt claim is missing")
+	}
+}
+
 func TestTokenExpiresAtReturnsTokenExpiration(t *testing.T) {
 	tokenService := testTokenService(t)
 
@@ -139,6 +164,32 @@ func TestParseTokenAcceptsSmallClockSkew(t *testing.T) {
 	}
 	if _, err := tokenService.ParseToken(token); err != nil {
 		t.Fatalf("parse token with leeway: %v", err)
+	}
+}
+
+func TestParseTokenRejectsFutureNotBefore(t *testing.T) {
+	tokenService, err := NewTokenServiceWithTTL("test-jwt-secret-with-at-least-32-chars", time.Hour, time.Second, "haohao-accounting", "haohao-accounting-api")
+	if err != nil {
+		t.Fatalf("token service: %v", err)
+	}
+
+	now := time.Now()
+	claims := jwtClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "42",
+			Issuer:    tokenService.issuer,
+			Audience:  jwt.ClaimStrings{tokenService.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now.Add(time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+		},
+	}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(tokenService.secret))
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+	if _, err := tokenService.ParseToken(token); err == nil {
+		t.Fatal("expected future not-before token error")
 	}
 }
 
