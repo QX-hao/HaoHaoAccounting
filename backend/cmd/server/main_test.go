@@ -320,7 +320,12 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`HTTP_METRICS_ENABLED=true`",
 		"`HTTP_METRICS_TOKEN`",
 		"`/metrics`",
+		"`promhttp_metric_handler_errors_total`",
+		"scrape gathering or encoding failures",
 		"Keep it disabled unless the backend port is protected",
+		"registered before API middleware",
+		"not affected by API `Accept` and `Content-Type` negotiation",
+		"still applies `RequestID`, `Recovery`, and `SecurityHeaders`",
 		"method, Gin route pattern, and status",
 		"early rejections",
 		"`X-Request-ID`",
@@ -366,6 +371,10 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	if secondMetricsResp.Code != http.StatusOK {
 		t.Fatalf("second metrics status = %d, body = %s", secondMetricsResp.Code, secondMetricsResp.Body.String())
 	}
+	if !middleware.ValidRequestID(secondMetricsResp.Header().Get(middleware.RequestIDHeader)) {
+		t.Fatalf("metrics response missing valid request id header: %#v", secondMetricsResp.Header())
+	}
+	assertMetricsSecurityHeaders(t, secondMetricsResp)
 	body := secondMetricsResp.Body.String()
 	for _, want := range []string{
 		`haohao_http_requests_total{method="GET",route="/api/v1/accounts/:id",status="204"} 1`,
@@ -373,6 +382,8 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 		`go_goroutines `,
 		`process_cpu_seconds_total `,
 		`promhttp_metric_handler_requests_total{code="200"} 1`,
+		`promhttp_metric_handler_errors_total{cause="gathering"} 0`,
+		`promhttp_metric_handler_errors_total{cause="encoding"} 0`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q: %s", want, body)
@@ -462,7 +473,26 @@ func TestMetricsEndpointCanRequireBearerToken(t *testing.T) {
 			if resp.Code != tc.status {
 				t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
 			}
+			if !middleware.ValidRequestID(resp.Header().Get(middleware.RequestIDHeader)) {
+				t.Fatalf("metrics response missing valid request id header: %#v", resp.Header())
+			}
+			assertMetricsSecurityHeaders(t, resp)
 		})
+	}
+}
+
+func assertMetricsSecurityHeaders(t *testing.T, resp *httptest.ResponseRecorder) {
+	t.Helper()
+	for header, want := range map[string]string{
+		"Content-Security-Policy":    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+		"Cross-Origin-Opener-Policy": "same-origin",
+		"Referrer-Policy":            "no-referrer",
+		"X-Content-Type-Options":     "nosniff",
+		"X-Frame-Options":            "DENY",
+	} {
+		if got := resp.Header().Get(header); got != want {
+			t.Fatalf("%s = %q, want %q", header, got, want)
+		}
 	}
 }
 

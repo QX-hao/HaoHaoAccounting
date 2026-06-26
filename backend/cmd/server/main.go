@@ -129,18 +129,23 @@ func installMetrics(router *gin.Engine, cfg config.Config) *middleware.HTTPMetri
 	}
 	metricsRegistry := newMetricsRegistry()
 	// /metrics 在全局中间件挂载前注册，避免应用 API 的 Accept/Content-Type 规则影响 Prometheus 抓取。
-	registerMetricsRoute(router, metricsRegistry, cfg.HTTP.MetricsToken)
+	registerMetricsRoute(router, metricsRegistry, cfg)
 	return middleware.NewHTTPMetrics(metricsRegistry)
 }
 
-func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry, token string) {
-	// InstrumentMetricHandler 会给抓取动作本身补 promhttp_* 指标，方便发现采集失败。
-	handler := gin.WrapH(promhttp.InstrumentMetricHandler(registry, promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
-	if token == "" {
-		router.GET("/metrics", handler)
-		return
+func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry, cfg config.Config) {
+	// HandlerOpts.Registry 会把 promhttp_metric_handler_errors_total 注册进同一个 registry，方便告警发现采集/编码失败。
+	handler := gin.WrapH(promhttp.InstrumentMetricHandler(registry, promhttp.HandlerFor(registry, promhttp.HandlerOpts{Registry: registry})))
+	handlers := []gin.HandlerFunc{
+		middleware.RequestID(),
+		middleware.Recovery(),
+		middleware.SecurityHeaders(securityHeadersConfig(cfg)),
 	}
-	router.GET("/metrics", requireMetricsToken(token), handler)
+	if cfg.HTTP.MetricsToken != "" {
+		handlers = append(handlers, requireMetricsToken(cfg.HTTP.MetricsToken))
+	}
+	handlers = append(handlers, handler)
+	router.GET("/metrics", handlers...)
 }
 
 func newMetricsRegistry() *prometheus.Registry {
