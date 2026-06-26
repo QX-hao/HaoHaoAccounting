@@ -35,6 +35,7 @@ const schemas = Object.fromEntries(schemaNames.map((name, index) => {
 validateOpenAPIDescription(source);
 validateOpenAPIServers(source);
 validateOpenAPITags(source);
+validateSchemaRefs(source, new Set(schemaNames));
 validateSchemaConstraints(schemas);
 validateParameterConstraints(source);
 validateResponseComponents(source);
@@ -85,6 +86,16 @@ function validateOpenAPITags(openapi) {
   }
 }
 
+// 防止 OpenAPI 引用不存在的 schema，避免前端生成出无法落地的类型。
+function validateSchemaRefs(openapi, knownSchemas) {
+  for (const match of openapi.matchAll(/\$ref:\s+'#\/components\/schemas\/([^']+)'/g)) {
+    const schemaName = match[1];
+    if (!knownSchemas.has(schemaName)) {
+      throw new Error(`OpenAPI references unknown schema component ${schemaName}`);
+    }
+  }
+}
+
 function validateSchemaConstraints(allSchemas) {
   const checks = [
     ['LoginRequest', 'minLength: 1'],
@@ -114,6 +125,7 @@ function validateSchemaConstraints(allSchemas) {
     }
   }
 
+  validateSchemaRequiredProperties(allSchemas);
   validateRequestSchemasAreClosed(allSchemas);
   validateSharedResponseSchemasAreClosed(allSchemas);
   validateErrorResponseSchema(allSchemas.ErrorResponse || '');
@@ -127,6 +139,21 @@ function validateSchemaConstraints(allSchemas) {
   validateAIResponseSchemasAreClosed(allSchemas);
   validateAIResponseSchema(allSchemas.AIParseResult || '');
   validatePaginationSchema(allSchemas.Pagination || '');
+}
+
+// required 只能声明 properties 中真实存在的字段，否则客户端会相信一个不存在的必填字段。
+function validateSchemaRequiredProperties(allSchemas) {
+  for (const [schemaName, schema] of Object.entries(allSchemas)) {
+    const required = parseRequired(schema);
+    if (required.length === 0) continue;
+
+    const declaredProperties = new Set(parseProperties(nestedBlock(schema, 'properties:')).map((property) => property.key));
+    for (const propertyName of required) {
+      if (!declaredProperties.has(propertyName)) {
+        throw new Error(`${schemaName}.required references missing property ${propertyName}`);
+      }
+    }
+  }
 }
 
 function validateRequestSchemasAreClosed(allSchemas) {
@@ -682,13 +709,14 @@ function parseEndpoints(openapi) {
   const pathMatches = [...pathsBlock.matchAll(/^  (\/[^:]+):$/gm)];
   const operationIds = new Map();
   const declaredTags = declaredOpenAPITags(openapi);
+  const componentParameters = parseComponentParameters(openapi);
   const result = [];
   for (const [index, match] of pathMatches.entries()) {
     const apiPath = match[1];
     const start = match.index;
     const end = pathMatches[index + 1]?.index ?? pathsBlock.length;
     const pathBlock = pathsBlock.slice(start, end);
-    const pathParameters = parseOperationParameters(pathLevelBlock(pathBlock));
+    const sharedPathBlock = pathLevelBlock(pathBlock);
     const methodMatches = openAPIMethodMatches(pathBlock);
     for (const [methodIndex, methodMatch] of methodMatches.entries()) {
       const method = methodMatch[1];
@@ -700,7 +728,7 @@ function parseEndpoints(openapi) {
       const description = operationDescription(methodBlock);
       const tags = operationTags(methodBlock);
       const responseStatuses = operationResponseStatuses(methodBlock);
-      const parameters = [...pathParameters, ...parseOperationParameters(methodBlock)];
+      const parameters = parseEffectiveOperationParameters(sharedPathBlock, methodBlock, componentParameters, method, apiPath);
       if (!operationId) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing operationId`);
       }
@@ -755,7 +783,7 @@ function parseEndpoints(openapi) {
       validateCreatedResponseHeaders(method, apiPath, methodBlock);
       validateAcceptedResponseHeaders(method, apiPath, methodBlock);
       validateSuccessResponseCacheHeaders(method, apiPath, methodBlock, source);
-      validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses);
+      validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses, parameters, `${sharedPathBlock}\n${methodBlock}`);
       if (operationHasRequestBody(methodBlock)) {
         validateRequestBodyContract(method, apiPath, methodBlock);
         if (!responseStatuses.has('400')) {
@@ -909,71 +937,71 @@ function responseIncludesHeader(responseBlock, openapi, headerText) {
   return componentName ? responseComponentBlock(openapi, componentName).includes(headerText) : false;
 }
 
-function validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses) {
-  const parameters = parseOperationParameters(methodBlock).filter((param) => param.in === 'query');
+function validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses, operationParameters, parameterSourceBlock) {
+  const parameters = operationParameters.filter((param) => param.in === 'query');
   if (parameters.length === 0) return;
 
   if (apiPath === '/transactions' && method === 'get') {
     require400Response(method, apiPath, responseStatuses, methodBlock);
-    requireParameterText(method, apiPath, methodBlock, 'page', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'page', 'default: 1');
-    requireParameterText(method, apiPath, methodBlock, 'page', 'Defaults to 1 when omitted');
-    requireParameterText(method, apiPath, methodBlock, 'page', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'maximum: 200');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'default: 20');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'Defaults to 20 when omitted');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'example: 20');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
-    requireParameterText(method, apiPath, methodBlock, 'type', 'Transaction type filter');
-    requireParameterText(method, apiPath, methodBlock, 'type', 'example: expense');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'Category id filter');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'Account id filter');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'q', 'matched against transaction notes and tags');
-    requireParameterText(method, apiPath, methodBlock, 'q', 'Maximum 100 characters');
-    requireParameterText(method, apiPath, methodBlock, 'q', 'maxLength: 100');
-    requireParameterText(method, apiPath, methodBlock, 'q', 'example: lunch');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'page', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'page', 'default: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'page', 'Defaults to 1 when omitted');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'page', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'maximum: 200');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'default: 20');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'Defaults to 20 when omitted');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'example: 20');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'start');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'end');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', 'Transaction type filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', 'example: expense');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'Category id filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'Account id filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'q', 'matched against transaction notes and tags');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'q', 'Maximum 100 characters');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'q', 'maxLength: 100');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'q', 'example: lunch');
   }
   if (apiPath === '/budgets' && method === 'get') {
     require400Response(method, apiPath, responseStatuses, methodBlock);
-    requireParameterText(method, apiPath, methodBlock, 'month', "pattern: '^\\d{4}-\\d{2}$'");
-    requireParameterText(method, apiPath, methodBlock, 'month', 'Budget month in YYYY-MM format');
-    requireParameterText(method, apiPath, methodBlock, 'month', "example: '2026-06'");
+    requireParameterText(method, apiPath, parameterSourceBlock, 'month', "pattern: '^\\d{4}-\\d{2}$'");
+    requireParameterText(method, apiPath, parameterSourceBlock, 'month', 'Budget month in YYYY-MM format');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'month', "example: '2026-06'");
   }
   if (apiPath === '/categories' && method === 'get') {
     require400Response(method, apiPath, responseStatuses, methodBlock);
-    requireParameterText(method, apiPath, methodBlock, 'type', "$ref: '#/components/schemas/TransactionType'");
-    requireParameterText(method, apiPath, methodBlock, 'type', 'Transaction type filter');
-    requireParameterText(method, apiPath, methodBlock, 'type', 'example: expense');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', "$ref: '#/components/schemas/TransactionType'");
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', 'Transaction type filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', 'example: expense');
   }
   if (apiPath === '/reports/summary' && method === 'get') {
     require400Response(method, apiPath, responseStatuses, methodBlock);
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'Category id filter');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'Account id filter');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'trend', 'enum: [day, week, month]');
-    requireParameterText(method, apiPath, methodBlock, 'trend', 'default: month');
-    requireParameterText(method, apiPath, methodBlock, 'trend', 'Defaults to month when omitted');
-    requireParameterText(method, apiPath, methodBlock, 'trend', 'example: month');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'start');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'end');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'Category id filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'Account id filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'trend', 'enum: [day, week, month]');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'trend', 'default: month');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'trend', 'Defaults to month when omitted');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'trend', 'example: month');
   }
   if (apiPath === '/io/export' && method === 'get') {
     require400Response(method, apiPath, responseStatuses, methodBlock);
-    requireParameterText(method, apiPath, methodBlock, 'format', 'enum: [csv, xlsx]');
-    requireParameterText(method, apiPath, methodBlock, 'format', 'default: csv');
-    requireParameterText(method, apiPath, methodBlock, 'format', 'Defaults to csv when omitted');
-    requireParameterText(method, apiPath, methodBlock, 'format', 'example: csv');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'enum: [csv, xlsx]');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'default: csv');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'Defaults to csv when omitted');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'example: csv');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'start');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'end');
     if (!methodBlock.includes('Content-Disposition:')) {
       throw new Error('GET /io/export is missing Content-Disposition response header');
     }
@@ -1009,9 +1037,13 @@ function requireDateTimeQueryParameter(method, apiPath, block, name) {
 }
 
 function parameterBlockByName(block, name) {
-  const parametersBlock = nestedBlock(block, 'parameters:');
-  const paramBlocks = parametersBlock.split(/\n(?=\s+- name:|\s+- \$ref:)/).map((item) => item.trim()).filter(Boolean);
-  return paramBlocks.find((paramBlock) => paramBlock.includes(`name: ${name}`)) || '';
+  for (const match of block.matchAll(/^\s+parameters:$/gm)) {
+    const parametersBlock = nestedBlock(block.slice(match.index), 'parameters:');
+    const paramBlocks = parametersBlock.split(/\n(?=\s+- name:|\s+- \$ref:)/).map((item) => item.trim()).filter(Boolean);
+    const parameterBlock = paramBlocks.find((paramBlock) => paramBlock.includes(`name: ${name}`));
+    if (parameterBlock) return parameterBlock;
+  }
+  return '';
 }
 
 function operationResponseStatuses(block) {
@@ -1044,7 +1076,9 @@ function responseComponentBlock(openapi, componentName) {
   const responsesBlock = nestedBlock(openAPIComponentsBlock(openapi), 'responses:');
   const marker = `    ${componentName}:`;
   const start = responsesBlock.indexOf(marker);
-  if (start === -1) return '';
+  if (start === -1) {
+    throw new Error(`OpenAPI references unknown response component ${componentName}`);
+  }
   const next = responsesBlock.slice(start + marker.length).search(/^    [A-Za-z][A-Za-z0-9]*:/m);
   return responsesBlock.slice(start, next === -1 ? undefined : start + marker.length + next);
 }
@@ -1053,7 +1087,9 @@ function componentHeaderBlock(openapi, componentName) {
   const headersBlock = nestedBlock(openAPIComponentsBlock(openapi), 'headers:');
   const marker = `    ${componentName}:`;
   const start = headersBlock.indexOf(marker);
-  if (start === -1) return '';
+  if (start === -1) {
+    throw new Error(`OpenAPI references unknown header component ${componentName}`);
+  }
   const next = headersBlock.slice(start + marker.length).search(/^    [A-Za-z][A-Za-z0-9]*:/m);
   return headersBlock.slice(start, next === -1 ? undefined : start + marker.length + next);
 }
@@ -1159,24 +1195,105 @@ function openAPIMethodLineRegexp() {
   return new RegExp(`^    (${openAPIHTTPMethodPattern}):`, 'm');
 }
 
-function parseOperationParameters(block) {
+// 汇总 Path Item 和 operation 两层参数，让生成器遵守 OpenAPI 的参数继承规则。
+function parseEffectiveOperationParameters(pathLevelBlockSource, methodBlock, componentParameters, method, apiPath) {
+  const pathParameters = parseOperationParameters(pathLevelBlockSource, componentParameters, `${apiPath} path parameters`);
+  const operationParameters = parseOperationParameters(methodBlock, componentParameters, `${method.toUpperCase()} ${apiPath} parameters`);
+  return mergeOpenAPIParameters(pathParameters, operationParameters);
+}
+
+// OpenAPI 规定 Path Item 参数会被 operation 继承；同名同位置参数由 operation 级定义覆盖。
+function mergeOpenAPIParameters(pathParameters, operationParameters) {
+  const result = [];
+  const indexes = new Map();
+  for (const parameter of [...pathParameters, ...operationParameters]) {
+    const key = parameterKey(parameter);
+    if (indexes.has(key)) {
+      result[indexes.get(key)] = parameter;
+      continue;
+    }
+    indexes.set(key, result.length);
+    result.push(parameter);
+  }
+  return result;
+}
+
+// 先解析 components.parameters，后续路径或接口里的 $ref 都必须能解析到这里。
+function parseComponentParameters(openapi) {
+  const parametersBlock = nestedBlock(openAPIComponentsBlock(openapi), 'parameters:');
+  if (!parametersBlock) return new Map();
+
+  const names = [...parametersBlock.matchAll(/^    ([A-Za-z][A-Za-z0-9]*):$/gm)];
+  return new Map(names.map((match, index) => {
+    const name = match[1];
+    const start = match.index;
+    const end = names[index + 1]?.index ?? parametersBlock.length;
+    return [name, parseParameterBlock(parametersBlock.slice(start, end), new Map(), `component parameter ${name}`)];
+  }));
+}
+
+function parseOperationParameters(block, componentParameters = new Map(), context = 'parameters') {
   const parametersBlock = nestedBlock(block, 'parameters:');
   if (!parametersBlock) return [];
 
   const paramBlocks = parametersBlock.split(/\n(?=\s+- name:|\s+- \$ref:)/).map((item) => item.trim()).filter(Boolean);
-  return paramBlocks.map((paramBlock) => {
-    if (paramBlock.includes("$ref: '#/components/parameters/Id'")) {
-      return { name: 'id', in: 'path', type: 'integer', required: true };
+  const parameters = paramBlocks.map((paramBlock) => parseParameterBlock(paramBlock, componentParameters, context)).filter((param) => param.name);
+  validateUniqueParameters(parameters, context);
+  return parameters;
+}
+
+// 参数对象必须显式写清 name 和 in，避免少写字段时被生成器误判成 query 参数。
+function parseParameterBlock(paramBlock, componentParameters, context) {
+  const componentName = paramBlock.match(/\$ref:\s+'#\/components\/parameters\/([^']+)'/)?.[1] || '';
+  if (componentName) {
+    const parameter = componentParameters.get(componentName);
+    if (!parameter) {
+      throw new Error(`${context} references unknown component parameter ${componentName}`);
     }
-    return {
-      name: paramBlock.match(/name:\s+([A-Za-z][A-Za-z0-9]*)/)?.[1] || '',
-      in: paramBlock.match(/in:\s+([A-Za-z]+)/)?.[1] || 'query',
-      type: paramBlock.match(/type:\s+([A-Za-z]+)/)?.[1] || 'string',
-      enumValues: enumValues(paramBlock),
-      ref: paramBlock.match(/\$ref:\s+'#\/components\/schemas\/([^']+)'/)?.[1] || '',
-      required: paramBlock.includes('required: true'),
-    };
-  }).filter((param) => param.name);
+    return { ...parameter };
+  }
+  const name = paramBlock.match(/name:\s+([A-Za-z][A-Za-z0-9_-]*)/)?.[1] || '';
+  if (!name) {
+    throw new Error(`${context} has a parameter missing name`);
+  }
+  const parameterIn = paramBlock.match(/in:\s+([A-Za-z]+)/)?.[1] || '';
+  if (!parameterIn) {
+    throw new Error(`${context} parameter ${name} is missing in`);
+  }
+  if (!['query', 'header', 'path', 'cookie'].includes(parameterIn)) {
+    throw new Error(`${context} parameter ${name} has unsupported in ${parameterIn}`);
+  }
+  return {
+    name,
+    in: parameterIn,
+    type: paramBlock.match(/type:\s+([A-Za-z]+)/)?.[1] || 'string',
+    enumValues: enumValues(paramBlock),
+    ref: paramBlock.match(/\$ref:\s+'#\/components\/schemas\/([^']+)'/)?.[1] || '',
+    required: parseParameterRequired(paramBlock, context, name),
+  };
+}
+
+function parseParameterRequired(paramBlock, context, name) {
+  const match = paramBlock.match(/^\s+required:\s+(\S+)\s*$/m);
+  if (!match) return false;
+  if (match[1] === 'true') return true;
+  if (match[1] === 'false') return false;
+  throw new Error(`${context} parameter ${name} required must be true or false`);
+}
+
+function validateUniqueParameters(parameters, context) {
+  const seen = new Set();
+  for (const parameter of parameters) {
+    const key = parameterKey(parameter);
+    if (seen.has(key)) {
+      throw new Error(`${context} has duplicate parameter ${parameter.name} in ${parameter.in}`);
+    }
+    seen.add(key);
+  }
+}
+
+function parameterKey(parameter) {
+  return `${parameter.in}:${parameter.name}`;
 }
 
 function requestSchema(block) {

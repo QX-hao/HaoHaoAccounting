@@ -515,6 +515,34 @@ test('generator requires declared path parameters for templated paths', () => {
 	assert.match(openapi, /Id:\n\s+name: id\n\s+in: path\n\s+required: true\n\s+description: Positive resource identifier\.[\s\S]+example: 1/);
 });
 
+test('generator fails fast for unresolved response and header component refs', () => {
+	assert.match(generator, /validateSchemaRefs\(source, new Set\(schemaNames\)\)/);
+	assert.match(generator, /OpenAPI references unknown schema component \$\{schemaName\}/);
+	assert.match(generator, /OpenAPI references unknown response component \$\{componentName\}/);
+	assert.match(generator, /OpenAPI references unknown header component \$\{componentName\}/);
+	assert.match(generator, /function responseComponentBlock[\s\S]+if \(start === -1\) \{[\s\S]+throw new Error\(`OpenAPI references unknown response component \$\{componentName\}`\);/);
+	assert.match(generator, /function componentHeaderBlock[\s\S]+if \(start === -1\) \{[\s\S]+throw new Error\(`OpenAPI references unknown header component \$\{componentName\}`\);/);
+});
+
+test('generator merges OpenAPI path item parameters into each operation', () => {
+	assert.match(generator, /parseEffectiveOperationParameters/);
+	assert.match(generator, /mergeOpenAPIParameters/);
+	assert.match(generator, /OpenAPI .* Path Item .* operation .*覆盖/);
+	assert.match(generator, /parameterKey\(parameter\)/);
+	assert.match(generator, /validateOperationQueryContract\(method, apiPath, methodBlock, responseStatuses, parameters, `\$\{sharedPathBlock\}\\n\$\{methodBlock\}`\)/);
+	assert.match(generator, /has duplicate parameter \$\{parameter\.name\} in \$\{parameter\.in\}/);
+});
+
+test('generator requires explicit OpenAPI parameter names and locations', () => {
+	assert.match(generator, /has a parameter missing name/);
+	assert.match(generator, /parameter \$\{name\} is missing in/);
+	assert.match(generator, /parameter \$\{name\} has unsupported in \$\{parameterIn\}/);
+	assert.match(generator, /parseParameterRequired\(paramBlock, context, name\)/);
+	assert.match(generator, /parameter \$\{name\} required must be true or false/);
+	assert.doesNotMatch(generator, /in:\s+paramBlock\.match\([^;]+ \|\| 'query'/);
+	assert.doesNotMatch(generator, /required:\s+paramBlock\.includes\('required: true'\)/);
+});
+
 test('generator requires X-Request-ID on success responses', () => {
 	assert.match(generator, /validateSuccessResponseHeaders/);
 	assert.match(generator, /missing X-Request-ID header/);
@@ -532,6 +560,12 @@ test('generator requires bounded visible ASCII request ids', () => {
 test('generator requires closed request schemas', () => {
 	assert.match(generator, /validateRequestSchemasAreClosed/);
 	assert.match(generator, /is missing additionalProperties: false/);
+});
+
+test('generator requires schema required fields to exist in properties', () => {
+	assert.match(generator, /validateSchemaRequiredProperties/);
+	assert.match(generator, /\.required references missing property \$\{propertyName\}/);
+	assert.match(generator, /parseProperties\(nestedBlock\(schema, 'properties:'\)\)/);
 });
 
 test('generator requires closed shared response schemas', () => {
@@ -792,17 +826,17 @@ test('generator requires documented accepted datetime query formats', () => {
 	assert.match(openapi, /name: start[\s\S]+example: '2026-06-01T00:00:00\+08:00'/);
 	assert.match(openapi, /name: end[\s\S]+Date-only values cover the entire day/);
 	assert.match(openapi, /name: end[\s\S]+example: '2026-06-30'/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'trend', 'default: month'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'trend', 'example: month'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'Category id filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'Account id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'trend', 'default: month'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'trend', 'example: month'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'categoryId', 'Category id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'accountId', 'Account id filter'\)/);
 	assert.match(generator, /query 400 response must use InvalidRequest/);
 	assert.match(openapi, /name: categoryId\n\s+in: query\n\s+description: Category id filter\.[\s\S]+example: 1/);
 	assert.match(openapi, /name: accountId\n\s+in: query\n\s+description: Account id filter\.[\s\S]+example: 1/);
 	assert.match(openapi, /name: trend\n\s+in: query\n\s+description: Trend aggregation granularity\. Defaults to month when omitted\.[\s\S]+default: month/);
 	assert.match(openapi, /name: trend[\s\S]+example: month/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'month', 'Budget month in YYYY-MM format'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'month', "example: '2026-06'"\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'month', 'Budget month in YYYY-MM format'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'month', "example: '2026-06'"\)/);
 	assert.match(openapi, /name: month\n\s+in: query\n\s+description: Budget month in YYYY-MM format\.[\s\S]+pattern: '\^\\d\{4\}-\\d\{2\}\$'/);
 	assert.match(openapi, /name: month[\s\S]+example: '2026-06'/);
 	for (const operation of openAPIOperationBlocks()) {
@@ -817,9 +851,9 @@ test('generator requires documented download filename headers', () => {
 	assert.match(generator, /GET \/io\/export is missing Content-Disposition response header/);
 	assert.match(generator, /operationHasJSONSuccessContent\(methodBlock, source\)/);
 	assert.match(generator, /result\.filter\(\(endpoint\) => endpoint\.jsonClientEndpoint\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'format', 'default: csv'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'format', 'Defaults to csv when omitted'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'format', 'example: csv'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'default: csv'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'Defaults to csv when omitted'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'example: csv'\)/);
 	assert.match(openapi, /name: format[\s\S]+description: Export file format\. Defaults to csv when omitted\.[\s\S]+default: csv/);
 	assert.match(openapi, /name: format[\s\S]+example: csv/);
 	assert.match(generator, /components\.headers\.ContentDisposition is missing filename\* guidance/);
@@ -862,21 +896,21 @@ test('generator requires bounded pagination response schema', () => {
 	assert.match(generator, /validatePaginationSchema/);
 	assert.match(generator, /Pagination\.pageSize is missing maximum: 200/);
 	assert.match(generator, /Pagination\.total is missing minimum: 0/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'page', 'default: 1'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'page', 'example: 1'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'pageSize', 'default: 20'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'pageSize', 'example: 20'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'type', 'Transaction type filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'type', 'example: expense'\)/);
-	assert.match(generator, /apiPath === '\/categories'[\s\S]+requireParameterText\(method, apiPath, methodBlock, 'type', 'Transaction type filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'Category id filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'example: 1'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'Account id filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'example: 1'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'matched against transaction notes and tags'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'Maximum 100 characters'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'maxLength: 100'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'example: lunch'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'page', 'default: 1'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'page', 'example: 1'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'pageSize', 'default: 20'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'pageSize', 'example: 20'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'type', 'Transaction type filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'type', 'example: expense'\)/);
+	assert.match(generator, /apiPath === '\/categories'[\s\S]+requireParameterText\(method, apiPath, parameterSourceBlock, 'type', 'Transaction type filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'categoryId', 'Category id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'categoryId', 'example: 1'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'accountId', 'Account id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'accountId', 'example: 1'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'q', 'matched against transaction notes and tags'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'q', 'Maximum 100 characters'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'q', 'maxLength: 100'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'q', 'example: lunch'\)/);
 	assert.match(openapi, /name: page\n\s+in: query\n\s+description: Page number\. Defaults to 1 when omitted\.[\s\S]+default: 1/);
 	assert.match(openapi, /name: page[\s\S]+example: 1/);
 	assert.match(openapi, /name: pageSize\n\s+in: query\n\s+description: Number of items per page\. Defaults to 20 when omitted\.[\s\S]+default: 20/);

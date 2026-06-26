@@ -58,7 +58,7 @@ func TestHealthOpenAPIHeadResponsesDeclareNoBody(t *testing.T) {
 
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			if operation.method != http.MethodHead {
 				continue
 			}
@@ -109,7 +109,7 @@ func TestHealthOpenAPIResponsesDeclareNoCacheHeaders(t *testing.T) {
 
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			for status, response := range operation.responses {
 				checked++
 				for _, header := range []string{"Cache-Control", "Pragma", "Expires"} {
@@ -157,7 +157,7 @@ func TestHealthOpenAPIOperationsHaveStableDocumentation(t *testing.T) {
 	operationIDs := map[string]string{}
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			checked++
 			if operation.operationID == "" {
 				t.Fatalf("%s %s is missing operationId", operation.method, path)
@@ -211,7 +211,7 @@ func TestOpenAPIRequestBodySchemasRejectAdditionalProperties(t *testing.T) {
 
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			if operation.requestBody == nil {
 				continue
 			}
@@ -247,7 +247,7 @@ func TestOpenAPIRequestBodyOperationsUseInvalidRequestResponse(t *testing.T) {
 
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			if operation.requestBody == nil {
 				continue
 			}
@@ -275,8 +275,8 @@ func TestOpenAPIQueryParameterOperationsUseInvalidRequestResponse(t *testing.T) 
 
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
-			if !operation.hasQueryParameters() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
+			if !operation.hasQueryParameters(doc.Components.Parameters) {
 				continue
 			}
 			checked++
@@ -304,7 +304,7 @@ func TestOpenAPIPathParametersMatchPathTemplates(t *testing.T) {
 	checked := 0
 	for path, item := range doc.Paths {
 		expected := openAPIPathParameterNames(path)
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			declared := operation.pathParameters(doc.Components.Parameters)
 			if !reflect.DeepEqual(declared, expected) {
 				t.Fatalf("%s %s path parameters = %#v, want %#v", operation.method, path, declared, expected)
@@ -416,7 +416,7 @@ func TestOpenAPISuccessResponsesDeclareSharedRuntimeHeaders(t *testing.T) {
 
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			for status, response := range operation.responses {
 				if len(status) != 3 || status[0] != '2' {
 					continue
@@ -448,7 +448,7 @@ func TestOpenAPIMethodNotAllowedResponsesDeclareAllowHeader(t *testing.T) {
 
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			response, ok := operation.responses["405"]
 			if !ok {
 				continue
@@ -473,7 +473,7 @@ func TestOpenAPINotAcceptableResponsesDeclareVaryHeader(t *testing.T) {
 
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			response, ok := operation.responses["406"]
 			if !ok {
 				continue
@@ -497,7 +497,7 @@ func TestOpenAPILogoutSuccessDeclaresClearSiteDataHeader(t *testing.T) {
 	}
 
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			if operation.operationID != "postAuthLogout" {
 				continue
 			}
@@ -523,7 +523,7 @@ func TestOpenAPIInternalErrorOperationsDeclareContextErrorResponses(t *testing.T
 
 	checked := 0
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			if _, ok := operation.responses["500"]; !ok {
 				continue
 			}
@@ -553,7 +553,7 @@ func TestOpenAPISecurityContractMatchesBearerMiddleware(t *testing.T) {
 
 	publicRoutes := map[string]bool{}
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			key := operation.method + " " + openAPIPathToGinPath(path)
 			if operation.public {
 				publicRoutes[key] = true
@@ -654,7 +654,7 @@ func openAPIRoutes(t *testing.T) []string {
 
 	result := make([]string, 0, len(doc.Paths))
 	for path, item := range doc.Paths {
-		for _, method := range item.methods() {
+		for _, method := range item.methods(doc.Components.Parameters) {
 			result = append(result, method+" "+openAPIPathToGinPath(path))
 		}
 	}
@@ -673,7 +673,7 @@ func healthOpenAPIRoutes(t *testing.T) []string {
 
 	result := make([]string, 0, len(doc.Paths))
 	for path, item := range doc.Paths {
-		for _, method := range item.methods() {
+		for _, method := range item.methods(doc.Components.Parameters) {
 			result = append(result, method+" "+path)
 		}
 	}
@@ -692,7 +692,7 @@ func openAPIPublicRoutes(t *testing.T) map[string]bool {
 
 	result := map[string]bool{}
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			if operation.public {
 				result[operation.method+" "+openAPIPathToGinPath(path)] = true
 			}
@@ -712,7 +712,7 @@ func openAPIResponseBodyRoutes(t *testing.T) map[string]bool {
 
 	result := map[string]bool{}
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			if operation.hasSuccessResponseBody(doc.Components.Responses) {
 				result[operation.method+" "+openAPIPathToGinPath(path)] = true
 			}
@@ -732,7 +732,7 @@ func openAPIRequestBodyRoutes(t *testing.T) map[string]bool {
 
 	result := map[string]bool{}
 	for path, item := range doc.Paths {
-		for _, operation := range item.operations() {
+		for _, operation := range item.operations(doc.Components.Parameters) {
 			if operation.requestBody != nil {
 				result[operation.method+" "+openAPIPathToGinPath(path)] = true
 			}
@@ -953,8 +953,8 @@ type openAPIOperationWithMethod struct {
 	responses        map[string]openAPIResponse
 }
 
-func (item openAPIPathItem) methods() []string {
-	operations := item.operations()
+func (item openAPIPathItem) methods(components map[string]openAPIParameter) []string {
+	operations := item.operations(components)
 	result := make([]string, 0, len(operations))
 	for _, operation := range operations {
 		result = append(result, operation.method)
@@ -962,7 +962,7 @@ func (item openAPIPathItem) methods() []string {
 	return result
 }
 
-func (item openAPIPathItem) operations() []openAPIOperationWithMethod {
+func (item openAPIPathItem) operations(components map[string]openAPIParameter) []openAPIOperationWithMethod {
 	operations := []struct {
 		method    string
 		operation *openAPIOperation
@@ -985,7 +985,7 @@ func (item openAPIPathItem) operations() []openAPIOperationWithMethod {
 				operationID:      operation.operation.OperationID,
 				summary:          strings.TrimSpace(operation.operation.Summary),
 				description:      strings.TrimSpace(operation.operation.Description),
-				parameters:       mergedOpenAPIParameters(item.Parameters, operation.operation.Parameters),
+				parameters:       mergedOpenAPIParameters(item.Parameters, operation.operation.Parameters, components),
 				public:           operation.operation.isPublic(),
 				securityOverride: operation.operation.Security != nil,
 				requestBody:      operation.operation.RequestBody,
@@ -1008,8 +1008,8 @@ func (operation openAPIOperationWithMethod) hasSuccessResponseBody(components ma
 	return false
 }
 
-func (operation openAPIOperationWithMethod) hasQueryParameters() bool {
-	for _, parameter := range operation.parameters {
+func (operation openAPIOperationWithMethod) hasQueryParameters(components map[string]openAPIParameter) bool {
+	for _, parameter := range operation.resolvedParameters(components) {
 		if parameter.In == "query" {
 			return true
 		}
@@ -1036,14 +1036,27 @@ func (operation openAPIOperationWithMethod) resolvedParameters(components map[st
 	return result
 }
 
-func mergedOpenAPIParameters(pathParameters []openAPIParameter, operationParameters []openAPIParameter) []openAPIParameter {
+// OpenAPI 允许 Path Item 声明公共参数；operation 同名同位置参数会覆盖公共参数。
+func mergedOpenAPIParameters(pathParameters []openAPIParameter, operationParameters []openAPIParameter, components map[string]openAPIParameter) []openAPIParameter {
 	if len(pathParameters) == 0 {
 		return operationParameters
 	}
 	result := make([]openAPIParameter, 0, len(pathParameters)+len(operationParameters))
-	result = append(result, pathParameters...)
-	result = append(result, operationParameters...)
+	indexes := make(map[string]int, len(pathParameters)+len(operationParameters))
+	for _, parameter := range append(pathParameters, operationParameters...) {
+		key := openAPIParameterKey(resolvedParameter(parameter, components))
+		if index, ok := indexes[key]; ok {
+			result[index] = parameter
+			continue
+		}
+		indexes[key] = len(result)
+		result = append(result, parameter)
+	}
 	return result
+}
+
+func openAPIParameterKey(parameter openAPIParameter) string {
+	return parameter.In + ":" + parameter.Name
 }
 
 func resolvedParameter(parameter openAPIParameter, components map[string]openAPIParameter) openAPIParameter {
