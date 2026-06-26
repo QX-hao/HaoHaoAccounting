@@ -279,6 +279,14 @@ test('stateful compose services keep privilege escalation disabled without read-
 	}
 });
 
+test('production compose services rotate json-file logs', () => {
+	assert.match(compose, /x-default-logging: &default-logging[\s\S]+driver: json-file[\s\S]+max-size: "10m"[\s\S]+max-file: "5"/);
+	for (const service of ['web', 'backend', 'dbmigrate', 'postgres', 'redis', 'mysql']) {
+		const block = composeServiceBlock(service);
+		assert.match(block, /logging: \*default-logging/, `${service} must use the shared logging policy`);
+	}
+});
+
 test('stateful compose healthchecks avoid password command arguments', () => {
 	const redis = composeServiceBlock('redis');
 	assert.match(redis, /REDISCLI_AUTH=\\?"\$\${REDIS_PASSWORD}\\?" redis-cli ping/);

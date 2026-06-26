@@ -993,6 +993,25 @@ func TestProductionComposeDocumentsMetricsToken(t *testing.T) {
 	}
 }
 
+func TestProductionComposeDocumentsLogRotation(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "readme.md"))
+	if err != nil {
+		t.Fatalf("read readme.md: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"Docker `json-file` 日志轮转",
+		"单文件上限 `10m`",
+		"最多保留 `5` 个文件",
+		"避免没有 daemon 级日志策略时容器日志持续占满磁盘",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("readme.md is missing log rotation guidance %q", want)
+		}
+	}
+}
+
 func TestProductionComposeRunsMigrationsBeforeBackend(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yaml"))
 	if err != nil {

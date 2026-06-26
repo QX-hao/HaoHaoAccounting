@@ -320,6 +320,8 @@ CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 
 Compose 对无状态的 `web` 和 `backend` 启用了只读根文件系统、`no-new-privileges`、`cap_drop: [ALL]` 和 `init: true`。临时写入只允许进入 `tmpfs`，数据库和 Redis 仍通过 volume 持久化数据。若迁移到不支持这些 Compose 选项的平台，需要用等价的安全上下文配置替代。
 
+生产 Compose 为所有服务统一配置了 Docker `json-file` 日志轮转，单文件上限 `10m`、最多保留 `5` 个文件，避免没有 daemon 级日志策略时容器日志持续占满磁盘。
+
 ### 2. 构建并启动
 
 ```bash

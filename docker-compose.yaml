@@ -24,6 +24,12 @@ x-stateful-security: &stateful-security
   cap_drop:
     - ALL
 
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 x-backend-env: &backend-env
   GIN_MODE: release
   PORT: 8080
@@ -66,6 +72,7 @@ x-backend-env: &backend-env
 services:
   web:
     <<: *app-security
+    logging: *default-logging
     build:
       context: ./web
       dockerfile: Dockerfile
@@ -101,6 +108,7 @@ services:
 
   backend:
     <<: *app-security
+    logging: *default-logging
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -133,6 +141,7 @@ services:
 
   dbmigrate:
     <<: *app-security
+    logging: *default-logging
     image: haohaoaccounting-backend:latest
     restart: "no"
     entrypoint: ["/app/dbmigrate"]
@@ -147,6 +156,7 @@ services:
 
   postgres:
     <<: *stateful-security
+    logging: *default-logging
     build:
       context: .
       dockerfile: Dockerfile.postgres
@@ -174,6 +184,7 @@ services:
 
   redis:
     <<: *stateful-security
+    logging: *default-logging
     build:
       context: .
       dockerfile: Dockerfile.redis
@@ -205,6 +216,7 @@ services:
 
   mysql:
     <<: *stateful-security
+    logging: *default-logging
     profiles:
       - mysql
     build:
