@@ -998,7 +998,8 @@ function validateOperationQueryContract(method, apiPath, methodBlock, responseSt
     require400Response(method, apiPath, responseStatuses, methodBlock);
     requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'enum: [csv, xlsx]');
     requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'default: csv');
-    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'Defaults to csv when omitted');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'Values are trimmed and case-insensitive');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'defaults to csv when omitted');
     requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'example: csv');
     requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'start');
     requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'end');

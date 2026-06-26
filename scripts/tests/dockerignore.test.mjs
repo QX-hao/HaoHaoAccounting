@@ -101,6 +101,15 @@ test('backend runtime image includes the migration command and SQL migrations', 
 	assert.match(dockerfile, /COPY --from=builder \/src\/migrations \/app\/migrations/);
 });
 
+test('backend Docker builds are reproducible without VCS stamping', () => {
+	const buildCommands = [...dockerfileSource('backend').matchAll(/go build \\\n([\s\S]*?)-o \/out\/(?:haohaoaccounting|dbmigrate)/g)];
+	assert.equal(buildCommands.length, 2, 'backend Dockerfile must build server and migration binaries');
+	for (const command of buildCommands) {
+		assert.match(command[0], /-buildvcs=false/);
+		assert.match(command[0], /-trimpath/);
+	}
+});
+
 test('dependabot watches every Dockerfile directory', () => {
 	assert.deepEqual([...dependabotDirectories('docker')].sort(), ['/', '/backend', '/mobile', '/web']);
 });
@@ -207,6 +216,27 @@ test('CI npm installs use lockfiles tracked by Dependabot', () => {
 		assert.ok(npmDependabotDirs.has(`/${directory}`), `${directory} npm package must be watched by Dependabot`);
 		assert.match(ciWorkflow, new RegExp(`cache-dependency-path: ${escapeRegExp(directory)}\\/package-lock\\.json`));
 	}
+});
+
+test('CI npm installs skip audit and funding network noise', () => {
+	for (const directory of ['web', 'mobile']) {
+		assert.match(
+			ciWorkflow,
+			new RegExp(`- run: npm --prefix ${escapeRegExp(directory)} ci --no-audit --no-fund`),
+			`${directory} CI install must stay frozen without automatic audit or funding calls`,
+		);
+	}
+});
+
+test('Docker npm installs use lockfiles without audit or funding network calls', () => {
+	for (const name of ['web', 'mobile']) {
+		assert.match(dockerfileSource(name), /^RUN npm ci --no-audit --no-fund$/m, `${name} Dockerfile must use reproducible, quiet npm installs`);
+	}
+});
+
+test('frontend Docker builds disable framework telemetry', () => {
+	assert.match(dockerfileSource('web'), /^ENV NEXT_TELEMETRY_DISABLED=1$/m);
+	assert.match(dockerfileSource('mobile'), /^ENV EXPO_NO_TELEMETRY=1$/m);
 });
 
 test('Node toolchain contract stays aligned across package metadata, CI, and Docker', () => {
@@ -332,6 +362,22 @@ test('mobile nginx keeps the SPA entrypoint revalidated', () => {
 	assert.match(mobileNginx, /server_tokens off;/);
 	assert.match(mobileNginx, /location = \/index\.html \{[\s\S]+add_header Cache-Control "no-cache" always;/);
 	assert.match(mobileNginx, /location \/ \{[\s\S]+try_files \$uri \$uri\/ \/index\.html;/);
+});
+
+test('mobile nginx sets baseline browser security headers', () => {
+	const indexLocation = mobileNginx.match(/location = \/index\.html \{[\s\S]+?\n    \}/)?.[0] || '';
+	const staticLocation = mobileNginx.match(/location ~\* \\\.\([\s\S]+?\n    \}/)?.[0] || '';
+	for (const [header, value] of [
+		['Referrer-Policy', 'strict-origin-when-cross-origin'],
+		['Permissions-Policy', 'camera=(), geolocation=(), microphone=(), payment=()'],
+		['X-Content-Type-Options', 'nosniff'],
+		['X-Frame-Options', 'DENY'],
+	]) {
+		assert.match(mobileNginx, new RegExp(`add_header ${escapeRegExp(header)} "${escapeRegExp(value)}" always;`));
+		assert.match(indexLocation, new RegExp(`add_header ${escapeRegExp(header)} "${escapeRegExp(value)}" always;`));
+		assert.match(staticLocation, new RegExp(`add_header ${escapeRegExp(header)} "${escapeRegExp(value)}" always;`));
+	}
+	assert.doesNotMatch(mobileNginx, /Strict-Transport-Security/);
 });
 
 test('mobile nginx caches static assets immutably without SPA fallback', () => {

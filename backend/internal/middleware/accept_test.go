@@ -317,13 +317,48 @@ func TestAPIAcceptRulesMatchExportFormat(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/io/export?format=xlsx", nil)
+	for _, path := range []string{
+		"/api/v1/io/export?format=xlsx",
+		"/api/v1/io/export?format=XLSX",
+		"/api/v1/io/export?format=%20xlsx%20",
+	} {
+		req = httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Accept", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		resp = httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusNoContent {
+			t.Fatalf("%s status = %d, body = %s", path, resp.Code, resp.Body.String())
+		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/io/export?format=pdf", nil)
 	req.Header.Set("Accept", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	resp = httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+		t.Fatalf("invalid format should pass Accept negotiation for handler validation, status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestExportFormatFromQueryMatchesDataIOFormatNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  string
+	}{
+		{value: "", want: "csv"},
+		{value: "CSV", want: "csv"},
+		{value: " csv ", want: "csv"},
+		{value: "XLSX", want: "xlsx"},
+		{value: " xlsx ", want: "xlsx"},
+		{value: "pdf", want: ""},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			if got := exportFormatFromQuery(tc.value); got != tc.want {
+				t.Fatalf("exportFormatFromQuery(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
 	}
 }
 

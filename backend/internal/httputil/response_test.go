@@ -533,6 +533,19 @@ func TestBindJSONBodyRejectsMultipleJSONValues(t *testing.T) {
 	}
 }
 
+func TestBindJSONBodyRejectsEmptyBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var body struct {
+		Name string `json:"name"`
+	}
+	c := testContextWithBody("")
+
+	if err := BindJSONBody(c, &body); err == nil {
+		t.Fatal("expected empty JSON body error")
+	}
+}
+
 func TestBindJSONBodyDecodesValidBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

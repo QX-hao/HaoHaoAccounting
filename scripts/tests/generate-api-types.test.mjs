@@ -138,7 +138,7 @@ test('generated error codes stay available to API clients', () => {
 	assert.match(webApiClient, /authenticateChallenge/);
 	assert.match(webApiClient, /WWW-Authenticate/);
 	assert.match(webApiClient, /network_error/);
-	assert.match(webApiClient, /function networkError\(err: unknown\)/);
+	assert.match(webApiClient, /function networkError\(err: unknown, timedOut = false\)/);
 	assert.match(webApiClient, /super\(message, \{ cause \}\)/);
 	assert.match(webApiClient, /new ApiError\(message, 0, 'network_error', '', null, null, null, null, '', err\)/);
 	assert.match(mobileApiClient, /ErrorResponse\['code'\]/);
@@ -149,7 +149,7 @@ test('generated error codes stay available to API clients', () => {
 	assert.match(mobileApiClient, /authenticateChallenge/);
 	assert.match(mobileApiClient, /WWW-Authenticate/);
 	assert.match(mobileApiClient, /network_error/);
-	assert.match(mobileApiClient, /function networkError\(err: unknown\)/);
+	assert.match(mobileApiClient, /function networkError\(err: unknown, timedOut = false\)/);
 	assert.match(mobileApiClient, /super\(message, \{ cause \}\)/);
 	assert.match(mobileApiClient, /new ApiError\(message, 0, 'network_error', '', null, null, null, null, '', err\)/);
 });
@@ -311,10 +311,22 @@ test('API clients bound fetch calls with timeout and preserve caller abort signa
 		assert.match(source, /const API_REQUEST_TIMEOUT_MS = 30_000;/);
 		assert.match(source, /function requestSignal\(callerSignal\?: AbortSignal \| null\)/);
 		assert.match(source, /const controller = new AbortController\(\);/);
-		assert.match(source, /setTimeout\(\(\) => controller\.abort\(\), API_REQUEST_TIMEOUT_MS\)/);
+		assert.match(source, /let timedOut = false;/);
+		assert.match(source, /setTimeout\(\(\) => \{\n\s+timedOut = true;\n\s+controller\.abort\(\);\n\s+\}, API_REQUEST_TIMEOUT_MS\)/);
 		assert.match(source, /callerSignal\.addEventListener\('abort', abort, \{ once: true \}\)/);
-		assert.match(source, /return await fetch\(`\$\{API_BASE\}\$\{path\}`, \{ \.\.\.init, credentials: 'omit', signal \}\);/);
-		assert.match(source, /finally \{\n\s+cleanup\(\);\n\s+\}/);
+		assert.match(source, /return await fetch\(`\$\{API_BASE\}\$\{path\}`, \{ \.\.\.init, credentials: 'omit', signal: request\.signal \}\);/);
+		assert.match(source, /finally \{\n\s+request\.cleanup\(\);\n\s+\}/);
+	}
+});
+
+test('API clients expose local request timeouts as structured API errors', () => {
+	assert.match(webApiClient, /throw networkError\(err, request\.timedOut\(\)\);/);
+	assert.match(mobileApiClient, /throw networkError\(err, request\.timedOut\(\)\);/);
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /timedOut: \(\) => timedOut/);
+		assert.match(source, /function networkError\(err: unknown, timedOut = false\)/);
+		assert.match(source, /if \(timedOut\) \{[\s\S]+new ApiError\([^,]+, 0, 'request_timeout'/);
+		assert.match(source, /new ApiError\(message, 0, 'network_error'/);
 	}
 });
 
@@ -328,6 +340,7 @@ test('API client READMEs document shared runtime contracts', () => {
 			'`RequestInit.signal`',
 			'`credentials: omit`',
 			'`application/*+json`',
+			'`request_timeout`',
 			'`Retry-After`',
 			'`RateLimit-*`',
 			'`WWW-Authenticate`',
@@ -857,9 +870,10 @@ test('generator requires documented download filename headers', () => {
 	assert.match(generator, /operationHasJSONSuccessContent\(methodBlock, source\)/);
 	assert.match(generator, /result\.filter\(\(endpoint\) => endpoint\.jsonClientEndpoint\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'default: csv'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'Defaults to csv when omitted'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'Values are trimmed and case-insensitive'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'defaults to csv when omitted'\)/);
 	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'example: csv'\)/);
-	assert.match(openapi, /name: format[\s\S]+description: Export file format\. Defaults to csv when omitted\.[\s\S]+default: csv/);
+	assert.match(openapi, /name: format[\s\S]+description: Export file format\. Values are trimmed and case-insensitive; defaults to csv when omitted\.[\s\S]+default: csv/);
 	assert.match(openapi, /name: format[\s\S]+example: csv/);
 	assert.match(generator, /components\.headers\.ContentDisposition is missing filename\* guidance/);
 	assert.match(openapi, /ContentDisposition:[\s\S]+example: attachment; filename="transactions\.csv"; filename\*=UTF-8''transactions\.csv/);

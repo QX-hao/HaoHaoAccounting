@@ -180,6 +180,139 @@ func TestHealthOpenAPIOperationsHaveStableDocumentation(t *testing.T) {
 	}
 }
 
+func TestOpenAPIOperationsHaveStableDocumentation(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	operationIDs := map[string]string{}
+	checked := 0
+	for path, item := range doc.Paths {
+		for _, operation := range item.operations(doc.Components.Parameters) {
+			checked++
+			if operation.operationID == "" {
+				t.Fatalf("%s %s is missing operationId", operation.method, path)
+			}
+			if operation.summary == "" {
+				t.Fatalf("%s %s is missing summary", operation.method, path)
+			}
+			if operation.description == "" {
+				t.Fatalf("%s %s is missing description", operation.method, path)
+			}
+			key := operation.method + " " + path
+			if previous, ok := operationIDs[operation.operationID]; ok {
+				t.Fatalf("operationId %s is used by both %s and %s", operation.operationID, previous, key)
+			}
+			operationIDs[operation.operationID] = key
+		}
+	}
+	if checked == 0 {
+		t.Fatal("OpenAPI does not define any operations")
+	}
+}
+
+func TestOpenAPISchemasAreClosed(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	checked := 0
+	for name, schema := range doc.Components.Schemas {
+		if schema.Type != "object" {
+			continue
+		}
+		checked++
+		if schema.AdditionalProperties == nil || *schema.AdditionalProperties {
+			t.Fatalf("OpenAPI schema %s must set additionalProperties: false", name)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("OpenAPI does not define any object schemas")
+	}
+}
+
+func TestOpenAPIObjectSchemasDeclareProperties(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	checked := 0
+	for name, schema := range doc.Components.Schemas {
+		if schema.Type != "object" {
+			continue
+		}
+		checked++
+		if len(schema.Properties) == 0 {
+			t.Fatalf("OpenAPI object schema %s must declare properties", name)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("OpenAPI does not define any object schemas")
+	}
+}
+
+func TestOpenAPIRequiredSchemaPropertiesExist(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	checked := 0
+	for name, schema := range doc.Components.Schemas {
+		if schema.Type != "object" {
+			continue
+		}
+		for _, property := range schema.Required {
+			checked++
+			if _, ok := schema.Properties[property]; !ok {
+				t.Fatalf("OpenAPI schema %s requires missing property %s", name, property)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("OpenAPI does not define any required schema properties")
+	}
+}
+
+func TestOpenAPIArraySchemasDeclareItems(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	checked := 0
+	for name, schema := range doc.Components.Schemas {
+		checked += assertArraySchemasDeclareItems(t, schema, "#/components/schemas/"+name)
+	}
+	if checked == 0 {
+		t.Fatal("OpenAPI does not define any array schemas")
+	}
+}
+
+func TestOpenAPIEnumSchemasAreNonEmpty(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	checked := 0
+	for name, schema := range doc.Components.Schemas {
+		checked += assertEnumSchemasAreNonEmpty(t, schema, "#/components/schemas/"+name)
+	}
+	if checked == 0 {
+		t.Fatal("OpenAPI does not define any enum schemas")
+	}
+}
+
 func TestRegisteredResponseBodyRoutesHaveAcceptRules(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -258,6 +391,34 @@ func TestOpenAPIRequestBodyOperationsUseInvalidRequestResponse(t *testing.T) {
 			}
 			if response.Ref != "#/components/responses/InvalidRequest" {
 				t.Fatalf("%s %s requestBody 400 response = %q, want InvalidRequest", operation.method, path, response.Ref)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("OpenAPI does not define any requestBody operations")
+	}
+}
+
+func TestOpenAPIRequestBodyOperationsDeclareUnsupportedMediaTypeResponse(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	checked := 0
+	for path, item := range doc.Paths {
+		for _, operation := range item.operations(doc.Components.Parameters) {
+			if operation.requestBody == nil {
+				continue
+			}
+			checked++
+			response, ok := operation.responses["415"]
+			if !ok {
+				t.Fatalf("%s %s requestBody operation is missing 415 response", operation.method, path)
+			}
+			if response.Ref != "#/components/responses/UnsupportedMediaType" {
+				t.Fatalf("%s %s requestBody 415 response = %q, want UnsupportedMediaType", operation.method, path, response.Ref)
 			}
 		}
 	}
@@ -436,6 +597,34 @@ func TestOpenAPISuccessResponsesDeclareSharedRuntimeHeaders(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("OpenAPI does not define any success responses")
+	}
+}
+
+func TestOpenAPIResponseBodyOperationsDeclareNotAcceptableResponse(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	checked := 0
+	for path, item := range doc.Paths {
+		for _, operation := range item.operations(doc.Components.Parameters) {
+			if !operation.hasSuccessResponseBody(doc.Components.Responses) {
+				continue
+			}
+			checked++
+			response, ok := operation.responses["406"]
+			if !ok {
+				t.Fatalf("%s %s response body operation is missing 406 response", operation.method, path)
+			}
+			if response.Ref != "#/components/responses/NotAcceptable" {
+				t.Fatalf("%s %s response body 406 response = %q, want NotAcceptable", operation.method, path, response.Ref)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("OpenAPI does not define any response body operations")
 	}
 }
 
@@ -936,9 +1125,13 @@ type openAPIRef struct {
 }
 
 type openAPISchema struct {
-	Type                 string `yaml:"type"`
-	AdditionalProperties *bool  `yaml:"additionalProperties"`
-	Minimum              *int   `yaml:"minimum"`
+	Type                 string         `yaml:"type"`
+	AdditionalProperties *bool          `yaml:"additionalProperties"`
+	Minimum              *int           `yaml:"minimum"`
+	Required             []string       `yaml:"required"`
+	Properties           map[string]any `yaml:"properties"`
+	Items                *openAPISchema `yaml:"items"`
+	Enum                 []any          `yaml:"enum"`
 }
 
 type openAPIOperationWithMethod struct {
@@ -1086,6 +1279,93 @@ func resolvedResponse(response openAPIResponse, components map[string]openAPIRes
 func resolvedResponseHasHeader(response openAPIResponse, components map[string]openAPIResponse, header string) bool {
 	_, ok := resolvedResponse(response, components).Headers[header]
 	return ok
+}
+
+func assertArraySchemasDeclareItems(t *testing.T, schema openAPISchema, path string) int {
+	t.Helper()
+
+	checked := 0
+	if schema.Type == "array" {
+		checked++
+		if schema.Items == nil {
+			t.Fatalf("OpenAPI array schema %s must declare items", path)
+		}
+		checked += assertArraySchemasDeclareItems(t, *schema.Items, path+".items")
+	}
+	for name, property := range schema.Properties {
+		if child, ok := property.(map[string]any); ok {
+			checked += assertArraySchemaMapDeclaresItems(t, child, path+".properties."+name)
+		}
+	}
+	return checked
+}
+
+func assertArraySchemaMapDeclaresItems(t *testing.T, schema map[string]any, path string) int {
+	t.Helper()
+
+	checked := 0
+	if schema["type"] == "array" {
+		checked++
+		if _, ok := schema["items"]; !ok {
+			t.Fatalf("OpenAPI array schema %s must declare items", path)
+		}
+	}
+	if items, ok := schema["items"].(map[string]any); ok {
+		checked += assertArraySchemaMapDeclaresItems(t, items, path+".items")
+	}
+	if properties, ok := schema["properties"].(map[string]any); ok {
+		for name, property := range properties {
+			if child, ok := property.(map[string]any); ok {
+				checked += assertArraySchemaMapDeclaresItems(t, child, path+".properties."+name)
+			}
+		}
+	}
+	return checked
+}
+
+func assertEnumSchemasAreNonEmpty(t *testing.T, schema openAPISchema, path string) int {
+	t.Helper()
+
+	checked := 0
+	if schema.Enum != nil {
+		checked++
+		if len(schema.Enum) == 0 {
+			t.Fatalf("OpenAPI enum schema %s must list at least one value", path)
+		}
+	}
+	for name, property := range schema.Properties {
+		if child, ok := property.(map[string]any); ok {
+			checked += assertEnumSchemaMapIsNonEmpty(t, child, path+".properties."+name)
+		}
+	}
+	if schema.Items != nil {
+		checked += assertEnumSchemasAreNonEmpty(t, *schema.Items, path+".items")
+	}
+	return checked
+}
+
+func assertEnumSchemaMapIsNonEmpty(t *testing.T, schema map[string]any, path string) int {
+	t.Helper()
+
+	checked := 0
+	if rawEnum, ok := schema["enum"]; ok {
+		checked++
+		values, ok := rawEnum.([]any)
+		if !ok || len(values) == 0 {
+			t.Fatalf("OpenAPI enum schema %s must list at least one value", path)
+		}
+	}
+	if items, ok := schema["items"].(map[string]any); ok {
+		checked += assertEnumSchemaMapIsNonEmpty(t, items, path+".items")
+	}
+	if properties, ok := schema["properties"].(map[string]any); ok {
+		for name, property := range properties {
+			if child, ok := property.(map[string]any); ok {
+				checked += assertEnumSchemaMapIsNonEmpty(t, child, path+".properties."+name)
+			}
+		}
+	}
+	return checked
 }
 
 func schemaByRef(schemas map[string]openAPISchema, ref string) (openAPISchema, bool) {

@@ -834,6 +834,7 @@ func TestCORSAllowMethodsStayMinimalAndDeduplicated(t *testing.T) {
 
 	want := []string{
 		http.MethodGet,
+		http.MethodHead,
 		http.MethodPost,
 		http.MethodPut,
 		http.MethodDelete,
@@ -1321,6 +1322,31 @@ func TestCORSPreflightKeepsGlobalMiddlewareHeaders(t *testing.T) {
 	}
 	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-preflight" {
 		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
+	}
+}
+
+func TestCORSPreflightAllowsHEADProbes(t *testing.T) {
+	router := newCORSMiddlewareTestRouter(t)
+	router.HEAD("/readyz", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/readyz", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	req.Header.Set("Access-Control-Request-Method", http.MethodHead)
+	req.Header.Set("Access-Control-Request-Headers", middleware.RequestIDHeader)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body = %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Methods"); !headerHasToken(got, http.MethodHead) {
+		t.Fatalf("Access-Control-Allow-Methods = %q, missing %s", got, http.MethodHead)
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Headers"); !headerHasToken(got, middleware.RequestIDHeader) {
+		t.Fatalf("Access-Control-Allow-Headers = %q, missing %s", got, middleware.RequestIDHeader)
 	}
 }
 

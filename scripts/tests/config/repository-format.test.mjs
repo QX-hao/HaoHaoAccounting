@@ -7,6 +7,7 @@ import { test } from 'node:test';
 const repositoryRoot = path.resolve(new URL('../../..', import.meta.url).pathname);
 const editorconfig = readRepositoryFile('.editorconfig');
 const gitattributes = readRepositoryFile('.gitattributes');
+const webNextConfig = readRepositoryFile('web/next.config.ts');
 
 test('editorconfig keeps repository text formatting stable across editors', () => {
 	assert.match(editorconfig, /^root = true$/m);
@@ -65,6 +66,20 @@ test('gitattributes covers current repository text extensions', () => {
 	for (const extension of repositoryTextExtensions()) {
 		assert.match(gitattributes, new RegExp(`^\\*\\.${escapeRegExp(extension)} text eol=lf$`, 'm'), `*.${extension} must be pinned to LF`);
 	}
+});
+
+test('web Next config sets baseline browser security headers', () => {
+	assert.match(webNextConfig, /async headers\(\)/);
+	assert.match(webNextConfig, /source: '\/:path\*'/);
+	for (const [header, value] of [
+		['Referrer-Policy', 'strict-origin-when-cross-origin'],
+		['Permissions-Policy', 'camera=(), geolocation=(), microphone=(), payment=()'],
+		['X-Content-Type-Options', 'nosniff'],
+		['X-Frame-Options', 'DENY'],
+	]) {
+		assert.match(webNextConfig, new RegExp(`key: '${escapeRegExp(header)}', value: '${escapeRegExp(value)}'`));
+	}
+	assert.doesNotMatch(webNextConfig, /Strict-Transport-Security/);
 });
 
 function readRepositoryFile(path) {

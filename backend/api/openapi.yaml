@@ -1413,7 +1413,7 @@ paths:
       parameters:
         - name: format
           in: query
-          description: Export file format. Defaults to csv when omitted.
+          description: Export file format. Values are trimmed and case-insensitive; defaults to csv when omitted.
           schema:
             type: string
             enum: [csv, xlsx]

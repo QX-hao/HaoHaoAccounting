@@ -75,7 +75,7 @@ type ImportPreviewRow struct {
 }
 
 type exportQuery struct {
-	Format string `form:"format" binding:"omitempty,oneof=csv xlsx"`
+	Format string `form:"format"`
 	Start  string `form:"start"`
 	End    string `form:"end"`
 }

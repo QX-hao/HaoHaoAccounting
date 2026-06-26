@@ -201,19 +201,23 @@ function isJSONContentType(contentType: string) {
 }
 
 async function fetchAPI(path: string, init: RequestInit = {}) {
-  const { signal, cleanup } = requestSignal(init.signal);
+  const request = requestSignal(init.signal);
   try {
-    return await fetch(`${API_BASE}${path}`, { ...init, credentials: 'omit', signal });
+    return await fetch(`${API_BASE}${path}`, { ...init, credentials: 'omit', signal: request.signal });
   } catch (err) {
-    throw networkError(err);
+    throw networkError(err, request.timedOut());
   } finally {
-    cleanup();
+    request.cleanup();
   }
 }
 
 function requestSignal(callerSignal?: AbortSignal | null) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, API_REQUEST_TIMEOUT_MS);
   const abort = () => controller.abort();
   if (callerSignal) {
     if (callerSignal.aborted) {
@@ -224,6 +228,7 @@ function requestSignal(callerSignal?: AbortSignal | null) {
   }
   return {
     signal: controller.signal,
+    timedOut: () => timedOut,
     cleanup: () => {
       // 清理定时器和外部 signal 监听，避免频繁请求后残留回调。
       clearTimeout(timeout);
@@ -232,7 +237,10 @@ function requestSignal(callerSignal?: AbortSignal | null) {
   };
 }
 
-function networkError(err: unknown) {
+function networkError(err: unknown, timedOut = false) {
+  if (timedOut) {
+    return new ApiError('请求超时', 0, 'request_timeout', '', null, null, null, null, '', err);
+  }
   const message = err instanceof Error && err.message ? err.message : '网络请求失败';
   return new ApiError(message, 0, 'network_error', '', null, null, null, null, '', err);
 }

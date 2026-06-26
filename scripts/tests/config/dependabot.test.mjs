@@ -56,6 +56,18 @@ test('dependabot update entries map to tracked repository manifests', () => {
 	}
 });
 
+test('dependabot uses multi-directory updates only for Docker images', () => {
+	for (const update of config.updates) {
+		if (update.ecosystem === 'docker') {
+			assert.ok(update.keys.includes('directories'), 'docker updates should keep one grouped multi-directory block');
+			assert.equal(update.directory, undefined, 'docker updates should not split back into one directory block');
+			continue;
+		}
+		assert.ok(update.keys.includes('directory'), `${update.ecosystem} updates should stay single-directory`);
+		assert.ok(!update.keys.includes('directories'), `${update.ecosystem} updates should not use multi-directory configuration`);
+	}
+});
+
 test('dependabot groups every watched ecosystem into one maintenance PR', () => {
 	for (const update of config.updates) {
 		assert.equal(update.groups.length, 1, `${updateContext(update)} must use exactly one group`);

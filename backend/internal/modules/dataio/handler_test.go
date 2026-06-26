@@ -37,6 +37,8 @@ func TestReadmeDocumentsExportDownloadAndSpreadsheetSafetyContracts(t *testing.T
 		"`filename`",
 		"`filename*`",
 		"`safeCSVCell`",
+		"case normalization",
+		"`invalid_request`",
 		"formula prefixes",
 	} {
 		if !strings.Contains(source, want) {
@@ -68,26 +70,70 @@ func TestExportRejectsInvalidQueryParameters(t *testing.T) {
 	}
 }
 
-func TestExportAcceptsDefaultQueryParameters(t *testing.T) {
+func TestExportInvalidFormatReturnsBadRequestAfterAcceptNegotiation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Accept(middleware.APIAcceptRules()))
+	store := testutil.NewStore(t)
+	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group("/api/v1"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/io/export?format=pdf", nil)
+	req.Header.Set("Accept", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+	}
+	assertErrorCode(t, resp, httputil.CodeInvalidRequest)
+}
+
+func TestExportAcceptsDefaultAndCaseInsensitiveFormatQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	store := testutil.NewStore(t)
 	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group(""))
 
-	req := httptest.NewRequest(http.MethodGet, "/io/export", nil)
-	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
+	for _, path := range []string{"/io/export", "/io/export?format=CSV", "/io/export?format=%20csv%20"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
 
-	if resp.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+			if resp.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+			}
+			if got := resp.Header().Get("Content-Type"); got != "text/csv; charset=utf-8" {
+				t.Fatalf("Content-Type = %q", got)
+			}
+			if got := resp.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment;") ||
+				!strings.Contains(got, `filename="transactions_`) ||
+				!strings.Contains(got, "filename*=UTF-8''transactions_") {
+				t.Fatalf("Content-Disposition = %q", got)
+			}
+		})
 	}
-	if got := resp.Header().Get("Content-Type"); got != "text/csv; charset=utf-8" {
-		t.Fatalf("Content-Type = %q", got)
-	}
-	if got := resp.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment;") ||
-		!strings.Contains(got, `filename="transactions_`) ||
-		!strings.Contains(got, "filename*=UTF-8''transactions_") {
-		t.Fatalf("Content-Disposition = %q", got)
+}
+
+func TestNormalizedExportFormat(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		value     string
+		want      string
+		wantValid bool
+	}{
+		{name: "empty defaults to csv", want: "csv", wantValid: true},
+		{name: "csv", value: "csv", want: "csv", wantValid: true},
+		{name: "uppercase csv", value: " CSV ", want: "csv", wantValid: true},
+		{name: "uppercase xlsx", value: "XLSX", want: "xlsx", wantValid: true},
+		{name: "invalid", value: "pdf", wantValid: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := normalizedExportFormat(tc.value)
+			if got != tc.want || ok != tc.wantValid {
+				t.Fatalf("normalizedExportFormat(%q) = (%q, %v), want (%q, %v)", tc.value, got, ok, tc.want, tc.wantValid)
+			}
+		})
 	}
 }
 

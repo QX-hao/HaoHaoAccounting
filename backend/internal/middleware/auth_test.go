@@ -436,6 +436,39 @@ func TestRequireAuthRejectsMalformedBearerHeader(t *testing.T) {
 	}
 }
 
+func TestRequireAuthRejectsDuplicateAuthorizationHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tokenService := testTokenService(t)
+	token, err := tokenService.BuildToken(42)
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+
+	called := false
+	router := gin.New()
+	router.GET("/private", RequireAuthWithRevocation(nil, tokenService), func(c *gin.Context) {
+		called = true
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/private", nil)
+	req.Header.Add("Authorization", "Bearer "+token)
+	req.Header.Add("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if called {
+		t.Fatal("handler was called for duplicate Authorization headers")
+	}
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.Code)
+	}
+	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api"` {
+		t.Fatalf("WWW-Authenticate = %q", got)
+	}
+}
+
 func TestBearerTokenParsesRFC6750Credentials(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

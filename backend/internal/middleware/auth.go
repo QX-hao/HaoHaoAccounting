@@ -167,7 +167,13 @@ func RequireAuth() gin.HandlerFunc {
 // RequireAuthWithRevocation 校验 Bearer JWT，并在撤销检查失败或 token 已撤销时失败关闭。
 func RequireAuthWithRevocation(checker TokenRevocationChecker, tokenService *TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token, ok := BearerToken(c.GetHeader("Authorization"))
+		values := c.Request.Header.Values("Authorization")
+		if len(values) != 1 {
+			httputil.Unauthorized(c, "invalid Authorization format")
+			c.Abort()
+			return
+		}
+		token, ok := BearerToken(values[0])
 		if !ok {
 			httputil.Unauthorized(c, "invalid Authorization format")
 			c.Abort()

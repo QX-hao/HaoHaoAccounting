@@ -205,6 +205,7 @@ func newCORSConfig(cfg config.Config) cors.Config {
 		AllowOrigins: normalizedCORSOrigins(cfg.HTTP.CORSAllowOrigins),
 		AllowMethods: []string{
 			http.MethodGet,
+			http.MethodHead,
 			http.MethodPost,
 			http.MethodPut,
 			http.MethodDelete,

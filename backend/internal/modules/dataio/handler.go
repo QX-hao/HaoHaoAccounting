@@ -40,9 +40,10 @@ func (h *Handler) exportData(c *gin.Context) {
 		httputil.InvalidRequest(c, "invalid query parameters")
 		return
 	}
-	format := strings.TrimSpace(query.Format)
-	if format == "" {
-		format = "csv"
+	format, ok := normalizedExportFormat(query.Format)
+	if !ok {
+		httputil.InvalidRequest(c, "format must be csv or xlsx")
+		return
 	}
 	start, end, err := timeutil.ResolveRangeStrict(query.Start, query.End)
 	if err != nil {
@@ -65,6 +66,17 @@ func (h *Handler) exportData(c *gin.Context) {
 	if err := writeCSV(c, rows); err != nil {
 		httputil.InternalError(c, err)
 	}
+}
+
+func normalizedExportFormat(value string) (string, bool) {
+	format := strings.ToLower(strings.TrimSpace(value))
+	if format == "" {
+		return "csv", true
+	}
+	if format == "csv" || format == "xlsx" {
+		return format, true
+	}
+	return "", false
 }
 
 func (h *Handler) importData(c *gin.Context) {

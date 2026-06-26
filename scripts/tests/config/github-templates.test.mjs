@@ -246,16 +246,20 @@ test('codeql workflow scans Go and TypeScript with least required permissions', 
 	assert.match(codeqlWorkflow, /^  push:\n    branches: \[main, dev-pxhao\]$/m);
 	assert.match(codeqlWorkflow, /^  pull_request:\n    branches: \[main, dev-pxhao\]$/m);
 	assert.match(codeqlWorkflow, /^  schedule:\n    - cron: '[^']+'$/m);
+	assert.match(codeqlWorkflow, /^  workflow_dispatch:$/m);
 	assert.match(codeqlWorkflow, /^permissions:\n  contents: read\n  security-events: write$/m);
 	assert.match(codeqlWorkflow, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: true$/m);
 	assert.match(codeqlWorkflow, /runs-on: ubuntu-24\.04/);
 	assert.match(codeqlWorkflow, /timeout-minutes: 20/);
+	assert.match(codeqlWorkflow, /strategy:\n      fail-fast: false\n      matrix:/);
 	assert.match(codeqlWorkflow, /language: go[\s\S]+build-mode: autobuild/);
 	assert.match(codeqlWorkflow, /language: javascript-typescript[\s\S]+build-mode: none/);
 	assert.match(codeqlWorkflow, /actions\/checkout@v4[\s\S]+persist-credentials: false/);
 	assert.match(codeqlWorkflow, /github\/codeql-action\/init@v3/);
 	assert.match(codeqlWorkflow, /queries: security-extended/);
+	assert.match(codeqlWorkflow, /if: matrix\.build-mode == 'autobuild'\n        uses: github\/codeql-action\/autobuild@v3/);
 	assert.match(codeqlWorkflow, /github\/codeql-action\/analyze@v3/);
+	assert.match(codeqlWorkflow, /category: '\/language:\$\{\{ matrix\.language \}\}'/);
 });
 
 function readRepositoryFile(path) {

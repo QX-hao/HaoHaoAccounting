@@ -226,10 +226,14 @@ func APIAcceptRules() []AcceptRule {
 			Path:         "/api/v1/io/export",
 			OfferedTypes: []string{"text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
 			Offered: func(c *gin.Context) []string {
-				if strings.TrimSpace(c.Query("format")) == "xlsx" {
+				switch exportFormatFromQuery(c.Query("format")) {
+				case "xlsx":
 					return []string{"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+				case "csv":
+					return []string{"text/csv"}
+				default:
+					return []string{"text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
 				}
-				return []string{"text/csv"}
 			},
 		},
 	}
@@ -241,6 +245,17 @@ func APIAcceptRules() []AcceptRule {
 		})
 	}
 	return rules
+}
+
+func exportFormatFromQuery(value string) string {
+	format := strings.ToLower(strings.TrimSpace(value))
+	if format == "" {
+		return "csv"
+	}
+	if format == "csv" || format == "xlsx" {
+		return format
+	}
+	return ""
 }
 
 type apiRoute struct {

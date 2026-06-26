@@ -16,6 +16,8 @@ This module owns CSV/XLSX import and export.
 - Do not update account balances directly in this module. Imported rows must go through `transactions.Service.Create` so manual and imported entries share the same ledger invariants.
 - Keep supported import columns aligned with exported columns:
   `occurred_at,type,amount,category,account,note,tags,source`.
+- Export `format` accepts `csv` or `xlsx` after trimming and case normalization; keep invalid
+  values mapped to `invalid_request`.
 - Export downloads must keep `Content-Disposition` with both `filename` and RFC 5987
   `filename*` parameters so web and mobile clients can recover stable file names.
 - User-controlled CSV/XLSX text cells must pass through `safeCSVCell` before export to

@@ -37,7 +37,11 @@ func ContentType(rules []ContentTypeRule) gin.HandlerFunc {
 			return
 		}
 
-		contentType := strings.TrimSpace(c.GetHeader("Content-Type"))
+		headerValues := c.Request.Header.Values("Content-Type")
+		contentType := ""
+		if len(headerValues) == 1 {
+			contentType = strings.TrimSpace(headerValues[0])
+		}
 		mediaType, _, err := mime.ParseMediaType(contentType)
 		if contentType == "" || err != nil || !mediaTypeAllowed(mediaType, allowed) {
 			httputil.UnsupportedMediaType(c, unsupportedMediaTypeMessage(allowed))

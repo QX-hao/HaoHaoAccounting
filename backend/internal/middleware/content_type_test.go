@@ -152,6 +152,35 @@ func TestContentTypeRejectsMalformedHeaderParameters(t *testing.T) {
 	}
 }
 
+func TestContentTypeRejectsDuplicateHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handlerCalled := false
+	router := gin.New()
+	router.Use(ContentType([]ContentTypeRule{{
+		Method:       http.MethodPost,
+		Path:         "/json",
+		AllowedTypes: []string{"application/json"},
+	}}))
+	router.POST("/json", func(c *gin.Context) {
+		handlerCalled = true
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/json", strings.NewReader("{}"))
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Content-Type", "text/plain")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415, body = %s", resp.Code, resp.Body.String())
+	}
+	if handlerCalled {
+		t.Fatal("handler ran after duplicate Content-Type headers")
+	}
+}
+
 func TestContentTypeIgnoresUnmatchedRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -19,7 +19,11 @@ type requestIDStdContextKey struct{}
 // RequestID 统一生成或复用请求相关 id，并把同一个值写入响应头、Gin context 和标准 context。
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		requestID := strings.TrimSpace(c.GetHeader(RequestIDHeader))
+		values := c.Request.Header.Values(RequestIDHeader)
+		requestID := ""
+		if len(values) == 1 {
+			requestID = strings.TrimSpace(values[0])
+		}
 		if !ValidRequestID(requestID) {
 			requestID = newRequestID()
 		}

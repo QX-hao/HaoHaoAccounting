@@ -155,6 +155,36 @@ func TestRequestIDReplacesInvalidCallerHeaderEverywhere(t *testing.T) {
 	}
 }
 
+func TestRequestIDReplacesDuplicateCallerHeadersEverywhere(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(RequestID())
+	router.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"requestId":    RequestIDFromContext(c),
+			"stdRequestId": RequestIDFromStdContext(c.Request.Context()),
+			"header":       c.GetHeader(RequestIDHeader),
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	req.Header.Add(RequestIDHeader, "client-request-1")
+	req.Header.Add(RequestIDHeader, "client-request-2")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	requestID := resp.Header().Get(RequestIDHeader)
+	if requestID == "" || requestID == "client-request-1" || requestID == "client-request-2" {
+		t.Fatalf("response request id = %q", requestID)
+	}
+
+	wantBody := `{"header":"` + requestID + `","requestId":"` + requestID + `","stdRequestId":"` + requestID + `"}`
+	if resp.Body.String() != wantBody {
+		t.Fatalf("body = %q, want %q", resp.Body.String(), wantBody)
+	}
+}
+
 func TestValidRequestIDRejectsUnsafeValues(t *testing.T) {
 	if ValidRequestID("") {
 		t.Fatal("empty request id should be invalid")
