@@ -82,12 +82,13 @@ test('dependabot uses multi-directory updates only for Docker images', () => {
 	}
 });
 
-test('dependabot groups every watched ecosystem into one maintenance PR', () => {
+test('dependabot groups routine updates while keeping major upgrades separate', () => {
 	for (const update of config.updates) {
 		assert.equal(update.groups.length, 1, `${updateContext(update)} must use exactly one group`);
 		const [group] = update.groups;
 		assert.deepEqual(group.patterns, ['*']);
-		assert.match(group.name, /^[a-z][a-z|_-]*[a-z]$/);
+		assert.deepEqual(group.updateTypes, ['minor', 'patch'], `${updateContext(update)} must keep major updates outside the maintenance group`);
+		assert.match(group.name, /^[a-z][a-z0-9_-]*[a-z0-9]$/, `${updateContext(update)} group name must stay shell- and branch-friendly`);
 	}
 });
 
@@ -201,26 +202,34 @@ function parseChildScalars(block, key) {
 function parseGroups(block) {
 	const groups = [];
 	let currentGroup = null;
+	let currentKey = '';
 	for (const line of sectionLines(block, 'groups')) {
 		const groupMatch = line.match(/^      ([a-z0-9_-]+):$/);
 		if (groupMatch) {
-			currentGroup = { name: groupMatch[1], keys: [], patterns: [] };
+			currentGroup = { name: groupMatch[1], keys: [], patterns: [], updateTypes: [] };
+			currentKey = '';
 			groups.push(currentGroup);
 			continue;
 		}
 		const keyMatch = line.match(/^        ([a-z][a-z-]*):$/);
 		if (keyMatch && currentGroup) {
 			currentGroup.keys.push(keyMatch[1]);
+			currentKey = keyMatch[1];
 			continue;
 		}
 		const itemMatch = line.match(/^          - (.+)$/);
 		if (itemMatch && currentGroup) {
-			currentGroup.patterns.push(parseScalar(itemMatch[1]));
+			if (currentKey === 'patterns') {
+				currentGroup.patterns.push(parseScalar(itemMatch[1]));
+			}
+			if (currentKey === 'update-types') {
+				currentGroup.updateTypes.push(parseScalar(itemMatch[1]));
+			}
 		}
 	}
 
 	for (const group of groups) {
-		assertAllowedKeys(group.keys, new Set(['patterns']), `group ${group.name}`);
+		assertAllowedKeys(group.keys, new Set(['patterns', 'update-types']), `group ${group.name}`);
 	}
 	return groups;
 }

@@ -18,10 +18,11 @@ This module owns CSV/XLSX import and export.
   `occurred_at,type,amount,category,account,note,tags,source`.
 - Export `format` accepts `csv` or `xlsx` after trimming and case normalization; keep invalid
   values mapped to `invalid_request`.
-- Export downloads must keep `Content-Disposition` with both `filename` and RFC 5987
-  `filename*` parameters so web and mobile clients can recover stable file names.
+- Export downloads must keep `Content-Disposition` with an ASCII-safe `filename` fallback
+  and an RFC 5987 `filename*` parameter so old clients and modern browsers can recover
+  stable file names without losing non-ASCII names.
 - User-controlled CSV/XLSX text cells must pass through `safeCSVCell` before export to
-  neutralize spreadsheet formula prefixes.
+  neutralize spreadsheet formula prefixes, including formulas hidden behind leading whitespace.
 - Import totals count non-empty data rows only. Blank rows are ignored, while reported row
   numbers still point to the original source file lines.
 - Imports skip duplicate rows by default; `skipDuplicates` defaults to true for both file and text imports. Duplicate checks compare user, time, type, amount, category, account, note, and tags.

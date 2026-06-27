@@ -1061,7 +1061,9 @@ test('generator requires documented download filename headers', () => {
 	assert.match(openapi, /name: format[\s\S]+description: Export file format\. Values are trimmed and case-insensitive; defaults to csv when omitted\.[\s\S]+default: csv/);
 	assert.match(openapi, /name: format[\s\S]+example: csv/);
 	assert.match(generator, /components\.headers\.ContentDisposition is missing filename\* guidance/);
-	assert.match(openapi, /ContentDisposition:[\s\S]+example: attachment; filename="transactions\.csv"; filename\*=UTF-8''transactions\.csv/);
+	assert.match(generator, /components\.headers\.ContentDisposition must document ASCII fallback and filename\* precedence/);
+	assert.match(openapi, /ContentDisposition:[\s\S]+ASCII-safe filename fallback[\s\S]+prefer filename\*/);
+	assert.match(openapi, /ContentDisposition:[\s\S]+example: attachment; filename="download\.csv"; filename\*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95\.csv/);
 	assert.doesNotMatch(generatedClient, /getIoExport/);
 	assert.match(webDataioApi, /download\(`\/io\/export\?format=\$\{format\}`, exportAccept\(format\)\)/);
 	assert.match(mobileDataioApi, /download\(`\/io\/export\?format=\$\{format\}`, exportAccept\(format\)\)/);

@@ -1543,10 +1543,10 @@ components:
         minimum: 0
       example: 95
     ContentDisposition:
-      description: Attachment disposition for downloaded files. Includes both filename and RFC 5987 filename* parameters.
+      description: Attachment disposition for downloaded files. Includes an ASCII-safe filename fallback and an RFC 5987 filename* parameter; clients should prefer filename* when present to preserve non-ASCII names.
       schema:
         type: string
-      example: attachment; filename="transactions.csv"; filename*=UTF-8''transactions.csv
+      example: attachment; filename="download.csv"; filename*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95.csv
     Location:
       description: Relative URL of the created or queued API resource.
       schema:

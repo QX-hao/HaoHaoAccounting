@@ -658,6 +658,9 @@ function validateResponseComponents(openapi) {
   if (!contentDisposition.includes('filename*')) {
     throw new Error('components.headers.ContentDisposition is missing filename* guidance');
   }
+  if (!contentDisposition.includes('ASCII-safe filename fallback') || !contentDisposition.includes('prefer filename*')) {
+    throw new Error('components.headers.ContentDisposition must document ASCII fallback and filename* precedence');
+  }
 
   const logoutSuccess = operationResponseBlockById(openapi, 'postAuthLogout', '200');
   if (!logoutSuccess.includes('Clear-Site-Data:')) {

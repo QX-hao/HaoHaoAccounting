@@ -6,7 +6,7 @@
 - Keep changes focused by area: backend, web, mobile, Docker/deployment config, OpenAPI/generated client, or repository configuration.
 - Fill out the pull request template with summary, related issue, review focus, tests, risk, and rollback notes.
 - Do not include secrets, local `.env` files, generated build output, dependency caches, or unrelated formatting-only changes.
-- Dependabot runs weekly grouped maintenance updates against `dev-pxhao`; automatic rebase is disabled so bot-only refresh commits do not drown out human review. Bot PRs use `dependencies` plus ecosystem labels, single-level branch names, and npm `increase-if-necessary` versioning so dependency updates stay easy to filter and avoid unnecessary `package.json` churn.
+- Dependabot runs weekly grouped maintenance updates against `dev-pxhao`; automatic rebase is disabled so bot-only refresh commits do not drown out human review. Bot PRs use `dependencies` plus ecosystem labels, single-level branch names, grouped minor/patch maintenance updates, and npm `increase-if-necessary` versioning so dependency updates stay easy to filter, leave major upgrades for focused review, and avoid unnecessary `package.json` churn.
 
 ## Issue Triage
 

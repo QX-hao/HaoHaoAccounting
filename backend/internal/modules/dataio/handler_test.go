@@ -34,12 +34,15 @@ func TestReadmeDocumentsExportDownloadAndSpreadsheetSafetyContracts(t *testing.T
 
 	for _, want := range []string{
 		"`Content-Disposition`",
+		"ASCII-safe `filename` fallback",
 		"`filename`",
 		"`filename*`",
+		"without losing non-ASCII names",
 		"`safeCSVCell`",
 		"case normalization",
 		"`invalid_request`",
 		"formula prefixes",
+		"leading whitespace",
 		"`skipDuplicates`",
 		"defaults to true",
 	} {
@@ -162,12 +165,101 @@ func TestAttachmentDispositionIncludesFallbackAndEncodedFilename(t *testing.T) {
 		{
 			name:     "non-ascii",
 			filename: "交易记录.csv",
-			want:     `attachment; filename="交易记录.csv"; filename*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95.csv`,
+			want:     `attachment; filename="download.csv"; filename*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95.csv`,
+		},
+		{
+			name:     "all non-ascii",
+			filename: "交易记录",
+			want:     `attachment; filename="download"; filename*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := attachmentDisposition(tc.filename); got != tc.want {
 				t.Fatalf("attachmentDisposition(%q) = %q, want %q", tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASCIIFilenameFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{name: "ascii", filename: "transactions.csv", want: "transactions.csv"},
+		{name: "non-ascii", filename: "交易记录.csv", want: "download.csv"},
+		{name: "all non-ascii", filename: "交易记录", want: "download"},
+		{name: "control", filename: "bad\nname.csv", want: "bad_name.csv"},
+		{name: "path separators", filename: "../reports\\transactions:2026.csv", want: "reports_transactions_2026.csv"},
+		{name: "leading separators", filename: "__hidden.csv", want: "hidden.csv"},
+		{name: "blank", filename: "  ", want: "download"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := asciiFilenameFallback(tc.filename); got != tc.want {
+				t.Fatalf("asciiFilenameFallback(%q) = %q, want %q", tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASCIIFilenameStemHasAlphanumeric(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		filename string
+		want     bool
+	}{
+		{name: "ascii stem", filename: "transactions.csv", want: true},
+		{name: "non-ascii stem with ascii extension", filename: "____.csv", want: false},
+		{name: "digit stem", filename: "202606.csv", want: true},
+		{name: "underscore stem", filename: "____", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := asciiFilenameStemHasAlphanumeric(tc.filename); got != tc.want {
+				t.Fatalf("asciiFilenameStemHasAlphanumeric(%q) = %v, want %v", tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASCIIFilenameExtension(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{name: "extension", filename: "____.csv", want: ".csv"},
+		{name: "no extension", filename: "____", want: ""},
+		{name: "trailing dot", filename: "____.", want: ""},
+		{name: "unsafe extension", filename: "____.c\nsv", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := asciiFilenameExtension(tc.filename); got != tc.want {
+				t.Fatalf("asciiFilenameExtension(%q) = %q, want %q", tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASCIIFilenameCharAllowed(t *testing.T) {
+	for _, tc := range []struct {
+		r    rune
+		want bool
+	}{
+		{r: 'a', want: true},
+		{r: 'Z', want: true},
+		{r: '7', want: true},
+		{r: '.', want: true},
+		{r: '_', want: true},
+		{r: '-', want: true},
+		{r: '/', want: false},
+		{r: '\\', want: false},
+		{r: ':', want: false},
+		{r: '交', want: false},
+	} {
+		t.Run(string(tc.r), func(t *testing.T) {
+			if got := asciiFilenameCharAllowed(tc.r); got != tc.want {
+				t.Fatalf("asciiFilenameCharAllowed(%q) = %v, want %v", tc.r, got, tc.want)
 			}
 		})
 	}
@@ -185,7 +277,7 @@ func TestWriteCSVNeutralizesFormulaCells(t *testing.T) {
 		Account:     models.Account{Name: "+account"},
 		Note:        "-note",
 		Tags:        "@tags",
-		Source:      "\t=source",
+		Source:      "  =source",
 		OccurredAt:  time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}}
 
@@ -201,7 +293,7 @@ func TestWriteCSVNeutralizesFormulaCells(t *testing.T) {
 		t.Fatalf("record count = %d, want 2", len(records))
 	}
 
-	want := []string{"'=category", "'+account", "'-note", "'@tags", "'\t=source"}
+	want := []string{"'=category", "'+account", "'-note", "'@tags", "'  =source"}
 	for i, value := range records[1][3:] {
 		if value != want[i] {
 			t.Fatalf("field %d = %q, want %q", i+3, value, want[i])
@@ -221,7 +313,7 @@ func TestWriteXLSXNeutralizesFormulaCells(t *testing.T) {
 		Account:     models.Account{Name: "+account"},
 		Note:        "-note",
 		Tags:        "@tags",
-		Source:      "\t=source",
+		Source:      "  =source",
 		OccurredAt:  time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}}
 
@@ -245,7 +337,7 @@ func TestWriteXLSXNeutralizesFormulaCells(t *testing.T) {
 		"E2": "'+account",
 		"F2": "'-note",
 		"G2": "'@tags",
-		"H2": "'\t=source",
+		"H2": "'  =source",
 	} {
 		got, err := f.GetCellValue(sheet, cell)
 		if err != nil {
@@ -272,10 +364,37 @@ func TestSafeCSVCellNeutralizesDangerousPrefixes(t *testing.T) {
 		{name: "tab", value: "\t=cmd", want: "'\t=cmd"},
 		{name: "carriage-return", value: "\r=cmd", want: "'\r=cmd"},
 		{name: "newline", value: "\n=cmd", want: "'\n=cmd"},
+		{name: "leading spaces", value: "  =cmd", want: "'  =cmd"},
+		{name: "leading spaces before at", value: "  @cmd", want: "'  @cmd"},
+		{name: "only whitespace with tab", value: " \t\n", want: "' \t\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := safeCSVCell(tc.value); got != tc.want {
 				t.Fatalf("safeCSVCell(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDangerousCSVFormulaPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "empty", value: "", want: false},
+		{name: "plain", value: "groceries", want: false},
+		{name: "equals", value: "=1+1", want: true},
+		{name: "tab", value: "\ttext", want: true},
+		{name: "carriage return", value: "\rtext", want: true},
+		{name: "newline", value: "\ntext", want: true},
+		{name: "spaces before formula", value: "  +1", want: true},
+		{name: "spaces before tab", value: " \ttext", want: true},
+		{name: "only spaces", value: "   ", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := dangerousCSVFormulaPrefix(tc.value); got != tc.want {
+				t.Fatalf("dangerousCSVFormulaPrefix(%q) = %v, want %v", tc.value, got, tc.want)
 			}
 		})
 	}

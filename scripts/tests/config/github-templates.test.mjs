@@ -198,6 +198,8 @@ test('contributing guide documents branch flow, issue triage, verification, cont
 		'bot-only refresh commits',
 		'`dependencies` plus ecosystem labels',
 		'single-level branch names',
+		'grouped minor/patch maintenance updates',
+		'leave major upgrades for focused review',
 		'npm `increase-if-necessary` versioning',
 		'unnecessary `package.json` churn',
 	]) {
