@@ -196,6 +196,10 @@ test('contributing guide documents branch flow, issue triage, verification, cont
 		'Dependabot runs weekly grouped maintenance updates against `dev-pxhao`',
 		'automatic rebase is disabled',
 		'bot-only refresh commits',
+		'`dependencies` plus ecosystem labels',
+		'single-level branch names',
+		'npm `increase-if-necessary` versioning',
+		'unnecessary `package.json` churn',
 	]) {
 		assert.match(contributingGuide, new RegExp(escapeRegExp(requiredText)));
 	}

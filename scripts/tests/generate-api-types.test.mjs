@@ -615,8 +615,11 @@ test('generator requires bounded visible ASCII request ids', () => {
 	assert.match(generator, /components\.parameters\.RequestID.*visible ASCII pattern/s);
 	assert.match(generator, /components\.headers\.RequestID.*maxLength: 128/s);
 	assert.match(generator, /is missing request id example/);
+	assert.match(generator, /must document generated id fallback uniqueness/);
 	assert.match(openapi, /parameters:[\s\S]+RequestID:[\s\S]+example: client-request-123/);
 	assert.match(openapi, /headers:[\s\S]+RequestID:[\s\S]+example: client-request-123/);
+	assert.match(openapi, /parameters:[\s\S]+RequestID:[\s\S]+system entropy source is unavailable/);
+	assert.match(openapi, /headers:[\s\S]+RequestID:[\s\S]+system entropy source is unavailable/);
 });
 
 test('generator requires closed request schemas', () => {

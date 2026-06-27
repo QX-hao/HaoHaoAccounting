@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"io"
+	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,6 +18,11 @@ const (
 )
 
 type requestIDStdContextKey struct{}
+
+var (
+	requestIDEntropyReader    io.Reader = rand.Reader
+	requestIDFallbackSequence atomic.Uint64
+)
 
 // RequestID 统一生成或复用请求相关 id，并把同一个值写入响应头、Gin context 和标准 context。
 func RequestID() gin.HandlerFunc {
@@ -77,8 +85,9 @@ func ValidRequestID(value string) bool {
 
 func newRequestID() string {
 	var bytes [16]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
-		return "request-id-unavailable"
+	if _, err := io.ReadFull(requestIDEntropyReader, bytes[:]); err != nil {
+		// 熵源异常时也保持每个请求 id 不同，避免日志关联字段全部撞到同一个固定值。
+		return "request-id-fallback-" + strconv.FormatUint(requestIDFallbackSequence.Add(1), 36)
 	}
 	return base64.RawURLEncoding.EncodeToString(bytes[:])
 }

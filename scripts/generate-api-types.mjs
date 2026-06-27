@@ -807,6 +807,9 @@ function validateRequestIDSchema(block, name) {
   if (!block.includes('example: client-request-123')) {
     throw new Error(`${name} is missing request id example`);
   }
+  if (!block.includes('system entropy source is unavailable')) {
+    throw new Error(`${name} must document generated id fallback uniqueness`);
+  }
 }
 
 function emitType(name, block) {

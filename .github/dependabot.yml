@@ -14,6 +14,12 @@ updates:
     rebase-strategy: disabled
     commit-message:
       prefix: deps(actions)
+    labels:
+      - dependencies
+      - github-actions
+    # 使用单层分支名，避免 dependabot/... 多级分支和本仓库分支约定不一致。
+    pull-request-branch-name:
+      separator: "-"
     cooldown:
       default-days: 7
     groups:
@@ -35,6 +41,13 @@ updates:
     rebase-strategy: disabled
     commit-message:
       prefix: deps(backend)
+    labels:
+      - dependencies
+      - backend
+      - go
+    # 使用单层分支名，避免 dependabot/... 多级分支和本仓库分支约定不一致。
+    pull-request-branch-name:
+      separator: "-"
     cooldown:
       default-days: 7
     groups:
@@ -54,8 +67,17 @@ updates:
     target-branch: dev-pxhao
     # 关闭自动 rebase，减少只为刷新分支产生的 bot 提交噪音；需要时由维护者手动触发。
     rebase-strategy: disabled
+    # npm 应用优先更新 lockfile；只有当前 semver 范围无法覆盖新版本时才改 package.json。
+    versioning-strategy: increase-if-necessary
     commit-message:
       prefix: deps(web)
+    labels:
+      - dependencies
+      - web
+      - npm
+    # 使用单层分支名，避免 dependabot/... 多级分支和本仓库分支约定不一致。
+    pull-request-branch-name:
+      separator: "-"
     cooldown:
       default-days: 7
     groups:
@@ -75,8 +97,17 @@ updates:
     target-branch: dev-pxhao
     # 关闭自动 rebase，减少只为刷新分支产生的 bot 提交噪音；需要时由维护者手动触发。
     rebase-strategy: disabled
+    # npm 应用优先更新 lockfile；只有当前 semver 范围无法覆盖新版本时才改 package.json。
+    versioning-strategy: increase-if-necessary
     commit-message:
       prefix: deps(mobile)
+    labels:
+      - dependencies
+      - mobile
+      - npm
+    # 使用单层分支名，避免 dependabot/... 多级分支和本仓库分支约定不一致。
+    pull-request-branch-name:
+      separator: "-"
     cooldown:
       default-days: 7
     groups:
@@ -102,6 +133,12 @@ updates:
     rebase-strategy: disabled
     commit-message:
       prefix: deps(docker)
+    labels:
+      - dependencies
+      - docker
+    # 使用单层分支名，避免 dependabot/... 多级分支和本仓库分支约定不一致。
+    pull-request-branch-name:
+      separator: "-"
     cooldown:
       default-days: 7
     groups:

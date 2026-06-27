@@ -6,9 +6,10 @@ const dependabot = readRepositoryFile('.github/dependabot.yml');
 const config = parseDependabotConfig(dependabot);
 
 const allowedTopLevelKeys = new Set(['version', 'updates']);
-const allowedUpdateKeys = new Set(['package-ecosystem', 'directory', 'directories', 'schedule', 'open-pull-requests-limit', 'target-branch', 'commit-message', 'cooldown', 'rebase-strategy', 'groups']);
+const allowedUpdateKeys = new Set(['package-ecosystem', 'directory', 'directories', 'schedule', 'open-pull-requests-limit', 'target-branch', 'commit-message', 'labels', 'pull-request-branch-name', 'cooldown', 'rebase-strategy', 'versioning-strategy', 'groups']);
 const allowedScheduleKeys = new Set(['interval', 'day', 'time', 'timezone']);
 const allowedCommitMessageKeys = new Set(['prefix']);
+const allowedPullRequestBranchNameKeys = new Set(['separator']);
 const allowedCooldownKeys = new Set(['default-days']);
 const allowedWeeklyDays = new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']);
 const supportedEcosystems = new Set(['docker', 'github-actions', 'gomod', 'npm']);
@@ -25,9 +26,13 @@ test('dependabot config uses the supported GitHub schema subset', () => {
 		assertDependabotDirectories(update);
 		assert.equal(update.openPullRequestsLimit, 1, `${updateContext(update)} must keep bot PR fan-out low`);
 		assert.equal(update.rebaseStrategy, 'disabled', `${updateContext(update)} must not create bot-only rebase commits`);
+		assertDependabotVersioningStrategy(update);
 		assert.equal(update.targetBranch, 'dev-pxhao', `${updateContext(update)} must target the development branch`);
 		assertAllowedKeys(update.commitMessage.keys, allowedCommitMessageKeys, `${update.ecosystem} commit-message`);
 		assert.match(update.commitMessage.prefix, /^deps\([a-z][a-z0-9-]*\)$/, `${updateContext(update)} must use a scoped bot commit prefix`);
+		assertDependabotLabels(update);
+		assertAllowedKeys(update.pullRequestBranchName.keys, allowedPullRequestBranchNameKeys, `${update.ecosystem} pull-request-branch-name`);
+		assert.equal(update.pullRequestBranchName.separator, '-', `${updateContext(update)} must use single-level bot branch names`);
 
 		assertAllowedKeys(update.schedule.keys, allowedScheduleKeys, `${updateContext(update)} schedule`);
 		assert.equal(update.schedule.interval, 'weekly');
@@ -118,6 +123,8 @@ function parseUpdateBlock(block) {
 	const scalars = new Map(rootEntries.map(({ key, value }) => [key, value]));
 	const schedule = parseChildScalars(block, 'schedule');
 	const commitMessage = parseChildScalars(block, 'commit-message');
+	const labels = parseList(block, 'labels');
+	const pullRequestBranchName = parseChildScalars(block, 'pull-request-branch-name');
 	const cooldown = parseChildScalars(block, 'cooldown');
 	const directories = parseDirectories(block, scalars.get('directory'));
 	const groups = parseGroups(block);
@@ -129,6 +136,7 @@ function parseUpdateBlock(block) {
 		directories,
 		openPullRequestsLimit: scalars.get('open-pull-requests-limit'),
 		rebaseStrategy: scalars.get('rebase-strategy'),
+		versioningStrategy: scalars.get('versioning-strategy'),
 		targetBranch: scalars.get('target-branch'),
 		schedule: {
 			keys: schedule.keys,
@@ -140,6 +148,11 @@ function parseUpdateBlock(block) {
 		commitMessage: {
 			keys: commitMessage.keys,
 			prefix: commitMessage.values.get('prefix'),
+		},
+		labels,
+		pullRequestBranchName: {
+			keys: pullRequestBranchName.keys,
+			separator: pullRequestBranchName.values.get('separator'),
 		},
 		cooldown: {
 			keys: cooldown.keys,
@@ -162,6 +175,13 @@ function parseDirectories(block, directory) {
 		}
 	}
 	return values;
+}
+
+function parseList(block, key) {
+	return sectionLines(block, key)
+		.map((line) => line.match(/^      - (.+)$/)?.[1])
+		.filter(Boolean)
+		.map(parseScalar);
 }
 
 function parseChildScalars(block, key) {
@@ -279,6 +299,34 @@ function assertDependabotDirectories(update) {
 		assert.match(directory, /^\//, `${update.ecosystem} directory must be repository-root relative`);
 	}
 	assert.deepEqual(update.directories, [...new Set(update.directories)], `${update.ecosystem} directories must be unique`);
+}
+
+function assertDependabotVersioningStrategy(update) {
+	if (update.ecosystem === 'npm') {
+		assert.equal(update.versioningStrategy, 'increase-if-necessary', `${updateContext(update)} should minimize package.json churn`);
+		return;
+	}
+	assert.equal(update.versioningStrategy, undefined, `${updateContext(update)} must not set unsupported versioning-strategy`);
+}
+
+function assertDependabotLabels(update) {
+	assert.ok(update.labels.includes('dependencies'), `${updateContext(update)} must be labeled dependencies`);
+	assert.deepEqual(update.labels, [...new Set(update.labels)], `${updateContext(update)} labels must be unique`);
+	for (const label of update.labels) {
+		assert.match(label, /^[a-z][a-z0-9-]*$/, `${updateContext(update)} label ${label} must be lowercase kebab-case`);
+	}
+	for (const label of expectedDependabotLabels(update)) {
+		assert.ok(update.labels.includes(label), `${updateContext(update)} labels must include ${label}`);
+	}
+}
+
+function expectedDependabotLabels(update) {
+	if (update.ecosystem === 'github-actions') return ['github-actions'];
+	if (update.ecosystem === 'gomod') return ['backend', 'go'];
+	if (update.ecosystem === 'docker') return ['docker'];
+	if (update.ecosystem === 'npm' && update.directories.includes('/web')) return ['web', 'npm'];
+	if (update.ecosystem === 'npm' && update.directories.includes('/mobile')) return ['mobile', 'npm'];
+	return [];
 }
 
 function updateContext(update) {

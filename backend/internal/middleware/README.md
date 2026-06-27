@@ -2,7 +2,7 @@
 
 Gin middleware and auth token helpers.
 
-`RequestID` preserves a valid caller-provided `X-Request-ID` or generates one, returns it in the response header, and stores the same value in both Gin context and the standard request `context.Context` for downstream services. Caller IDs are trimmed and accepted only when they are bounded to 128 visible ASCII characters; invalid values are replaced everywhere to avoid unsafe log correlation values.
+`RequestID` preserves a valid caller-provided `X-Request-ID` or generates one, returns it in the response header, and stores the same value in both Gin context and the standard request `context.Context` for downstream services. Caller IDs are trimmed and accepted only when they are bounded to 128 visible ASCII characters; missing, duplicate, or invalid values are replaced everywhere to avoid unsafe log correlation values. Generated IDs use cryptographic randomness in the normal path and fall back to a bounded unique sequence if the system entropy source is unavailable.
 
 `RequestTimeout` adds a deadline to the standard request `context.Context` so downstream database, cache, and external-service calls can stop work when a request exceeds the configured budget. If the handler returns without writing after the middleware deadline, it writes the structured `504` timeout response; if the parent request context is canceled first, it writes the documented `499 client_closed_request` response. A zero or negative timeout is treated as disabled.
 

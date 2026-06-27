@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,6 +128,60 @@ func TestNewRequestIDProducesSafeHeaderValue(t *testing.T) {
 	}
 }
 
+func TestNewRequestIDFallbackStaysUniqueWhenEntropyFails(t *testing.T) {
+	withRequestIDEntropyReader(t, failingReader{})
+
+	first := newRequestID()
+	second := newRequestID()
+
+	if first == second {
+		t.Fatalf("fallback request ids should be unique, got %q twice", first)
+	}
+	for _, requestID := range []string{first, second} {
+		if !ValidRequestID(requestID) {
+			t.Fatalf("fallback request id %q is not valid", requestID)
+		}
+		if !strings.HasPrefix(requestID, "request-id-fallback-") {
+			t.Fatalf("fallback request id = %q", requestID)
+		}
+	}
+}
+
+func TestRequestIDFallbackKeepsMiddlewareCorrelationWhenEntropyFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withRequestIDEntropyReader(t, failingReader{})
+
+	router := gin.New()
+	router.Use(RequestID())
+	router.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"requestId":    RequestIDFromContext(c),
+			"stdRequestId": RequestIDFromStdContext(c.Request.Context()),
+			"header":       c.GetHeader(RequestIDHeader),
+		})
+	})
+
+	responses := make([]*httptest.ResponseRecorder, 0, 2)
+	for range 2 {
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/ping", nil))
+		responses = append(responses, resp)
+	}
+
+	firstRequestID := responses[0].Header().Get(RequestIDHeader)
+	secondRequestID := responses[1].Header().Get(RequestIDHeader)
+	if firstRequestID == secondRequestID {
+		t.Fatalf("fallback request ids should be unique across middleware requests, got %q twice", firstRequestID)
+	}
+	for _, resp := range responses {
+		requestID := resp.Header().Get(RequestIDHeader)
+		wantBody := `{"header":"` + requestID + `","requestId":"` + requestID + `","stdRequestId":"` + requestID + `"}`
+		if resp.Body.String() != wantBody {
+			t.Fatalf("body = %q, want %q", resp.Body.String(), wantBody)
+		}
+	}
+}
+
 func TestRequestIDReplacesInvalidCallerHeaderEverywhere(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -153,6 +209,24 @@ func TestRequestIDReplacesInvalidCallerHeaderEverywhere(t *testing.T) {
 	if resp.Body.String() != wantBody {
 		t.Fatalf("body = %q, want %q", resp.Body.String(), wantBody)
 	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) {
+	return 0, errors.New("entropy unavailable")
+}
+
+func withRequestIDEntropyReader(t *testing.T, reader io.Reader) {
+	t.Helper()
+
+	oldReader := requestIDEntropyReader
+	oldSequence := requestIDFallbackSequence.Swap(0)
+	requestIDEntropyReader = reader
+	t.Cleanup(func() {
+		requestIDEntropyReader = oldReader
+		requestIDFallbackSequence.Store(oldSequence)
+	})
 }
 
 func TestRequestIDReplacesDuplicateCallerHeadersEverywhere(t *testing.T) {

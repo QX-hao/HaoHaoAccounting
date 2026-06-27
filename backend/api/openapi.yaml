@@ -1515,7 +1515,7 @@ components:
       name: X-Request-ID
       in: header
       required: false
-      description: Optional request correlation id. The API trims surrounding whitespace and returns the normalized value when valid, otherwise it generates one.
+      description: Optional request correlation id. The API trims surrounding whitespace and returns the normalized value when valid; missing, duplicate, or invalid values are replaced with a server-generated id that remains unique even if the system entropy source is unavailable.
       schema:
         type: string
         minLength: 1
@@ -1524,7 +1524,7 @@ components:
       example: client-request-123
   headers:
     RequestID:
-      description: Request correlation id for tracing logs and API calls.
+      description: Request correlation id for tracing logs and API calls. Generated ids remain unique even if the system entropy source is unavailable.
       schema:
         type: string
         minLength: 1
