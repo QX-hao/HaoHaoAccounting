@@ -638,6 +638,9 @@ func (c HTTPConfig) Validate() error {
 	if !validCrossOriginEmbedderPolicy(c.CrossOriginEmbedderPolicy) {
 		errs = append(errs, errors.New("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY must be empty or one of: require-corp, credentialless, unsafe-none"))
 	}
+	if !validCrossOriginEmbedderPolicy(c.CrossOriginEmbedderPolicy) {
+		errs = append(errs, errors.New("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY must be empty or one of: require-corp, credentialless, unsafe-none"))
+	}
 	if err := validateTrustedProxies(c.TrustedProxies); err != nil {
 		errs = append(errs, err)
 	}

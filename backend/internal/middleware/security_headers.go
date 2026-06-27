@@ -50,6 +50,9 @@ func SecurityHeaders(configs ...SecurityHeadersConfig) gin.HandlerFunc {
 		if coep != "" {
 			headers.Set("Cross-Origin-Embedder-Policy", coep)
 		}
+		if cfg.CrossOriginEmbedderPolicy != "" {
+			headers.Set("Cross-Origin-Embedder-Policy", cfg.CrossOriginEmbedderPolicy)
+		}
 		if hsts != "" {
 			headers.Set("Strict-Transport-Security", hsts)
 		}
