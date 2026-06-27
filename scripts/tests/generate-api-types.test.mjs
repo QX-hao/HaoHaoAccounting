@@ -170,6 +170,32 @@ test('OpenAPI documents CORS allowlist rejection behavior', () => {
 	assert.match(generator, /OpenAPI info\.description must document CORS allowlist rejection behavior/);
 });
 
+test('OpenAPI documents strict API path matching behavior', () => {
+	const info = openapiTopLevelBlock('info');
+	assert.match(info, /API paths are matched exactly as documented/);
+	assert.match(info, /trailing slash or extra slash variants are not/);
+	assert.match(info, /redirected or normalized/);
+	assert.match(info, /structured not_found response/);
+	assert.match(generator, /OpenAPI info\.description must document strict API path matching behavior/);
+});
+
+test('OpenAPI documents repeated query parameter rejection', () => {
+	const info = openapiTopLevelBlock('info');
+	assert.match(info, /Query parameters are single-value/);
+	assert.match(info, /repeated scalar query keys/);
+	assert.match(info, /structured invalid_request response/);
+	assert.match(generator, /OpenAPI info\.description must document repeated query parameter rejection/);
+});
+
+test('OpenAPI documents strict JSON body parsing behavior', () => {
+	const info = openapiTopLevelBlock('info');
+	assert.match(info, /JSON request bodies reject unknown fields/);
+	assert.match(info, /duplicate object keys/);
+	assert.match(info, /multiple top-level JSON values/);
+	assert.match(info, /before binding validation/);
+	assert.match(generator, /OpenAPI info\.description must document strict JSON body parsing behavior/);
+});
+
 test('OpenAPI info identifies the maintainer contact path', () => {
 	const info = openapiTopLevelBlock('info');
 	assert.match(info, /contact:\n\s+name: HaoHaoAccounting Maintainers/);

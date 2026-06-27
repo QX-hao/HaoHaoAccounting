@@ -35,6 +35,7 @@ func RegisterRoutes(engine *gin.Engine, s *store.Store, redisCache *cache.RedisC
 
 // RegisterRoutesWithConfig 注册健康检查、API 分组、公开登录路由和受 Bearer 认证保护的私有路由。
 func RegisterRoutesWithConfig(engine *gin.Engine, s *store.Store, redisCache *cache.RedisCache, cfg config.Config) error {
+	configureRouter(engine)
 	registerFallbackRoutes(engine)
 	registerHealthRoutes(engine, s, redisCache)
 
@@ -76,6 +77,15 @@ func RegisterRoutesWithConfig(engine *gin.Engine, s *store.Store, redisCache *ca
 	reports.NewHandler(reports.NewService(s, redisCache)).Register(authGroup)
 	dataio.NewHandler(dataio.NewService(s, transactionService, cacheInvalidator)).Register(authGroup)
 	return nil
+}
+
+func configureRouter(engine *gin.Engine) {
+	// API 路径以 OpenAPI 为准；关闭 Gin 默认路径修复，避免绕过统一的结构化错误响应。
+	engine.RedirectTrailingSlash = false
+	engine.RedirectFixedPath = false
+	engine.RemoveExtraSlash = false
+	// 上传文件的业务上限是 5 MiB；multipart 解析内存预算也保持同一量级，避免依赖 Gin 默认 32 MiB。
+	engine.MaxMultipartMemory = dataio.MaxImportFileBytes
 }
 
 func registerFallbackRoutes(engine *gin.Engine) {

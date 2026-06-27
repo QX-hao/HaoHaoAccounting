@@ -1,6 +1,7 @@
 package httputil
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -173,9 +174,17 @@ func InternalError(c *gin.Context, err error) {
 	Error(c, http.StatusInternalServerError, CodeInternal, message)
 }
 
-// BindJSONBody 使用严格 JSON 解码：禁止未知字段、禁止多个 JSON 值，并执行 Gin binding 校验。
+// BindJSONBody 使用严格 JSON 解码：禁止未知字段、重复字段和多个 JSON 值，并执行 Gin binding 校验。
 func BindJSONBody(c *gin.Context, dst any) error {
-	decoder := json.NewDecoder(c.Request.Body)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	if err := rejectDuplicateJSONFields(body); err != nil {
+		return err
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
 		return err
@@ -191,8 +200,83 @@ func BindJSONBody(c *gin.Context, dst any) error {
 	return nil
 }
 
-// BindQuery 统一入口绑定 query 参数，handler 只需要决定失败时返回的业务提示。
+// rejectDuplicateJSONFields 先按 token 扫描 JSON，对每个对象单独记录字段名，避免重复 key 被标准库静默覆盖。
+func rejectDuplicateJSONFields(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := rejectDuplicateJSONFieldsInValue(decoder); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("request body must contain a single JSON value")
+	}
+	return nil
+}
+
+func rejectDuplicateJSONFieldsInValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+
+	switch delim {
+	case '{':
+		seen := map[string]struct{}{}
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("invalid JSON object key")
+			}
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("duplicate JSON field %q", key)
+			}
+			seen[key] = struct{}{}
+			if err := rejectDuplicateJSONFieldsInValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim('}') {
+			return errors.New("invalid JSON object")
+		}
+	case '[':
+		for decoder.More() {
+			if err := rejectDuplicateJSONFieldsInValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim(']') {
+			return errors.New("invalid JSON array")
+		}
+	default:
+		return errors.New("invalid JSON value")
+	}
+
+	return nil
+}
+
+// BindQuery 统一入口绑定 query 参数；单值参数重复出现时先拒绝，避免 Gin 只取首值造成歧义。
 func BindQuery(c *gin.Context, dst any) error {
+	for key, values := range c.Request.URL.Query() {
+		if len(values) > 1 {
+			return fmt.Errorf("query parameter %q must not be repeated", key)
+		}
+	}
 	return c.ShouldBindQuery(dst)
 }
 

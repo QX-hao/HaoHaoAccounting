@@ -298,12 +298,14 @@ func TestReadmeDocumentsHTTPUtilityContracts(t *testing.T) {
 		"non-negative integer seconds",
 		"`BindJSONBody`",
 		"`DisallowUnknownFields`",
+		"duplicate object keys",
 		"multiple JSON values",
 		"Gin `binding` tag validation",
 		"documented request schema",
 		"`BindQuery`",
 		"query binding",
 		"`invalid_request` response",
+		"repeated",
 		"query parameters",
 		"`X-Total-Count`",
 		"RFC 8288 `Link` headers",
@@ -533,6 +535,45 @@ func TestBindJSONBodyRejectsMultipleJSONValues(t *testing.T) {
 	}
 }
 
+func TestBindJSONBodyRejectsDuplicateObjectKeys(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name string
+		body string
+		dst  any
+	}{
+		{
+			name: "top-level duplicate",
+			body: `{"name":"cash","name":"bank"}`,
+			dst: &struct {
+				Name string `json:"name"`
+			}{},
+		},
+		{
+			name: "nested duplicate",
+			body: `{"items":[{"name":"cash","name":"bank"}]}`,
+			dst: &struct {
+				Items []struct {
+					Name string `json:"name"`
+				} `json:"items"`
+			}{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := testContextWithBody(tc.body)
+
+			err := BindJSONBody(c, tc.dst)
+			if err == nil {
+				t.Fatal("expected duplicate JSON field error")
+			}
+			if !strings.Contains(err.Error(), `duplicate JSON field "name"`) {
+				t.Fatalf("error = %q", err)
+			}
+		})
+	}
+}
+
 func TestBindJSONBodyRejectsEmptyBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -605,6 +646,25 @@ func TestBindQueryReturnsBindingErrors(t *testing.T) {
 
 	if err := BindQuery(c, &query); err == nil {
 		t.Fatal("expected query binding validation error")
+	}
+}
+
+func TestBindQueryRejectsRepeatedParameters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var query struct {
+		Page int `form:"page" binding:"min=1"`
+	}
+	resp := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(resp)
+	c.Request = httptest.NewRequest(http.MethodGet, "/items?page=1&page=2", nil)
+
+	err := BindQuery(c, &query)
+	if err == nil {
+		t.Fatal("expected repeated query parameter error")
+	}
+	if !strings.Contains(err.Error(), `query parameter "page" must not be repeated`) {
+		t.Fatalf("error = %v", err)
 	}
 }
 

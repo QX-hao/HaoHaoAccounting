@@ -6,6 +6,10 @@ info:
     Cross-origin browser requests must come from an origin configured in CORS_ALLOW_ORIGINS.
     Requests from other origins are rejected by CORS middleware with 403 before route handlers run
     and do not include Access-Control-Allow-Origin.
+    API paths are matched exactly as documented; trailing slash or extra slash variants are not
+    redirected or normalized and return the structured not_found response.
+    Query parameters are single-value unless an operation explicitly documents an array; repeated scalar query keys return the structured invalid_request response.
+    JSON request bodies reject unknown fields, duplicate object keys, and multiple top-level JSON values before binding validation.
   contact:
     name: HaoHaoAccounting Maintainers
     url: https://github.com/QX-hao/HaoHaoAccounting/security

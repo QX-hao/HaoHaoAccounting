@@ -20,6 +20,6 @@ Health probe responses use `Cache-Control: no-cache`, `Pragma: no-cache`, and `E
 
 Health probe `GET` responses use `Content-Type: application/json; charset=utf-8`. Health probes support both `GET` and `HEAD`; `HEAD` keeps the same status codes and cache headers without returning a JSON body.
 
-All `/api/v1` routes use `NoStore` cache headers. API fallback errors for missing routes and unsupported methods return the shared structured error body with request IDs; API fallback errors also keep `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0`. Non-API health probe fallbacks remain cache-neutral.
+All `/api/v1` routes use `NoStore` cache headers. API paths are matched exactly as documented in OpenAPI; trailing slash variants are not redirected, extra slash variants are not normalized, and both flow through the API fallback contract. API fallback errors for missing routes and unsupported methods return the shared structured error body with request IDs; API fallback errors also keep `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0`. The multipart parsing memory budget is aligned with the import file size limit. Non-API health probe fallbacks remain cache-neutral.
 
 Business rules, database mutations, and file parsing should stay in `internal/modules/*` or `internal/shared/*`, not in this package.

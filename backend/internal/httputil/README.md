@@ -12,9 +12,9 @@ Shared response helpers for Gin handlers.
 
 `RateLimitedWithPolicy` emits `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` headers alongside the shared rate-limited error body. Retry delays are serialized as non-negative integer seconds.
 
-`BindJSONBody` uses a JSON decoder with `DisallowUnknownFields`, rejects multiple JSON values, and runs Gin `binding` tag validation so request handlers accept only one closed request object that matches the documented request schema. Handlers must pass bind errors through `middleware.HandleBodyReadError` before returning `invalid_request`, so streamed oversized request bodies keep the documented `413 payload_too_large` response.
+`BindJSONBody` uses a JSON decoder with `DisallowUnknownFields`, rejects duplicate object keys and multiple JSON values, and runs Gin `binding` tag validation so request handlers accept only one closed request object that matches the documented request schema. Handlers must pass bind errors through `middleware.HandleBodyReadError` before returning `invalid_request`, so streamed oversized request bodies keep the documented `413 payload_too_large` response.
 
-`BindQuery` is the shared entrypoint for Gin query binding. Handlers use it before returning the documented `invalid_request` response for malformed or validation-failing query parameters, so list/export filters follow the same error contract as OpenAPI.
+`BindQuery` is the shared entrypoint for Gin query binding. Handlers use it before returning the documented `invalid_request` response for malformed, repeated, or validation-failing query parameters, so list/export filters follow the same error contract as OpenAPI.
 
 `SetPaginationHeaders` emits `X-Total-Count` and RFC 8288 `Link` headers for paginated list responses when additional pages exist.
 

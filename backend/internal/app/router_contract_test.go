@@ -561,6 +561,32 @@ func TestOpenAPIQueryParameterOperationsUseInvalidRequestResponse(t *testing.T) 
 	}
 }
 
+func TestOpenAPIQueryParametersStaySingleValueScalars(t *testing.T) {
+	data := readOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+
+	checked := 0
+	for path, item := range doc.Paths {
+		for _, operation := range item.operations(doc.Components.Parameters) {
+			for _, parameter := range operation.resolvedParameters(doc.Components.Parameters) {
+				if parameter.In != "query" {
+					continue
+				}
+				checked++
+				if parameter.Schema.Type == "array" || parameter.Schema.Items != nil {
+					t.Fatalf("%s %s query parameter %q must stay single-value to match BindQuery repeated-key rejection", operation.method, path, parameter.Name)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("OpenAPI does not define any query parameters")
+	}
+}
+
 func TestOpenAPIPathParametersMatchPathTemplates(t *testing.T) {
 	data := readOpenAPI(t)
 	var doc openAPIDocument

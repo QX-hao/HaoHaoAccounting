@@ -69,6 +69,21 @@ function validateOpenAPIDescription(openapi) {
   if (!info.includes('CORS_ALLOW_ORIGINS') || !info.includes('Access-Control-Allow-Origin')) {
     throw new Error('OpenAPI info.description must document CORS allowlist rejection behavior');
   }
+  if (!info.includes('API paths are matched exactly as documented') ||
+    !info.includes('trailing slash or extra slash variants are not') ||
+    !info.includes('structured not_found response')) {
+    throw new Error('OpenAPI info.description must document strict API path matching behavior');
+  }
+  if (!info.includes('Query parameters are single-value') ||
+    !info.includes('repeated scalar query keys') ||
+    !info.includes('invalid_request')) {
+    throw new Error('OpenAPI info.description must document repeated query parameter rejection');
+  }
+  if (!info.includes('JSON request bodies reject unknown fields') ||
+    !info.includes('duplicate object keys') ||
+    !info.includes('multiple top-level JSON values')) {
+    throw new Error('OpenAPI info.description must document strict JSON body parsing behavior');
+  }
 }
 
 function validateOpenAPIInfoContact(openapi) {

@@ -14,6 +14,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/dataio"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
 )
@@ -88,6 +89,10 @@ func TestReadmeDocumentsRouteContracts(t *testing.T) {
 		"All `/api/v1` routes use `NoStore` cache headers",
 		"API fallback errors for missing routes and unsupported methods",
 		"shared structured error body with request IDs",
+		"API paths are matched exactly as documented",
+		"trailing slash variants are not redirected",
+		"extra slash variants are not normalized",
+		"multipart parsing memory budget is aligned with the import file size limit",
 		"`Cache-Control: no-store`",
 		"`Pragma: no-cache`",
 		"`Expires: 0`",
@@ -99,6 +104,74 @@ func TestReadmeDocumentsRouteContracts(t *testing.T) {
 		if !strings.Contains(source, want) {
 			t.Fatalf("README.md is missing app route guidance %q", want)
 		}
+	}
+}
+
+func TestConfigureRouterKeepsAPIContractsExplicit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	configureRouter(router)
+
+	if router.RedirectTrailingSlash {
+		t.Fatal("RedirectTrailingSlash = true, want false")
+	}
+	if router.RedirectFixedPath {
+		t.Fatal("RedirectFixedPath = true, want false")
+	}
+	if router.RemoveExtraSlash {
+		t.Fatal("RemoveExtraSlash = true, want false")
+	}
+	if router.MaxMultipartMemory != dataio.MaxImportFileBytes {
+		t.Fatalf("MaxMultipartMemory = %d, want %d", router.MaxMultipartMemory, dataio.MaxImportFileBytes)
+	}
+}
+
+func TestAPISlashVariantsDoNotRedirectOrNormalize(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(middleware.RequestID())
+	if err := RegisterRoutesWithConfig(router, testutil.NewStore(t), nil, config.Config{
+		Admin: config.AdminConfig{
+			Username: "admin",
+			Password: "secret-password",
+			Name:     "管理员",
+		},
+		LoginRateLimit: config.LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		JWT:            config.JWTConfig{Secret: "test-jwt-secret-with-at-least-32-chars", TTL: time.Hour, Issuer: "issuer", Audience: "api"},
+	}); err != nil {
+		t.Fatalf("register routes: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		path      string
+		requestID string
+	}{
+		{name: "trailing slash", path: "/api/v1/accounts/", requestID: "request-trailing-slash"},
+		{name: "extra slash", path: "/api/v1//accounts", requestID: "request-extra-slash"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Header.Set(middleware.RequestIDHeader, tc.requestID)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+			}
+			if got := resp.Header().Get("Location"); got != "" {
+				t.Fatalf("Location = %q, want no redirect", got)
+			}
+			if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control = %q", got)
+			}
+			body := parseErrorBody(t, resp)
+			if body.Code != httputil.CodeNotFound || body.RequestID != tc.requestID {
+				t.Fatalf("body = %#v", body)
+			}
+		})
 	}
 }
 
