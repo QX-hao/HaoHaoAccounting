@@ -1,4 +1,4 @@
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 WORKDIR /src
 
@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /out/dbmigrate \
     ./cmd/dbmigrate
 
-FROM alpine:3.21
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S app \
