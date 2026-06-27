@@ -126,6 +126,12 @@ test('generated types preserve property enum values', () => {
 	assert.match(generator, /propertyEnumValues/);
 });
 
+test('generated types parse quoted empty string enum values', () => {
+	assert.match(generator, /parseInlineYAMLScalar/);
+	assert.doesNotMatch(generatedTypes, /"''"/);
+	assert.match(generatedTypes, /type: "income" \| "expense" \| "";/);
+});
+
 test('generated error codes stay available to API clients', () => {
 	assert.match(generatedTypes, /request_timeout/);
 	assert.match(generatedTypes, /client_closed_request/);
@@ -668,6 +674,66 @@ test('generator requires closed report response schemas', () => {
 	}
 });
 
+test('generator requires bounded report response schemas', () => {
+	assert.match(generator, /validateReportResponseBounds/);
+	assert.match(generator, /Summary\.trendGranularity is missing day\/week\/month enum/);
+	for (const [schemaName, fields] of [
+		['CategoryStat', [['categoryId', 1], ['amount', 0]]],
+		['AccountStat', [['accountId', 1], ['amount', 0]]],
+		['MonthTrend', [['income', 0], ['expense', 0]]],
+		['TrendPoint', [['income', 0], ['expense', 0]]],
+		['CategoryTrendPoint', [['categoryId', 1], ['amount', 0]]],
+		['AccountBalancePoint', [['accountId', 1]]],
+		['BudgetExecution', [['budgetId', 1], ['categoryId', 0], ['budget', 0], ['expense', 0], ['usageRate', 0]]],
+		['SummaryTableRow', [['income', 0], ['expense', 0], ['txCount', 0]]],
+		['PeriodTotals', [['income', 0], ['expense', 0]]],
+		['Summary', [['income', 0], ['expense', 0]]],
+	]) {
+		const schema = openapiSchema(schemaName);
+		for (const [propertyName, minimum] of fields) {
+			assert.match(openapiSchemaPropertyBlock(schema, propertyName), new RegExp(`minimum: ${minimum}`), `${schemaName}.${propertyName} is missing minimum`);
+		}
+	}
+	for (const [schemaName, fields] of [
+		['AccountBalancePoint', ['net', 'balance']],
+		['BudgetExecution', ['remaining']],
+		['SummaryTableRow', ['balance']],
+		['Summary', ['balance']],
+	]) {
+		const schema = openapiSchema(schemaName);
+		for (const propertyName of fields) {
+			const property = openapiSchemaPropertyBlock(schema, propertyName);
+			assert.match(property, /multipleOf: 0\.01/, `${schemaName}.${propertyName} is missing cent precision`);
+			assert.doesNotMatch(property, /minimum: 0/, `${schemaName}.${propertyName} must allow negative values`);
+		}
+	}
+	assert.match(openapiSchemaPropertyBlock(openapiSchema('Summary'), 'trendGranularity'), /enum: \[day, week, month\]/);
+});
+
+test('generator requires realistic report response examples', () => {
+	assert.match(generator, /validateReportResponseExamples/);
+	for (const schemaName of [
+		'CategoryStat',
+		'AccountStat',
+		'MonthTrend',
+		'TrendPoint',
+		'CategoryTrendPoint',
+		'AccountBalancePoint',
+		'BudgetExecution',
+		'SummaryTableRow',
+		'PeriodTotals',
+		'PeriodCompare',
+		'Summary',
+	]) {
+		assert.match(openapiSchema(schemaName), /example:/, `${schemaName} is missing example`);
+	}
+	const summary = openapiSchema('Summary');
+	assert.match(summary, /trendGranularity: day/);
+	assert.match(summary, /dailySummaries:/);
+	assert.match(summary, /balance: -150/);
+	assert.match(summary, /usageRate: 0\.5/);
+});
+
 test('generator requires summary response date range fields', () => {
 	assert.match(generator, /validateSummaryResponseSchema/);
 	assert.match(openapi, /start:\n\s+type: string\n\s+format: date-time/);
@@ -678,6 +744,8 @@ test('generator requires summary response date range fields', () => {
 
 test('generator requires stable summary response fields to be required', () => {
 	for (const fieldName of [
+		'categoryId',
+		'accountId',
 		'monthlyTrend',
 		'trendGranularity',
 		'trend',
@@ -696,6 +764,53 @@ test('generator requires closed import response schemas', () => {
 	assert.match(generator, /validateImportResponseSchemasAreClosed/);
 	for (const schemaName of ['ImportPreviewRow', 'ImportPreview', 'ImportResult', 'ImportJob']) {
 		assert.match(openapi, new RegExp(`${schemaName}:\\n\\s+type: object\\n\\s+additionalProperties: false`));
+	}
+});
+
+test('generator requires bounded import response schemas', () => {
+	assert.match(generator, /validateImportResponseBounds/);
+	assert.match(generator, /ImportPreviewRow: \{ line: 1 \}/);
+	assert.match(generator, /ImportJob: \{ id: 1, total: 0, success: 0, failed: 0, skipped: 0 \}/);
+	for (const [schemaName, fields] of [
+		['ImportPreviewRow', [['line', 1]]],
+		['ImportPreview', [['size', 0], ['totalRows', 0], ['validRows', 0], ['failedRows', 0], ['duplicateRows', 0], ['maxRows', 0], ['maxFileBytes', 0]]],
+		['ImportResult', [['total', 0], ['success', 0], ['failed', 0], ['skipped', 0]]],
+		['ImportJob', [['id', 1], ['total', 0], ['success', 0], ['failed', 0], ['skipped', 0]]],
+	]) {
+		const schema = openapiSchema(schemaName);
+		for (const [propertyName, minimum] of fields) {
+			assert.match(openapiSchemaPropertyBlock(schema, propertyName), new RegExp(`minimum: ${minimum}`), `${schemaName}.${propertyName} is missing minimum`);
+		}
+	}
+	const previewAmount = openapiSchemaPropertyBlock(openapiSchema('ImportPreviewRow'), 'amount');
+	assert.match(previewAmount, /minimum: 0/);
+	assert.match(previewAmount, /multipleOf: 0\.01/);
+	const previewType = openapiSchemaPropertyBlock(openapiSchema('ImportPreviewRow'), 'type');
+	assert.match(previewType, /enum: \[income, expense, ''\]/);
+	assert.match(generator, /ImportPreviewRow\.type must allow an empty string for failed preview rows/);
+	const importPreviewRows = Number(goRequestDTOs.get('dataio').match(/ImportPreviewRows\s+=\s+(\d+)/)?.[1]);
+	assert.ok(importPreviewRows > 0, 'ImportPreviewRows must be a positive Go constant');
+	assert.match(openapiSchemaPropertyBlock(openapiSchema('ImportPreview'), 'rows'), new RegExp(`maxItems: ${importPreviewRows}`));
+});
+
+test('generator requires realistic import response examples', () => {
+	assert.match(generator, /validateImportResponseExamples/);
+	assert.match(generator, /ImportPreview: \['filename: preview\.csv', 'maxRows: 5000', 'maxFileBytes: 5242880', 'valid: false', "type: ''", 'error: invalid occurred_at'\]/);
+	const maxRows = Number(goRequestDTOs.get('dataio').match(/MaxImportRows\s+=\s+(\d+)/)?.[1]);
+	const maxFileBytesExpression = goRequestDTOs.get('dataio').match(/MaxImportFileBytes\s+=\s+([^\n]+)/)?.[1];
+	assert.equal(maxRows, 5000);
+	assert.equal(maxFileBytesExpression, '5 * 1024 * 1024');
+
+	const preview = openapiSchema('ImportPreview');
+	assert.match(preview, /example:\n[\s\S]+filename: preview\.csv/);
+	assert.match(preview, new RegExp(`maxRows: ${maxRows}`));
+	assert.match(preview, /maxFileBytes: 5242880/);
+	assert.match(preview, /valid: false/);
+	assert.match(preview, /type: ''/);
+	assert.match(preview, /error: invalid occurred_at/);
+
+	for (const schemaName of ['ImportPreviewRow', 'ImportResult', 'ImportJob']) {
+		assert.match(openapiSchema(schemaName), /example:/, `${schemaName} is missing example`);
 	}
 });
 
@@ -1043,10 +1158,12 @@ function escapeRegExp(value) {
 }
 
 function openapiSchemaPropertyBlock(schema, propertyName) {
-	const marker = `        ${propertyName}:`;
-	const start = schema.indexOf(marker);
-	assert.notEqual(start, -1, `schema is missing property ${propertyName}`);
-	const rest = schema.slice(start);
+	const propertiesStart = schema.indexOf('      properties:\n');
+	assert.notEqual(propertiesStart, -1, 'schema is missing properties block');
+	const properties = schema.slice(propertiesStart);
+	const match = properties.match(new RegExp(`^        ${escapeRegExp(propertyName)}:\\n`, 'm'));
+	assert.ok(match && match.index !== undefined, `schema is missing property ${propertyName}`);
+	const rest = properties.slice(match.index);
 	const nextProperty = rest.search(/\n        [A-Za-z][A-Za-z0-9]*:/);
 	return nextProperty === -1 ? rest : rest.slice(0, nextProperty);
 }

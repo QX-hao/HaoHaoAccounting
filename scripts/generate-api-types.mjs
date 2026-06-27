@@ -139,8 +139,12 @@ function validateSchemaConstraints(allSchemas) {
   validateCoreResourceTimestampSchemas(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
   validateReportResponseSchemasAreClosed(allSchemas);
+  validateReportResponseBounds(allSchemas);
+  validateReportResponseExamples(allSchemas);
   validateSummaryResponseSchema(allSchemas.Summary || '');
   validateImportResponseSchemasAreClosed(allSchemas);
+  validateImportResponseBounds(allSchemas);
+  validateImportResponseExamples(allSchemas);
   validateImportJobReadOnlyFields(allSchemas.ImportJob || '');
   validateAIResponseSchemasAreClosed(allSchemas);
   validateAIResponseSchema(allSchemas.AIParseResult || '');
@@ -300,6 +304,85 @@ function validateReportResponseSchemasAreClosed(allSchemas) {
   }
 }
 
+function validateReportResponseBounds(allSchemas) {
+  const minimumsBySchema = {
+    CategoryStat: { categoryId: 1, amount: 0 },
+    AccountStat: { accountId: 1, amount: 0 },
+    MonthTrend: { income: 0, expense: 0 },
+    TrendPoint: { income: 0, expense: 0 },
+    CategoryTrendPoint: { categoryId: 1, amount: 0 },
+    AccountBalancePoint: { accountId: 1 },
+    BudgetExecution: { budgetId: 1, categoryId: 0, budget: 0, expense: 0, usageRate: 0 },
+    SummaryTableRow: { income: 0, expense: 0, txCount: 0 },
+    PeriodTotals: { income: 0, expense: 0 },
+    Summary: { income: 0, expense: 0 },
+  };
+  for (const [schemaName, propertyMinimums] of Object.entries(minimumsBySchema)) {
+    const schema = allSchemas[schemaName] || '';
+    for (const [propertyName, minimum] of Object.entries(propertyMinimums)) {
+      const property = schemaPropertyBlock(schema, propertyName);
+      if (!property.includes(`minimum: ${minimum}`)) {
+        throw new Error(`${schemaName}.${propertyName} is missing minimum: ${minimum}`);
+      }
+    }
+  }
+
+  const moneyFieldsBySchema = {
+    CategoryStat: ['amount'],
+    AccountStat: ['amount'],
+    MonthTrend: ['income', 'expense'],
+    TrendPoint: ['income', 'expense'],
+    CategoryTrendPoint: ['amount'],
+    AccountBalancePoint: ['net', 'balance'],
+    BudgetExecution: ['budget', 'expense', 'remaining'],
+    SummaryTableRow: ['income', 'expense', 'balance'],
+    PeriodTotals: ['income', 'expense'],
+    Summary: ['income', 'expense', 'balance'],
+  };
+  for (const [schemaName, propertyNames] of Object.entries(moneyFieldsBySchema)) {
+    const schema = allSchemas[schemaName] || '';
+    for (const propertyName of propertyNames) {
+      const property = schemaPropertyBlock(schema, propertyName);
+      if (!property.includes('multipleOf: 0.01')) {
+        throw new Error(`${schemaName}.${propertyName} is missing multipleOf: 0.01`);
+      }
+    }
+  }
+
+  const trendGranularity = schemaPropertyBlock(allSchemas.Summary || '', 'trendGranularity');
+  if (!trendGranularity.includes('enum: [day, week, month]')) {
+    throw new Error('Summary.trendGranularity is missing day/week/month enum');
+  }
+}
+
+function validateReportResponseExamples(allSchemas) {
+  const requiredExamples = {
+    CategoryStat: ['categoryId: 1', 'category: 餐饮', 'amount: 250'],
+    AccountStat: ['accountId: 1', 'account: 现金', 'amount: 250'],
+    MonthTrend: ["month: '2026-06'", 'income: 3000', 'expense: 250'],
+    TrendPoint: ["period: '2026-06-01'", 'income: 3000', 'expense: 100'],
+    CategoryTrendPoint: ['categoryId: 1', 'category: 餐饮', 'amount: 100'],
+    AccountBalancePoint: ['net: -150', 'balance: 2750'],
+    BudgetExecution: ['budget: 500', 'expense: 250', 'remaining: 250', 'usageRate: 0.5'],
+    SummaryTableRow: ['balance: -150', 'txCount: 1'],
+    PeriodTotals: ['income: 3000', 'expense: 250'],
+    PeriodCompare: ['current:', 'previous:'],
+    Summary: ['trendGranularity: day', 'dailySummaries:', 'monthlySummaries:', 'periodCompare:'],
+  };
+
+  for (const [schemaName, expectedTexts] of Object.entries(requiredExamples)) {
+    const example = nestedBlock(allSchemas[schemaName] || '', 'example:');
+    if (!example) {
+      throw new Error(`${schemaName} is missing example`);
+    }
+    for (const expectedText of expectedTexts) {
+      if (!example.includes(expectedText)) {
+        throw new Error(`${schemaName} example is missing ${expectedText}`);
+      }
+    }
+  }
+}
+
 function schemaRequiredProperties(schema) {
   return new Set(parseRequired(schema));
 }
@@ -342,6 +425,64 @@ function validateImportResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of ['ImportPreviewRow', 'ImportPreview', 'ImportResult', 'ImportJob']) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateImportResponseBounds(allSchemas) {
+  const fieldsBySchema = {
+    ImportPreviewRow: { line: 1 },
+    ImportPreview: { size: 0, totalRows: 0, validRows: 0, failedRows: 0, duplicateRows: 0, maxRows: 0, maxFileBytes: 0 },
+    ImportResult: { total: 0, success: 0, failed: 0, skipped: 0 },
+    ImportJob: { id: 1, total: 0, success: 0, failed: 0, skipped: 0 },
+  };
+
+  for (const [schemaName, propertyBounds] of Object.entries(fieldsBySchema)) {
+    const schema = allSchemas[schemaName] || '';
+    for (const [propertyName, minimum] of Object.entries(propertyBounds)) {
+      const property = schemaPropertyBlock(schema, propertyName);
+      if (!property.includes(`minimum: ${minimum}`)) {
+        throw new Error(`${schemaName}.${propertyName} is missing minimum: ${minimum}`);
+      }
+    }
+  }
+
+  const amount = schemaPropertyBlock(allSchemas.ImportPreviewRow || '', 'amount');
+  if (!amount.includes('minimum: 0')) {
+    throw new Error('ImportPreviewRow.amount is missing minimum: 0');
+  }
+  if (!amount.includes('multipleOf: 0.01')) {
+    throw new Error('ImportPreviewRow.amount is missing multipleOf: 0.01');
+  }
+
+  const rows = schemaPropertyBlock(allSchemas.ImportPreview || '', 'rows');
+  if (!rows.includes('maxItems: 20')) {
+    throw new Error('ImportPreview.rows is missing maxItems: 20');
+  }
+
+  const type = schemaPropertyBlock(allSchemas.ImportPreviewRow || '', 'type');
+  if (!type.includes('enum: [income, expense, \'\']')) {
+    throw new Error('ImportPreviewRow.type must allow an empty string for failed preview rows');
+  }
+}
+
+function validateImportResponseExamples(allSchemas) {
+  const requiredExamples = {
+    ImportPreviewRow: ['line: 2', 'occurredAt:', 'type: expense', 'amount: 35.5', 'valid: true', 'duplicate: false'],
+    ImportPreview: ['filename: preview.csv', 'maxRows: 5000', 'maxFileBytes: 5242880', 'valid: false', "type: ''", 'error: invalid occurred_at'],
+    ImportResult: ['total: 2', 'success: 1', 'failed: 1', 'skipped: 0', 'line 3: invalid occurred_at'],
+    ImportJob: ['id: 1', 'status: completed', 'createdAt:', 'updatedAt:', 'line 3: invalid occurred_at'],
+  };
+
+  for (const [schemaName, expectedTexts] of Object.entries(requiredExamples)) {
+    const example = nestedBlock(allSchemas[schemaName] || '', 'example:');
+    if (!example) {
+      throw new Error(`${schemaName} is missing example`);
+    }
+    for (const expectedText of expectedTexts) {
+      if (!example.includes(expectedText)) {
+        throw new Error(`${schemaName} example is missing ${expectedText}`);
+      }
     }
   }
 }
@@ -397,8 +538,9 @@ function validatePaginationSchema(schema) {
 }
 
 function schemaPropertyBlock(schema, propertyName) {
-  const pattern = new RegExp(`^        ${propertyName}:\\n(?:          .+\\n)+`, 'm');
-  return schema.match(pattern)?.[0] || '';
+  const properties = nestedBlock(schema, 'properties:') || schema;
+  const pattern = new RegExp(`^        ${escapeRegExp(propertyName)}:\\n(?:          .+\\n)+`, 'm');
+  return properties.match(pattern)?.[0] || '';
 }
 
 function validateParameterConstraints(openapi) {
@@ -1428,7 +1570,7 @@ function parameterType(param) {
 function enumValues(block) {
   const match = block.match(/enum:\s+\[([^\]]+)\]/);
   if (!match) return [];
-  return match[1].split(',').map((value) => value.trim()).filter(Boolean);
+  return match[1].split(',').map(parseInlineYAMLScalar);
 }
 
 function upperFirst(value) {
@@ -1438,7 +1580,15 @@ function upperFirst(value) {
 function parseEnum(block) {
   const match = block.match(/^      enum:\s+\[([^\]]+)\]/m);
   if (!match) return [];
-  return match[1].split(',').map((value) => value.trim()).filter(Boolean);
+  return match[1].split(',').map(parseInlineYAMLScalar);
+}
+
+function parseInlineYAMLScalar(value) {
+  const clean = value.trim();
+  if ((clean.startsWith("'") && clean.endsWith("'")) || (clean.startsWith('"') && clean.endsWith('"'))) {
+    return clean.slice(1, -1);
+  }
+  return clean;
 }
 
 function parseRequired(block) {

@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 type TxType = 'income' | 'expense';
+type TrendGranularity = 'day' | 'week' | 'month';
 
 type Account = {
   id: number;
@@ -203,14 +204,15 @@ class MockApi {
     }
     if (method === 'GET' && path === '/reports/summary') {
       const expense = this.transactions.reduce((sum, tx) => tx.type === 'expense' ? sum + tx.amount : sum, 0);
+      const trendGranularity = reportTrendGranularity(url.searchParams.get('trend'));
       return this.json(route, {
         income: 1000,
         expense,
         balance: 900,
-        byCategory: [{ category: '餐饮', amount: 12.5 }],
-        byAccount: [{ account: '现金', amount: 12.5 }],
+        byCategory: [{ categoryId: 1, category: '餐饮', amount: 12.5 }],
+        byAccount: [{ accountId: 1, account: '现金', amount: 12.5 }],
         monthlyTrend: [{ month: '2026-06', income: 1000, expense: 12.5 }],
-        trendGranularity: url.searchParams.get('trend') || 'month',
+        trendGranularity,
         trend: [{ period: '2026-06', income: 1000, expense }],
         categoryTrend: [{ period: '2026-06', categoryId: 1, category: '餐饮', amount: expense }],
         accountBalanceTrend: [{ period: '2026-06', accountId: 1, account: '现金', net: 1000 - expense, balance: 1000 - expense }],
@@ -408,4 +410,8 @@ class MockApi {
   private json(route: Route, body: unknown, status = 200) {
     return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   }
+}
+
+function reportTrendGranularity(value: string | null): TrendGranularity {
+  return value === 'day' || value === 'week' || value === 'month' ? value : 'month';
 }
