@@ -610,7 +610,9 @@ test('generator requires closed core response schemas', () => {
 
 test('generator requires stable current user response fields to be required', () => {
 	assert.match(generator, /validateCurrentUserResponseSchema/);
+	assert.match(generator, /CurrentUser\.id is missing readOnly: true/);
 	const authDTO = goRequestDTOs.get('auth');
+	assert.match(openapiSchemaPropertyBlock(openapiSchema('CurrentUser'), 'id'), /readOnly: true/);
 	for (const fieldName of ['username', 'phone', 'email', 'wechatId']) {
 		assert.doesNotMatch(generatedTypes, new RegExp(`${fieldName}\\?:`));
 		assert.match(authDTO, new RegExp(`json:"${fieldName}"`));

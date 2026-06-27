@@ -227,6 +227,10 @@ function validateCurrentUserResponseSchema(schema) {
       throw new Error(`CurrentUser.${propertyName} is missing required`);
     }
   }
+  const id = schemaPropertyBlock(schema, 'id');
+  if (!id.includes('readOnly: true')) {
+    throw new Error('CurrentUser.id is missing readOnly: true');
+  }
 }
 
 function validateCoreResourceReadOnlyFields(allSchemas) {
