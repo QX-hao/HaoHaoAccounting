@@ -170,8 +170,8 @@ test('CI workflow keeps pull request checks on read-only credentials', () => {
 	assert.doesNotMatch(ciWorkflow, /^\s+[a-z-]+:\s+write$/m);
 });
 
-test('CI run steps use explicit bash defaults for pipefail semantics', () => {
-	assert.match(ciWorkflow, /defaults:\n\s+run:\n\s+shell: bash/);
+test('CI run steps use explicit strict bash defaults for pipefail semantics', () => {
+	assert.match(ciWorkflow, /defaults:\n\s+run:\n\s+# .+\n\s+shell: bash --noprofile --norc -euo pipefail \{0\}/);
 });
 
 test('CI workflow runs only maintained branch events', () => {

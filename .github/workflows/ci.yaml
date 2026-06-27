@@ -17,7 +17,8 @@ concurrency:
 
 defaults:
   run:
-    shell: bash
+    # 显式启用 bash 严格模式；-u 可以让未定义环境变量在 CI 中尽早失败。
+    shell: bash --noprofile --norc -euo pipefail {0}
 
 jobs:
   deployment-config:

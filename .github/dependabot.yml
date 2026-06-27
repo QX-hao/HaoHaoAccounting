@@ -10,6 +10,8 @@ updates:
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
     target-branch: dev-pxhao
+    # 关闭自动 rebase，减少只为刷新分支产生的 bot 提交噪音；需要时由维护者手动触发。
+    rebase-strategy: disabled
     commit-message:
       prefix: deps(actions)
     cooldown:
@@ -29,6 +31,8 @@ updates:
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
     target-branch: dev-pxhao
+    # 关闭自动 rebase，减少只为刷新分支产生的 bot 提交噪音；需要时由维护者手动触发。
+    rebase-strategy: disabled
     commit-message:
       prefix: deps(backend)
     cooldown:
@@ -48,6 +52,8 @@ updates:
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
     target-branch: dev-pxhao
+    # 关闭自动 rebase，减少只为刷新分支产生的 bot 提交噪音；需要时由维护者手动触发。
+    rebase-strategy: disabled
     commit-message:
       prefix: deps(web)
     cooldown:
@@ -67,6 +73,8 @@ updates:
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
     target-branch: dev-pxhao
+    # 关闭自动 rebase，减少只为刷新分支产生的 bot 提交噪音；需要时由维护者手动触发。
+    rebase-strategy: disabled
     commit-message:
       prefix: deps(mobile)
     cooldown:
@@ -90,6 +98,8 @@ updates:
       timezone: Asia/Shanghai
     open-pull-requests-limit: 1
     target-branch: dev-pxhao
+    # 关闭自动 rebase，减少只为刷新分支产生的 bot 提交噪音；需要时由维护者手动触发。
+    rebase-strategy: disabled
     commit-message:
       prefix: deps(docker)
     cooldown:

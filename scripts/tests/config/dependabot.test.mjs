@@ -6,7 +6,7 @@ const dependabot = readRepositoryFile('.github/dependabot.yml');
 const config = parseDependabotConfig(dependabot);
 
 const allowedTopLevelKeys = new Set(['version', 'updates']);
-const allowedUpdateKeys = new Set(['package-ecosystem', 'directory', 'directories', 'schedule', 'open-pull-requests-limit', 'target-branch', 'commit-message', 'cooldown', 'groups']);
+const allowedUpdateKeys = new Set(['package-ecosystem', 'directory', 'directories', 'schedule', 'open-pull-requests-limit', 'target-branch', 'commit-message', 'cooldown', 'rebase-strategy', 'groups']);
 const allowedScheduleKeys = new Set(['interval', 'day', 'time', 'timezone']);
 const allowedCommitMessageKeys = new Set(['prefix']);
 const allowedCooldownKeys = new Set(['default-days']);
@@ -24,6 +24,7 @@ test('dependabot config uses the supported GitHub schema subset', () => {
 		assert.ok(supportedEcosystems.has(update.ecosystem), `unsupported package ecosystem ${update.ecosystem}`);
 		assertDependabotDirectories(update);
 		assert.equal(update.openPullRequestsLimit, 1, `${updateContext(update)} must keep bot PR fan-out low`);
+		assert.equal(update.rebaseStrategy, 'disabled', `${updateContext(update)} must not create bot-only rebase commits`);
 		assert.equal(update.targetBranch, 'dev-pxhao', `${updateContext(update)} must target the development branch`);
 		assertAllowedKeys(update.commitMessage.keys, allowedCommitMessageKeys, `${update.ecosystem} commit-message`);
 		assert.match(update.commitMessage.prefix, /^deps\([a-z][a-z0-9-]*\)$/, `${updateContext(update)} must use a scoped bot commit prefix`);
@@ -119,6 +120,7 @@ function parseUpdateBlock(block) {
 		directory: scalars.get('directory'),
 		directories,
 		openPullRequestsLimit: scalars.get('open-pull-requests-limit'),
+		rebaseStrategy: scalars.get('rebase-strategy'),
 		targetBranch: scalars.get('target-branch'),
 		schedule: {
 			keys: schedule.keys,
