@@ -1982,8 +1982,10 @@ components:
       properties:
         id:
           type: integer
+          readOnly: true
         userId:
           type: integer
+          readOnly: true
         name:
           type: string
         type:
@@ -1993,9 +1995,11 @@ components:
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
     AccountRequest:
       type: object
       additionalProperties: false
@@ -2022,8 +2026,10 @@ components:
       properties:
         id:
           type: integer
+          readOnly: true
         userId:
           type: integer
+          readOnly: true
         month:
           type: string
         categoryId:
@@ -2033,9 +2039,11 @@ components:
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
     BudgetRequest:
       type: object
       additionalProperties: false
@@ -2058,8 +2066,10 @@ components:
       properties:
         id:
           type: integer
+          readOnly: true
         userId:
           type: integer
+          readOnly: true
         name:
           type: string
         type:
@@ -2069,9 +2079,11 @@ components:
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
     CategoryRequest:
       type: object
       additionalProperties: false
@@ -2089,8 +2101,10 @@ components:
       properties:
         id:
           type: integer
+          readOnly: true
         userId:
           type: integer
+          readOnly: true
         type:
           $ref: '#/components/schemas/TransactionType'
         amount:
@@ -2115,9 +2129,11 @@ components:
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
     TransactionRequest:
       type: object
       additionalProperties: false

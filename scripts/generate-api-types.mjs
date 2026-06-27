@@ -135,6 +135,7 @@ function validateSchemaConstraints(allSchemas) {
   validateCoreResponseSchemasAreClosed(allSchemas);
   validateAuthSchemaFieldDirection(allSchemas);
   validateCurrentUserResponseSchema(allSchemas.CurrentUser || '');
+  validateCoreResourceReadOnlyFields(allSchemas);
   validateCoreResourceTimestampSchemas(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
   validateReportResponseSchemasAreClosed(allSchemas);
@@ -224,6 +225,25 @@ function validateCurrentUserResponseSchema(schema) {
   for (const propertyName of ['id', 'name', 'username', 'phone', 'email', 'wechatId']) {
     if (!schemaRequiredProperties(schema).has(propertyName)) {
       throw new Error(`CurrentUser.${propertyName} is missing required`);
+    }
+  }
+}
+
+function validateCoreResourceReadOnlyFields(allSchemas) {
+  const fieldsBySchema = {
+    Account: ['id', 'userId', 'createdAt', 'updatedAt'],
+    Budget: ['id', 'userId', 'createdAt', 'updatedAt'],
+    Category: ['id', 'userId', 'createdAt', 'updatedAt'],
+    Transaction: ['id', 'userId', 'createdAt', 'updatedAt'],
+  };
+
+  for (const [schemaName, propertyNames] of Object.entries(fieldsBySchema)) {
+    const schema = allSchemas[schemaName] || '';
+    for (const propertyName of propertyNames) {
+      const property = schemaPropertyBlock(schema, propertyName);
+      if (!property.includes('readOnly: true')) {
+        throw new Error(`${schemaName}.${propertyName} is missing readOnly: true`);
+      }
     }
   }
 }

@@ -618,6 +618,17 @@ test('generator requires stable current user response fields to be required', ()
 	}
 });
 
+test('generator requires server-owned core resource fields to be read-only', () => {
+	assert.match(generator, /validateCoreResourceReadOnlyFields/);
+	assert.match(generator, /\$\{schemaName\}\.\$\{propertyName\} is missing readOnly: true/);
+	for (const schemaName of ['Account', 'Budget', 'Category', 'Transaction']) {
+		const schema = openapiSchema(schemaName);
+		for (const propertyName of ['id', 'userId', 'createdAt', 'updatedAt']) {
+			assert.match(openapiSchemaPropertyBlock(schema, propertyName), /readOnly: true/, `${schemaName}.${propertyName} is missing readOnly`);
+		}
+	}
+});
+
 test('generator requires core resource timestamps in response schemas', () => {
 	assert.match(generator, /validateCoreResourceTimestampSchemas/);
 	for (const schemaName of ['Account', 'Budget', 'Category', 'Transaction']) {
@@ -1018,6 +1029,15 @@ function duplicateYamlMappingKeys(source) {
 
 function escapeRegExp(value) {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function openapiSchemaPropertyBlock(schema, propertyName) {
+	const marker = `        ${propertyName}:`;
+	const start = schema.indexOf(marker);
+	assert.notEqual(start, -1, `schema is missing property ${propertyName}`);
+	const rest = schema.slice(start);
+	const nextProperty = rest.search(/\n        [A-Za-z][A-Za-z0-9]*:/);
+	return nextProperty === -1 ? rest : rest.slice(0, nextProperty);
 }
 
 function expectedOperationId(method, apiPath) {
