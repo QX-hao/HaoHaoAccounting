@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -348,6 +349,11 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`/metrics`",
 		"`promhttp_metric_handler_errors_total`",
 		"scrape gathering or encoding failures",
+		"in-flight HTTP request gauge",
+		"completed HTTP request metrics",
+		"`HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT` limits concurrent scrapes",
+		"`HTTP_METRICS_TIMEOUT` bounds one scrape duration",
+		"`503 Service Unavailable`",
 		"Keep it disabled unless the backend port is protected",
 		"registered before API middleware",
 		"not affected by API `Accept` and `Content-Type` negotiation",
@@ -406,6 +412,7 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	for _, want := range []string{
 		`haohao_http_requests_total{method="GET",route="/api/v1/accounts/:id",status="204"} 1`,
 		`haohao_http_request_duration_seconds_bucket{method="GET",route="/api/v1/accounts/:id",status="204"`,
+		`haohao_http_requests_in_flight `,
 		`go_goroutines `,
 		`process_cpu_seconds_total `,
 		`promhttp_metric_handler_requests_total{code="200"} 1`,
@@ -536,6 +543,83 @@ func TestMetricsEndpointRejectsDuplicateAuthorizationHeaders(t *testing.T) {
 	assertMetricsSecurityHeaders(t, resp)
 }
 
+func TestMetricsEndpointLimitsConcurrentScrapes(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	router := gin.New()
+	registry := prometheus.NewRegistry()
+	registerMetricsRoute(router, registry, config.Config{HTTP: config.HTTPConfig{
+		MetricsEnabled:             true,
+		MetricsMaxRequestsInFlight: 1,
+	}})
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "haohao_test_blocking_metric",
+		Help: "Blocks collection so concurrent scrape limiting can be observed.",
+	}, func() float64 {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+		<-release
+		return 1
+	}))
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		if resp.Code != http.StatusOK {
+			t.Errorf("first scrape status = %d, body = %s", resp.Code, resp.Body.String())
+		}
+	}()
+
+	<-entered
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusServiceUnavailable {
+		close(release)
+		wg.Wait()
+		t.Fatalf("second scrape status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	close(release)
+	wg.Wait()
+}
+
+func TestMetricsEndpointTimesOutSlowScrapes(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	router := gin.New()
+	registry := prometheus.NewRegistry()
+	registerMetricsRoute(router, registry, config.Config{HTTP: config.HTTPConfig{
+		MetricsEnabled:             true,
+		MetricsMaxRequestsInFlight: 1,
+		MetricsTimeout:             time.Nanosecond,
+	}})
+	registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "haohao_test_slow_metric",
+		Help: "Sleeps so scrape timeout behavior can be observed.",
+	}, func() float64 {
+		time.Sleep(time.Second)
+		return 1
+	}))
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
 func assertMetricsNoCacheHeaders(t *testing.T, resp *httptest.ResponseRecorder) {
 	t.Helper()
 	for header, want := range map[string]string{
@@ -618,15 +702,17 @@ func TestValidateStartupConfig(t *testing.T) {
 		},
 		Redis: config.RedisConfig{Addr: "127.0.0.1:6379", DB: 0},
 		HTTP: config.HTTPConfig{
-			GinMode:           gin.ReleaseMode,
-			CORSAllowOrigins:  []string{"https://app.example.com"},
-			ReadTimeout:       15 * time.Second,
-			ReadHeaderTimeout: 5 * time.Second,
-			WriteTimeout:      30 * time.Second,
-			IdleTimeout:       60 * time.Second,
-			ShutdownTimeout:   10 * time.Second,
-			MaxHeaderBytes:    1 << 20,
-			MaxBodyBytes:      6 * 1024 * 1024,
+			GinMode:                    gin.ReleaseMode,
+			CORSAllowOrigins:           []string{"https://app.example.com"},
+			ReadTimeout:                15 * time.Second,
+			ReadHeaderTimeout:          5 * time.Second,
+			WriteTimeout:               30 * time.Second,
+			IdleTimeout:                60 * time.Second,
+			ShutdownTimeout:            10 * time.Second,
+			MaxHeaderBytes:             1 << 20,
+			MaxBodyBytes:               6 * 1024 * 1024,
+			MetricsMaxRequestsInFlight: 1,
+			MetricsTimeout:             10 * time.Second,
 		},
 		LoginRateLimit: config.LoginRateLimitConfig{MaxFailures: 5, Window: 10 * time.Minute},
 		Admin:          config.AdminConfig{Username: "admin", Password: "secret-password"},

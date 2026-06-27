@@ -55,23 +55,25 @@ type RedisConfig struct {
 }
 
 type HTTPConfig struct {
-	GinMode                   string
-	CORSAllowOrigins          []string
-	TrustedProxies            []string
-	ReadTimeout               time.Duration
-	ReadHeaderTimeout         time.Duration
-	WriteTimeout              time.Duration
-	IdleTimeout               time.Duration
-	ShutdownTimeout           time.Duration
-	RequestTimeout            time.Duration
-	MaxHeaderBytes            int
-	MaxBodyBytes              int64
-	MetricsEnabled            bool
-	MetricsToken              string
-	HSTSMaxAgeSeconds         int
-	HSTSIncludeSubDomains     bool
-	HSTSPreload               bool
-	CrossOriginEmbedderPolicy string
+	GinMode                    string
+	CORSAllowOrigins           []string
+	TrustedProxies             []string
+	ReadTimeout                time.Duration
+	ReadHeaderTimeout          time.Duration
+	WriteTimeout               time.Duration
+	IdleTimeout                time.Duration
+	ShutdownTimeout            time.Duration
+	RequestTimeout             time.Duration
+	MaxHeaderBytes             int
+	MaxBodyBytes               int64
+	MetricsEnabled             bool
+	MetricsToken               string
+	MetricsMaxRequestsInFlight int
+	MetricsTimeout             time.Duration
+	HSTSMaxAgeSeconds          int
+	HSTSIncludeSubDomains      bool
+	HSTSPreload                bool
+	CrossOriginEmbedderPolicy  string
 }
 
 type AdminConfig struct {
@@ -239,23 +241,25 @@ func Load() Config {
 			DB:       intEnv("REDIS_DB", 0),
 		},
 		HTTP: HTTPConfig{
-			GinMode:                   stringEnv("GIN_MODE", "release"),
-			CORSAllowOrigins:          corsAllowOrigins(),
-			TrustedProxies:            csvEnv("TRUSTED_PROXIES"),
-			ReadTimeout:               durationEnv("HTTP_READ_TIMEOUT", 15*time.Second),
-			ReadHeaderTimeout:         durationEnv("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
-			WriteTimeout:              durationEnv("HTTP_WRITE_TIMEOUT", 30*time.Second),
-			IdleTimeout:               durationEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
-			ShutdownTimeout:           durationEnv("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
-			RequestTimeout:            nonNegativeDurationEnv("HTTP_REQUEST_TIMEOUT", defaultHTTPRequestTimeout),
-			MaxHeaderBytes:            positiveIntEnv("HTTP_MAX_HEADER_BYTES", 1<<20),
-			MaxBodyBytes:              int64Env("HTTP_MAX_BODY_BYTES", 6*1024*1024),
-			MetricsEnabled:            boolEnv("HTTP_METRICS_ENABLED", false),
-			MetricsToken:              strings.TrimSpace(os.Getenv("HTTP_METRICS_TOKEN")),
-			HSTSMaxAgeSeconds:         nonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS", 0),
-			HSTSIncludeSubDomains:     boolEnv("HTTP_HSTS_INCLUDE_SUBDOMAINS", false),
-			HSTSPreload:               boolEnv("HTTP_HSTS_PRELOAD", false),
-			CrossOriginEmbedderPolicy: crossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
+			GinMode:                    stringEnv("GIN_MODE", "release"),
+			CORSAllowOrigins:           corsAllowOrigins(),
+			TrustedProxies:             csvEnv("TRUSTED_PROXIES"),
+			ReadTimeout:                durationEnv("HTTP_READ_TIMEOUT", 15*time.Second),
+			ReadHeaderTimeout:          durationEnv("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
+			WriteTimeout:               durationEnv("HTTP_WRITE_TIMEOUT", 30*time.Second),
+			IdleTimeout:                durationEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
+			ShutdownTimeout:            durationEnv("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
+			RequestTimeout:             nonNegativeDurationEnv("HTTP_REQUEST_TIMEOUT", defaultHTTPRequestTimeout),
+			MaxHeaderBytes:             positiveIntEnv("HTTP_MAX_HEADER_BYTES", 1<<20),
+			MaxBodyBytes:               int64Env("HTTP_MAX_BODY_BYTES", 6*1024*1024),
+			MetricsEnabled:             boolEnv("HTTP_METRICS_ENABLED", false),
+			MetricsToken:               strings.TrimSpace(os.Getenv("HTTP_METRICS_TOKEN")),
+			MetricsMaxRequestsInFlight: positiveIntEnv("HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT", 1),
+			MetricsTimeout:             durationEnv("HTTP_METRICS_TIMEOUT", 10*time.Second),
+			HSTSMaxAgeSeconds:          nonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS", 0),
+			HSTSIncludeSubDomains:      boolEnv("HTTP_HSTS_INCLUDE_SUBDOMAINS", false),
+			HSTSPreload:                boolEnv("HTTP_HSTS_PRELOAD", false),
+			CrossOriginEmbedderPolicy:  crossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
 		},
 		Admin: AdminConfig{
 			Username: strings.TrimSpace(os.Getenv("ADMIN_USERNAME")),
@@ -395,6 +399,8 @@ func validateEnvValues() error {
 		validateCrossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
 		validateBoolEnv("HTTP_METRICS_ENABLED"),
 		validateBearerTokenEnv("HTTP_METRICS_TOKEN"),
+		validatePositiveIntEnv("HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT"),
+		validatePositiveDurationEnv("HTTP_METRICS_TIMEOUT"),
 		validateNonNegativeIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES"),
 		validateNonNegativeDurationEnv("LOGIN_RATE_LIMIT_WINDOW"),
 		validatePositiveDurationEnv("JWT_TTL"),
@@ -613,6 +619,12 @@ func (c HTTPConfig) Validate() error {
 	}
 	if c.MaxBodyBytes <= 0 {
 		errs = append(errs, errors.New("HTTP_MAX_BODY_BYTES must be positive"))
+	}
+	if c.MetricsMaxRequestsInFlight <= 0 {
+		errs = append(errs, errors.New("HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT must be positive"))
+	}
+	if c.MetricsTimeout <= 0 {
+		errs = append(errs, errors.New("HTTP_METRICS_TIMEOUT must be positive"))
 	}
 	if c.HSTSMaxAgeSeconds < 0 {
 		errs = append(errs, errors.New("HTTP_HSTS_MAX_AGE_SECONDS must be non-negative"))

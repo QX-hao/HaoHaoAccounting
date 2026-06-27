@@ -135,7 +135,11 @@ func installMetrics(router *gin.Engine, cfg config.Config) *middleware.HTTPMetri
 
 func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry, cfg config.Config) {
 	// HandlerOpts.Registry 会把 promhttp_metric_handler_errors_total 注册进同一个 registry，方便告警发现采集/编码失败。
-	handler := gin.WrapH(promhttp.InstrumentMetricHandler(registry, promhttp.HandlerFor(registry, promhttp.HandlerOpts{Registry: registry})))
+	handler := gin.WrapH(promhttp.InstrumentMetricHandler(registry, promhttp.HandlerFor(registry, promhttp.HandlerOpts{
+		Registry:            registry,
+		MaxRequestsInFlight: cfg.HTTP.MetricsMaxRequestsInFlight,
+		Timeout:             cfg.HTTP.MetricsTimeout,
+	})))
 	handlers := []gin.HandlerFunc{
 		middleware.RequestID(),
 		middleware.Recovery(),

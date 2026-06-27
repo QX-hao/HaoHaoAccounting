@@ -16,7 +16,7 @@ Gin middleware and auth token helpers.
 
 `Accept` enforces declared response media types for API routes, supports compatible media ranges and structured syntax suffixes, ensures repeated `Accept` header fields are combined before negotiation, treats `q=0` media ranges as explicit exclusions, and appends `Vary: Accept` on negotiated routes. Offered media types use the same normalization as request media types so duplicate or invalid rule entries do not leak into negotiation errors.
 
-`HTTPMetrics` records low-cardinality Prometheus counters and duration histograms after route handling. Labels use only HTTP method, Gin route pattern, and response status; unmatched routes are grouped as `unmatched` so raw URLs and query strings do not become metric labels.
+`HTTPMetrics` records the current in-flight request gauge when a request enters middleware, then records low-cardinality Prometheus counters and duration histograms after route handling. Labels use only HTTP method, Gin route pattern, and response status; unmatched routes are grouped as `unmatched` so raw URLs and query strings do not become metric labels.
 
 `NoStoreAPI` applies `Cache-Control: no-store`, `Pragma: no-cache`, and `Expires: 0` to requests under the API prefix before early global rejections can write an error. `NoStore` applies the same headers inside API route groups. `NoCache` and `SetNoCache` are available for non-sensitive operational endpoints such as health probes and metrics that may be stored but must be revalidated before reuse.
 

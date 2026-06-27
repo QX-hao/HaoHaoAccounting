@@ -10,13 +10,18 @@ import (
 )
 
 type HTTPMetrics struct {
+	inFlight prometheus.Gauge
 	requests *prometheus.CounterVec
 	duration *prometheus.HistogramVec
 }
 
-// NewHTTPMetrics 注册低基数 HTTP 指标，标签只包含方法、Gin 路由模板和状态码。
+// NewHTTPMetrics 注册 HTTP 指标；并发请求数不用标签，历史请求指标只使用低基数标签。
 func NewHTTPMetrics(registry *prometheus.Registry) *HTTPMetrics {
 	metrics := &HTTPMetrics{
+		inFlight: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "haohao_http_requests_in_flight",
+			Help: "Current HTTP requests being handled.",
+		}),
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "haohao_http_requests_total",
 			Help: "Total HTTP requests handled by method, route, and status.",
@@ -27,7 +32,7 @@ func NewHTTPMetrics(registry *prometheus.Registry) *HTTPMetrics {
 			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
 		}, []string{"method", "route", "status"}),
 	}
-	registry.MustRegister(metrics.requests, metrics.duration)
+	registry.MustRegister(metrics.inFlight, metrics.requests, metrics.duration)
 	return metrics
 }
 
@@ -35,6 +40,8 @@ func NewHTTPMetrics(registry *prometheus.Registry) *HTTPMetrics {
 func (metrics *HTTPMetrics) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		started := time.Now()
+		metrics.inFlight.Inc()
+		defer metrics.inFlight.Dec()
 		c.Next()
 
 		method := normalizedMetricMethod(c.Request.Method)

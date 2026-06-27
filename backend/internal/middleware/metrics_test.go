@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -101,6 +102,46 @@ func TestHTTPMetricsNormalizesUnknownMethods(t *testing.T) {
 	}
 }
 
+func TestHTTPMetricsTracksInFlightRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	registry := prometheus.NewRegistry()
+	metrics := NewHTTPMetrics(registry)
+	router := gin.New()
+	router.Use(metrics.Middleware())
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	router.GET("/api/v1/slow", func(c *gin.Context) {
+		close(entered)
+		<-release
+		c.Status(http.StatusNoContent)
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/slow", nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		if resp.Code != http.StatusNoContent {
+			t.Errorf("status = %d, body = %s", resp.Code, resp.Body.String())
+		}
+	}()
+
+	<-entered
+	if got := metricGaugeValue(t, registry, "haohao_http_requests_in_flight"); got != 1 {
+		t.Fatalf("in-flight during request = %v, want 1", got)
+	}
+
+	close(release)
+	wg.Wait()
+	if got := metricGaugeValue(t, registry, "haohao_http_requests_in_flight"); got != 0 {
+		t.Fatalf("in-flight after request = %v, want 0", got)
+	}
+}
+
 func TestNormalizedMetricStatusBoundsHTTPStatusLabels(t *testing.T) {
 	tests := []struct {
 		status int
@@ -119,6 +160,27 @@ func TestNormalizedMetricStatusBoundsHTTPStatusLabels(t *testing.T) {
 			t.Fatalf("normalizedMetricStatus(%d) = %q, want %q", tt.status, got, tt.want)
 		}
 	}
+}
+
+func metricGaugeValue(t *testing.T, registry *prometheus.Registry, name string) float64 {
+	t.Helper()
+
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		metrics := family.GetMetric()
+		if len(metrics) != 1 || metrics[0].GetGauge() == nil {
+			t.Fatalf("%s metrics = %s, want exactly one gauge sample", name, metricFamiliesText(families))
+		}
+		return metrics[0].GetGauge().GetValue()
+	}
+	t.Fatalf("metrics = %s, missing gauge %s", metricFamiliesText(families), name)
+	return 0
 }
 
 func hasMetricWithLabels(families []*dto.MetricFamily, name string, labels map[string]string) bool {

@@ -50,6 +50,7 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"`q=0` media ranges as explicit exclusions",
 		"Vary: Accept",
 		"duplicate or invalid rule entries",
+		"current in-flight request gauge",
 		"low-cardinality Prometheus counters and duration histograms",
 		"Gin route pattern",
 		"unmatched",
