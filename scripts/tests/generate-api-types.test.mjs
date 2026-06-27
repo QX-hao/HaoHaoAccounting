@@ -699,6 +699,15 @@ test('generator requires closed import response schemas', () => {
 	}
 });
 
+test('generator requires import job server-owned fields to be read-only', () => {
+	assert.match(generator, /validateImportJobReadOnlyFields/);
+	assert.match(generator, /ImportJob\.\$\{propertyName\} is missing readOnly: true/);
+	const schema = openapiSchema('ImportJob');
+	for (const propertyName of ['id', 'createdAt', 'updatedAt']) {
+		assert.match(openapiSchemaPropertyBlock(schema, propertyName), /readOnly: true/, `ImportJob.${propertyName} is missing readOnly`);
+	}
+});
+
 test('generator requires closed AI response schemas', () => {
 	assert.match(generator, /validateAIResponseSchemasAreClosed/);
 	for (const schemaName of ['AIParseResult', 'AIParseResponse']) {

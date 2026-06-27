@@ -141,6 +141,7 @@ function validateSchemaConstraints(allSchemas) {
   validateReportResponseSchemasAreClosed(allSchemas);
   validateSummaryResponseSchema(allSchemas.Summary || '');
   validateImportResponseSchemasAreClosed(allSchemas);
+  validateImportJobReadOnlyFields(allSchemas.ImportJob || '');
   validateAIResponseSchemasAreClosed(allSchemas);
   validateAIResponseSchema(allSchemas.AIParseResult || '');
   validatePaginationSchema(allSchemas.Pagination || '');
@@ -341,6 +342,15 @@ function validateImportResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of ['ImportPreviewRow', 'ImportPreview', 'ImportResult', 'ImportJob']) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
+    }
+  }
+}
+
+function validateImportJobReadOnlyFields(schema) {
+  for (const propertyName of ['id', 'createdAt', 'updatedAt']) {
+    const property = schemaPropertyBlock(schema, propertyName);
+    if (!property.includes('readOnly: true')) {
+      throw new Error(`ImportJob.${propertyName} is missing readOnly: true`);
     }
   }
 }
