@@ -107,17 +107,17 @@ func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
 }
 
 func applyGlobalMiddleware(router *gin.Engine, cfg config.Config, metrics *middleware.HTTPMetrics) {
-	// 中间件顺序会影响错误响应能否带上 request id、安全头、CORS 和 no-store。
-	// 先放 RequestID 和指标采集，后面的早期拒绝也能被追踪和统计。
+	// 中间件顺序会影响早期拒绝能否带上 request id、指标、安全头、CORS 和 no-store。
+	// NoStoreAPI 放在 CORS 前面，保证不可信 Origin 被 CORS 直接拒绝时也不会缓存 API 响应。
 	router.Use(middleware.RequestID())
 	if metrics != nil {
 		router.Use(metrics.Middleware())
 	}
 	router.Use(middleware.RequestTimeout(cfg.HTTP.RequestTimeout))
-	router.Use(gin.LoggerWithConfig(newLoggerConfig()), middleware.Recovery())
+	router.Use(gin.LoggerWithConfig(newLoggerConfig()), captureLogRoute(), middleware.Recovery())
 	router.Use(middleware.SecurityHeaders(securityHeadersConfig(cfg)))
-	router.Use(cors.New(newCORSConfig(cfg)))
 	router.Use(middleware.NoStoreAPI("/api/v1"))
+	router.Use(cors.New(newCORSConfig(cfg)))
 	router.Use(middleware.BodyLimit(cfg.HTTP.MaxBodyBytes))
 	router.Use(middleware.ContentType(middleware.APIMediaTypeRules()))
 	router.Use(middleware.Accept(middleware.APIAcceptRules()))
@@ -342,6 +342,20 @@ func newLoggerConfig() gin.LoggerConfig {
 	}
 }
 
+const requestLogRouteContextKey = "request_log_route"
+
+// captureLogRoute 在 handler 执行后记录 Gin 的路由模板，日志里用它做低基数字段，避免真实 id 进入 route。
+func captureLogRoute() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+		route := c.FullPath()
+		if route == "" {
+			route = "unmatched"
+		}
+		c.Set(requestLogRouteContextKey, route)
+	}
+}
+
 func runHTTPServer(parent context.Context, server *http.Server, shutdownTimeout time.Duration) error {
 	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -376,13 +390,14 @@ func requestLogFormatter(param gin.LogFormatterParams) string {
 	}
 
 	return fmt.Sprintf(
-		"time=%q status=%d latency=%q client_ip=%q method=%q path=%q proto=%q user_agent=%q request_id=%q bytes=%d error=%q\n",
+		"time=%q status=%d latency=%q client_ip=%q method=%q path=%q route=%q proto=%q user_agent=%q request_id=%q bytes=%d error=%q\n",
 		param.TimeStamp.Format(time.RFC3339),
 		param.StatusCode,
 		param.Latency.String(),
 		param.ClientIP,
 		param.Method,
 		logPath(param.Path),
+		logRoute(param.Keys),
 		logProto(param.Request),
 		logUserAgent(param.Request),
 		logRequestID(param.Keys),
@@ -422,6 +437,18 @@ func logPath(path string) string {
 		return "/"
 	}
 	return path
+}
+
+func logRoute(keys map[string]any) string {
+	if value, ok := keys[requestLogRouteContextKey]; ok {
+		if route, ok := value.(string); ok {
+			route = strings.TrimSpace(route)
+			if route != "" {
+				return route
+			}
+		}
+	}
+	return "unmatched"
 }
 
 func logRequestID(keys map[string]any) string {

@@ -94,6 +94,42 @@ func TestRequestLogFormatterDropsQueryString(t *testing.T) {
 	}
 }
 
+func TestRequestLogFormatterIncludesRouteTemplate(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts/123",
+		Keys: map[string]any{
+			requestLogRouteContextKey: "/api/v1/accounts/:id",
+		},
+	})
+
+	if !strings.Contains(line, `path="/api/v1/accounts/123"`) {
+		t.Fatalf("log line = %q, missing concrete path", line)
+	}
+	if !strings.Contains(line, `route="/api/v1/accounts/:id"`) {
+		t.Fatalf("log line = %q, missing route template", line)
+	}
+}
+
+func TestRequestLogFormatterUsesUnmatchedRoutePlaceholder(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 404,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/not-found",
+	})
+
+	if !strings.Contains(line, `route="unmatched"`) {
+		t.Fatalf("log line = %q, missing unmatched route placeholder", line)
+	}
+}
+
 func TestRequestLogFormatterUsesRootForEmptyPath(t *testing.T) {
 	for _, path := range []string{"", "?token=secret"} {
 		t.Run(path, func(t *testing.T) {
@@ -330,7 +366,7 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"Leave it empty for direct traffic",
 		"client-supplied `X-Forwarded-*` headers are ignored",
 		"trusted reverse proxy IPs or CIDRs",
-		"`RequestID` -> `HTTPMetrics` -> `RequestTimeout` -> logger -> `Recovery` -> `SecurityHeaders` -> CORS -> `NoStoreAPI` -> `BodyLimit` -> `ContentType` -> `Accept`",
+		"`RequestID` -> `HTTPMetrics` -> `RequestTimeout` -> logger -> `captureLogRoute` -> `Recovery` -> `SecurityHeaders` -> `NoStoreAPI` -> CORS -> `BodyLimit` -> `ContentType` -> `Accept`",
 		"no-store API cache headers",
 		"being counted by request metrics",
 		"per-request",
@@ -341,7 +377,10 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`HTTP_HSTS_PRELOAD=true` requires `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`",
 		"`HTTP_CROSS_ORIGIN_EMBEDDER_POLICY`",
 		"`require-corp`, `credentialless`, or `unsafe-none`",
-		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
+		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, low-cardinality Gin `route`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
+		"Dynamic route parameters stay in the `path` field",
+		"replaced by the Gin route pattern in `route`",
+		"`/api/v1/accounts/:id`",
 		"`user_agent` values are trimmed to 256 characters before logging",
 		"`error` values are trimmed to 512 characters before logging",
 		"`HTTP_METRICS_ENABLED=true`",
@@ -1326,6 +1365,34 @@ func TestLoggerConfigIncludesStructuredErrorSummary(t *testing.T) {
 	}
 }
 
+func TestLoggerConfigIncludesCapturedRouteTemplate(t *testing.T) {
+	previousMode := gin.Mode()
+	previousWriter := gin.DefaultWriter
+	t.Cleanup(func() {
+		gin.SetMode(previousMode)
+		gin.DefaultWriter = previousWriter
+	})
+	gin.SetMode(gin.TestMode)
+
+	var logOutput bytes.Buffer
+	gin.DefaultWriter = &logOutput
+	router := gin.New()
+	router.Use(gin.LoggerWithConfig(newLoggerConfig()), captureLogRoute())
+	router.GET("/api/v1/accounts/:id", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/accounts/123", nil))
+
+	got := logOutput.String()
+	if !strings.Contains(got, `path="/api/v1/accounts/123"`) {
+		t.Fatalf("api log = %q, missing concrete path", got)
+	}
+	if !strings.Contains(got, `route="/api/v1/accounts/:id"`) {
+		t.Fatalf("api log = %q, missing route template", got)
+	}
+}
+
 func TestLoggerConfigSkipsOnlyProbePaths(t *testing.T) {
 	config := newLoggerConfig()
 
@@ -1456,6 +1523,15 @@ func TestCORSPreflightKeepsGlobalMiddlewareHeaders(t *testing.T) {
 	if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q", got)
 	}
+	if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := resp.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q", got)
+	}
+	if got := resp.Header().Get("Expires"); got != "0" {
+		t.Fatalf("Expires = %q", got)
+	}
 	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-preflight" {
 		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
 	}
@@ -1510,6 +1586,18 @@ func TestCORSAllowedOriginExposesClientHeaders(t *testing.T) {
 	if got := resp.Header().Get("Access-Control-Allow-Credentials"); got != "" {
 		t.Fatalf("Access-Control-Allow-Credentials = %q, want empty", got)
 	}
+	if got := resp.Header().Get("Vary"); !headerHasToken(got, "Origin") {
+		t.Fatalf("Vary = %q, missing Origin", got)
+	}
+	if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := resp.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q", got)
+	}
+	if got := resp.Header().Get("Expires"); got != "0" {
+		t.Fatalf("Expires = %q", got)
+	}
 	exposeHeaders := resp.Header().Get("Access-Control-Expose-Headers")
 	for _, header := range []string{"Allow", "Clear-Site-Data", "Content-Disposition", "Link", "Location", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "WWW-Authenticate", "Retry-After", "X-Total-Count", middleware.RequestIDHeader} {
 		if !headerHasToken(exposeHeaders, header) {
@@ -1522,6 +1610,97 @@ func TestCORSAllowedOriginExposesClientHeaders(t *testing.T) {
 	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-cors-expose" {
 		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
 	}
+}
+
+func TestCORSExposesRuntimeRateLimitHeaders(t *testing.T) {
+	router := newCORSAppRouter(t, config.LoginRateLimitConfig{MaxFailures: 1, Window: time.Minute})
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		req.Header.Set("Origin", "https://app.example.com")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(middleware.RequestIDHeader, "request-rate-limit")
+		resp := httptest.NewRecorder()
+
+		router.ServeHTTP(resp, req)
+
+		if attempt == 1 {
+			if resp.Code != http.StatusUnauthorized {
+				t.Fatalf("first login status = %d, want 401, body = %s", resp.Code, resp.Body.String())
+			}
+			continue
+		}
+		if resp.Code != http.StatusTooManyRequests {
+			t.Fatalf("blocked login status = %d, want 429, body = %s", resp.Code, resp.Body.String())
+		}
+		for header, want := range map[string]string{
+			"Retry-After":         "60",
+			"RateLimit-Limit":     "1",
+			"RateLimit-Remaining": "0",
+			"RateLimit-Reset":     "60",
+		} {
+			if got := resp.Header().Get(header); got != want {
+				t.Fatalf("%s = %q, want %q", header, got, want)
+			}
+			if expose := resp.Header().Get("Access-Control-Expose-Headers"); !headerHasToken(expose, header) {
+				t.Fatalf("Access-Control-Expose-Headers = %q, missing %s", expose, header)
+			}
+		}
+		if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+			t.Fatalf("Access-Control-Allow-Origin = %q", got)
+		}
+	}
+}
+
+func TestCORSExposesRuntimeAuthenticateChallenge(t *testing.T) {
+	router := newCORSAppRouter(t, config.LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	req.Header.Set(middleware.RequestIDHeader, "request-auth-challenge")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api"` {
+		t.Fatalf("WWW-Authenticate = %q", got)
+	}
+	if expose := resp.Header().Get("Access-Control-Expose-Headers"); !headerHasToken(expose, "WWW-Authenticate") {
+		t.Fatalf("Access-Control-Expose-Headers = %q, missing WWW-Authenticate", expose)
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+	if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+func newCORSAppRouter(t *testing.T, limiter config.LoginRateLimitConfig) *gin.Engine {
+	t.Helper()
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	cfg := config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+			MaxBodyBytes:     6 * 1024 * 1024,
+		},
+		Admin:          config.AdminConfig{Username: "admin", Password: "secret-password", Name: "管理员"},
+		LoginRateLimit: config.LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		JWT:            config.JWTConfig{Secret: "test-jwt-secret-with-at-least-32-chars", TTL: time.Hour, Issuer: "issuer", Audience: "api"},
+	}
+	cfg.LoginRateLimit = limiter
+	router := gin.New()
+	applyGlobalMiddleware(router, cfg, middleware.NewHTTPMetrics(prometheus.NewRegistry()))
+	if err := app.RegisterRoutesWithConfig(router, testutil.NewStore(t), nil, cfg); err != nil {
+		t.Fatalf("register routes: %v", err)
+	}
+	return router
 }
 
 func TestCORSIgnoresSameOriginRequestsWithOriginHeader(t *testing.T) {
@@ -1636,6 +1815,15 @@ func TestCORSRejectsUntrustedOriginsWithoutAllowHeaders(t *testing.T) {
 			}
 			if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 				t.Fatalf("X-Content-Type-Options = %q", got)
+			}
+			if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control = %q", got)
+			}
+			if got := resp.Header().Get("Pragma"); got != "no-cache" {
+				t.Fatalf("Pragma = %q", got)
+			}
+			if got := resp.Header().Get("Expires"); got != "0" {
+				t.Fatalf("Expires = %q", got)
 			}
 			if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-denied-cors" {
 				t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
