@@ -21,6 +21,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/stringutil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -152,6 +153,64 @@ func TestRequestLogFormatterUsesRootForEmptyPath(t *testing.T) {
 	}
 }
 
+func TestRequestLogFormatterBoundsPathLength(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/" + strings.Repeat("a", maxLoggedPathLength+20) + "?token=secret",
+	})
+
+	want := "/" + strings.Repeat("a", maxLoggedPathLength-4) + "..."
+	if !strings.Contains(line, `path="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated path", line)
+	}
+	if strings.Contains(line, strings.Repeat("a", maxLoggedPathLength+1)) || strings.Contains(line, "token=secret") {
+		t.Fatalf("log line contains unbounded or unsanitized path: %q", line)
+	}
+}
+
+func TestRequestLogFormatterTruncatesPathOnCharacterBoundary(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/" + strings.Repeat("好", maxLoggedPathLength+20),
+	})
+
+	want := "/" + strings.Repeat("好", maxLoggedPathLength-4) + "..."
+	if !strings.Contains(line, `path="`+want+`"`) {
+		t.Fatalf("log line = %q, missing character-safe truncated path", line)
+	}
+}
+
+func TestRequestLogFormatterBoundsRouteLength(t *testing.T) {
+	longRoute := "/api/v1/" + strings.Repeat("segment/", maxLoggedRouteLength)
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts",
+		Keys: map[string]any{
+			requestLogRouteContextKey: longRoute,
+		},
+	})
+
+	want := stringutil.TruncateRunes(longRoute, maxLoggedRouteLength)
+	if !strings.Contains(line, `route="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated route", line)
+	}
+	if strings.Contains(line, longRoute) {
+		t.Fatalf("log line contains unbounded route: %q", line)
+	}
+}
+
 func TestRequestLogFormatterEscapesClientControlledFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
 	req.Header.Set("User-Agent", "HaoHao\nMobile")
@@ -192,6 +251,41 @@ func TestRequestLogFormatterEscapesMethod(t *testing.T) {
 	}
 	if strings.Count(line, "\n") != 1 || !strings.HasSuffix(line, "\n") {
 		t.Fatalf("log line should stay single-line: %q", line)
+	}
+}
+
+func TestRequestLogFormatterBoundsMethodLength(t *testing.T) {
+	method := strings.Repeat("M", maxLoggedMethodLength+20)
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     method,
+		Path:       "/api/v1/accounts",
+	})
+
+	want := stringutil.TruncateRunes(method, maxLoggedMethodLength)
+	if !strings.Contains(line, `method="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated method", line)
+	}
+	if strings.Contains(line, method) {
+		t.Fatalf("log line contains unbounded method: %q", line)
+	}
+}
+
+func TestRequestLogFormatterUsesPlaceholderForEmptyMethod(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "  ",
+		Path:       "/api/v1/accounts",
+	})
+
+	if !strings.Contains(line, `method="-"`) {
+		t.Fatalf("log line = %q, missing empty method placeholder", line)
 	}
 }
 
@@ -381,6 +475,9 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"Dynamic route parameters stay in the `path` field",
 		"replaced by the Gin route pattern in `route`",
 		"`/api/v1/accounts/:id`",
+		"`method` values are trimmed to 32 characters before logging",
+		"`path` values are trimmed to 512 characters before logging",
+		"`route` values are trimmed to 256 characters before logging",
 		"`user_agent` values are trimmed to 256 characters before logging",
 		"`error` values are trimmed to 512 characters before logging",
 		"`HTTP_METRICS_ENABLED=true`",

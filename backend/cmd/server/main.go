@@ -395,7 +395,7 @@ func requestLogFormatter(param gin.LogFormatterParams) string {
 		param.StatusCode,
 		param.Latency.String(),
 		param.ClientIP,
-		param.Method,
+		logMethod(param.Method),
 		logPath(param.Path),
 		logRoute(param.Keys),
 		logProto(param.Request),
@@ -407,6 +407,9 @@ func requestLogFormatter(param gin.LogFormatterParams) string {
 }
 
 const (
+	maxLoggedMethodLength    = 32
+	maxLoggedPathLength      = 512
+	maxLoggedRouteLength     = 256
 	maxLoggedUserAgentLength = 256
 	maxLoggedErrorLength     = 512
 )
@@ -416,6 +419,14 @@ func logProto(request *http.Request) string {
 		return "-"
 	}
 	return request.Proto
+}
+
+func logMethod(method string) string {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		return "-"
+	}
+	return stringutil.TruncateRunes(method, maxLoggedMethodLength)
 }
 
 func logUserAgent(request *http.Request) string {
@@ -436,7 +447,8 @@ func logPath(path string) string {
 	if path == "" {
 		return "/"
 	}
-	return path
+	// path 来自客户端请求行，截断后再写日志，避免异常长 URL 放大单条日志。
+	return stringutil.TruncateRunes(path, maxLoggedPathLength)
 }
 
 func logRoute(keys map[string]any) string {
@@ -444,7 +456,7 @@ func logRoute(keys map[string]any) string {
 		if route, ok := value.(string); ok {
 			route = strings.TrimSpace(route)
 			if route != "" {
-				return route
+				return stringutil.TruncateRunes(route, maxLoggedRouteLength)
 			}
 		}
 	}
