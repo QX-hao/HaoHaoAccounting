@@ -78,6 +78,46 @@ func TestContentTypeAllowsParameters(t *testing.T) {
 	}
 }
 
+func TestContentTypeRejectsMultipartWithoutBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{name: "missing boundary", contentType: "multipart/form-data"},
+		{name: "empty boundary", contentType: `multipart/form-data; boundary=""`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handlerCalled := false
+			router := gin.New()
+			router.Use(ContentType([]ContentTypeRule{{
+				Method:       http.MethodPost,
+				Path:         "/upload",
+				AllowedTypes: []string{"multipart/form-data"},
+			}}))
+			router.POST("/upload", func(c *gin.Context) {
+				handlerCalled = true
+				c.Status(http.StatusNoContent)
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(""))
+			req.Header.Set("Content-Type", tt.contentType)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusUnsupportedMediaType {
+				t.Fatalf("status = %d, want 415, body = %s", resp.Code, resp.Body.String())
+			}
+			if handlerCalled {
+				t.Fatal("handler ran after multipart request without a boundary")
+			}
+		})
+	}
+}
+
 func TestContentTypeAllowsStructuredJSONMediaTypes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

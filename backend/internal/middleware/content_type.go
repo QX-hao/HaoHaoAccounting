@@ -42,8 +42,8 @@ func ContentType(rules []ContentTypeRule) gin.HandlerFunc {
 		if len(headerValues) == 1 {
 			contentType = strings.TrimSpace(headerValues[0])
 		}
-		mediaType, _, err := mime.ParseMediaType(contentType)
-		if contentType == "" || err != nil || !mediaTypeAllowed(mediaType, allowed) {
+		mediaType, params, err := mime.ParseMediaType(contentType)
+		if contentType == "" || err != nil || !mediaTypeAllowed(mediaType, allowed) || !mediaTypeParametersAllowed(mediaType, params) {
 			httputil.UnsupportedMediaType(c, unsupportedMediaTypeMessage(allowed))
 			c.Abort()
 			return
@@ -82,6 +82,14 @@ func mediaTypeAllowed(mediaType string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+func mediaTypeParametersAllowed(mediaType string, params map[string]string) bool {
+	// multipart/form-data 没有 boundary 时，后续 multipart reader 无法可靠解析表单内容。
+	if strings.EqualFold(strings.TrimSpace(mediaType), "multipart/form-data") {
+		return strings.TrimSpace(params["boundary"]) != ""
+	}
+	return true
 }
 
 func structuredJSONMediaTypeAllowed(mediaType string, allowedType string) bool {

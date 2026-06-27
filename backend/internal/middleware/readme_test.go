@@ -40,6 +40,7 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"http.MaxBytesReader",
 		"`charset=utf-8`",
 		"Content-Type parameters",
+		"multipart form data must include a non-empty `boundary` parameter",
 		"application/*+json",
 		"bare concrete types without parameters or wildcards",
 		"normalized, deduplicated",
