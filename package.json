@@ -7,9 +7,9 @@
   "scripts": {
     "generate:api-types": "node scripts/generate-api-types.mjs",
     "test:api-generator": "node --test scripts/tests/*.test.mjs",
-    "verify:compose": "NEXT_PUBLIC_API_BASE=https://api.example.com/api/v1 POSTGRES_PASSWORD=postgres-secret REDIS_PASSWORD=redis-secret JWT_SECRET=jwt-secret-with-at-least-32-characters ADMIN_USERNAME=admin ADMIN_PASSWORD=admin-secret CORS_ALLOW_ORIGINS=https://app.example.com MYSQL_ROOT_PASSWORD=mysql-secret docker compose config && docker compose -f docker-compose.local.yaml config && docker compose -f docker-compose.local.yaml --profile mysql config && node --test scripts/tests/dockerignore.test.mjs scripts/tests/config/dependabot.test.mjs scripts/tests/config/github-templates.test.mjs scripts/tests/config/repository-format.test.mjs",
+    "verify:compose": "NEXT_PUBLIC_API_BASE=https://api.example.com/api/v1 POSTGRES_PASSWORD=postgres-secret REDIS_PASSWORD=redis-secret JWT_SECRET=jwt-secret-with-at-least-32-characters ADMIN_USERNAME=admin ADMIN_PASSWORD=admin-secret CORS_ALLOW_ORIGINS=https://app.example.com MYSQL_ROOT_PASSWORD=mysql-secret docker compose config && docker compose -f docker-compose.local.yaml config && docker compose -f docker-compose.local.yaml --profile mysql config && node --test scripts/tests/dockerignore.test.mjs scripts/tests/config/github-templates.test.mjs scripts/tests/config/repository-format.test.mjs",
     "verify:api-contract": "npm run generate:api-types && npm run test:api-generator && git diff --exit-code -- web/shared/types/api.ts mobile/src/shared/types/api.ts web/shared/api/generated-client.ts mobile/src/shared/api/generated-client.ts web/shared/api/client.ts mobile/src/shared/api/client.ts",
-    "verify:backend": "cd backend && test -z \"$(gofmt -l .)\" && go vet ./... && go test ./...",
+    "verify:backend": "cd backend && test -z \"$(gofmt -l .)\" && go vet -buildvcs=false ./... && go test -buildvcs=false ./...",
     "verify:web": "npm --prefix web run lint && NEXT_PUBLIC_API_BASE=http://127.0.0.1:8080/api/v1 npm --prefix web run build && npm --prefix web run typecheck",
     "verify:web:e2e": "npm --prefix web run test:e2e",
     "verify:mobile": "npm --prefix mobile run typecheck"
