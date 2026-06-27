@@ -416,14 +416,23 @@ test('mobile nginx sets baseline browser security headers', () => {
 	for (const [header, value] of [
 		['Referrer-Policy', 'strict-origin-when-cross-origin'],
 		['Permissions-Policy', 'camera=(), geolocation=(), microphone=(), payment=()'],
+		['Cross-Origin-Opener-Policy', 'same-origin'],
+		['Cross-Origin-Resource-Policy', 'same-origin'],
+		['Origin-Agent-Cluster', '?1'],
 		['X-Content-Type-Options', 'nosniff'],
+		['X-DNS-Prefetch-Control', 'off'],
+		['X-Download-Options', 'noopen'],
 		['X-Frame-Options', 'DENY'],
+		['X-Permitted-Cross-Domain-Policies', 'none'],
+		['X-XSS-Protection', '0'],
 	]) {
 		assert.match(mobileNginx, new RegExp(`add_header ${escapeRegExp(header)} "${escapeRegExp(value)}" always;`));
 		assert.match(indexLocation, new RegExp(`add_header ${escapeRegExp(header)} "${escapeRegExp(value)}" always;`));
 		assert.match(staticLocation, new RegExp(`add_header ${escapeRegExp(header)} "${escapeRegExp(value)}" always;`));
 	}
 	assert.doesNotMatch(mobileNginx, /Strict-Transport-Security/);
+	assert.doesNotMatch(mobileNginx, /Cross-Origin-Embedder-Policy/);
+	assert.doesNotMatch(mobileNginx, /Content-Security-Policy/);
 });
 
 test('mobile nginx caches static assets immutably without SPA fallback', () => {

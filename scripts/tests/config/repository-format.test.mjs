@@ -74,12 +74,21 @@ test('web Next config sets baseline browser security headers', () => {
 	for (const [header, value] of [
 		['Referrer-Policy', 'strict-origin-when-cross-origin'],
 		['Permissions-Policy', 'camera=(), geolocation=(), microphone=(), payment=()'],
+		['Cross-Origin-Opener-Policy', 'same-origin'],
+		['Cross-Origin-Resource-Policy', 'same-origin'],
+		['Origin-Agent-Cluster', '?1'],
 		['X-Content-Type-Options', 'nosniff'],
+		['X-DNS-Prefetch-Control', 'off'],
+		['X-Download-Options', 'noopen'],
 		['X-Frame-Options', 'DENY'],
+		['X-Permitted-Cross-Domain-Policies', 'none'],
+		['X-XSS-Protection', '0'],
 	]) {
 		assert.match(webNextConfig, new RegExp(`key: '${escapeRegExp(header)}', value: '${escapeRegExp(value)}'`));
 	}
 	assert.doesNotMatch(webNextConfig, /Strict-Transport-Security/);
+	assert.doesNotMatch(webNextConfig, /Cross-Origin-Embedder-Policy/);
+	assert.doesNotMatch(webNextConfig, /Content-Security-Policy/);
 });
 
 function readRepositoryFile(path) {

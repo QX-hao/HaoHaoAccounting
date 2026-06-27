@@ -6,9 +6,15 @@ info:
     Cross-origin browser requests must come from an origin configured in CORS_ALLOW_ORIGINS.
     Requests from other origins are rejected by CORS middleware with 403 before route handlers run
     and do not include Access-Control-Allow-Origin.
+  contact:
+    name: HaoHaoAccounting Maintainers
+    url: https://github.com/QX-hao/HaoHaoAccounting/security
 servers:
   - url: http://localhost:8080/api/v1
     description: Local development API server.
+externalDocs:
+  description: Repository API contract and verification workflow.
+  url: https://github.com/QX-hao/HaoHaoAccounting/tree/dev-pxhao#协作与安全
 tags:
   - name: auth
     description: Authentication and current user endpoints.

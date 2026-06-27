@@ -234,6 +234,10 @@ test('root readme links collaboration, security, ownership, and API contract ent
 		'npm run verify:api-contract',
 		'CodeQL',
 		'Go 和 JavaScript/TypeScript',
+		'Web 的 Next 配置和 Mobile Web 的 Nginx 配置',
+		'Cross-Origin-Opener-Policy: same-origin',
+		'Origin-Agent-Cluster: ?1',
+		'静态前端默认不写 `Strict-Transport-Security`、`Content-Security-Policy` 或 `Cross-Origin-Embedder-Policy`',
 	]) {
 		assert.match(rootReadme, new RegExp(escapeRegExp(requiredText)));
 	}

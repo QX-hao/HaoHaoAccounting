@@ -170,6 +170,24 @@ test('OpenAPI documents CORS allowlist rejection behavior', () => {
 	assert.match(generator, /OpenAPI info\.description must document CORS allowlist rejection behavior/);
 });
 
+test('OpenAPI info identifies the maintainer contact path', () => {
+	const info = openapiTopLevelBlock('info');
+	assert.match(info, /contact:\n\s+name: HaoHaoAccounting Maintainers/);
+	assert.match(info, /url: https:\/\/github\.com\/QX-hao\/HaoHaoAccounting\/security/);
+	assert.match(generator, /validateOpenAPIInfoContact\(source\)/);
+	assert.match(generator, /OpenAPI info\.contact must identify HaoHaoAccounting maintainers/);
+	assert.match(generator, /OpenAPI info\.contact must link to the repository security contact path/);
+});
+
+test('OpenAPI links to repository contract documentation', () => {
+	const externalDocs = openapiTopLevelBlock('externalDocs');
+	assert.match(externalDocs, /description: Repository API contract and verification workflow\./);
+	assert.match(externalDocs, /url: https:\/\/github\.com\/QX-hao\/HaoHaoAccounting\/tree\/dev-pxhao#协作与安全/);
+	assert.match(generator, /validateOpenAPIExternalDocs\(source\)/);
+	assert.match(generator, /OpenAPI externalDocs must describe the repository API contract workflow/);
+	assert.match(generator, /OpenAPI externalDocs must link to repository API contract documentation/);
+});
+
 test('OpenAPI servers describe the local API base URL', () => {
 	const servers = openapiTopLevelBlock('servers');
 	assert.match(servers, /url: http:\/\/localhost:8080\/api\/v1/);

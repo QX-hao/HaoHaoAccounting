@@ -294,6 +294,8 @@ CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 
 后端会统一返回基础安全响应头，包括 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin` 和一个保守的 `Permissions-Policy`，默认关闭相机、定位、麦克风和支付能力。
 
+Web 的 Next 配置和 Mobile Web 的 Nginx 配置也会返回基础浏览器安全响应头，包括 `Referrer-Policy: strict-origin-when-cross-origin`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin`、`Origin-Agent-Cluster: ?1`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`X-DNS-Prefetch-Control: off`、`X-Download-Options: noopen`、`X-Permitted-Cross-Domain-Policies: none`、`X-XSS-Protection: 0` 和同样收紧相机、定位、麦克风、支付能力的 `Permissions-Policy`。静态前端默认不写 `Strict-Transport-Security`、`Content-Security-Policy` 或 `Cross-Origin-Embedder-Policy`，这些头需要在确认 HTTPS 覆盖、脚本资源和跨源隔离策略后再按部署启用。
+
 `Cross-Origin-Embedder-Policy` 默认不发送，避免 API 被嵌入到还没完成 CORP/CORS 标记的前端或第三方资源链路时出现浏览器拦截。只有确认部署需要浏览器跨域隔离能力时，再设置 `HTTP_CROSS_ORIGIN_EMBEDDER_POLICY=require-corp` 或 `credentialless`；启动校验会拒绝未知值。
 
 `Strict-Transport-Security` 默认不发送，避免本地 HTTP 调试或尚未确认 HTTPS 覆盖面的域名被浏览器长期记住为强制 HTTPS。生产环境确认 API 域名只通过 HTTPS 访问后，可以设置 `HTTP_HSTS_MAX_AGE_SECONDS=31536000`；只有确认所有子域也都支持 HTTPS 时再开启 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。准备加入浏览器 preload 列表时再开启 `HTTP_HSTS_PRELOAD=true`，此时启动校验会要求 `HTTP_HSTS_MAX_AGE_SECONDS>=31536000` 且 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。

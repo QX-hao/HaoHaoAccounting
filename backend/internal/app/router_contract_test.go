@@ -100,6 +100,64 @@ func TestHealthOpenAPIRefsResolve(t *testing.T) {
 	})
 }
 
+func TestOpenAPIInfoDeclaresMaintainerContact(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{name: "business", data: readOpenAPI(t)},
+		{name: "health", data: readHealthOpenAPI(t)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc openAPIDocument
+			if err := yaml.Unmarshal(tc.data, &doc); err != nil {
+				t.Fatalf("parse OpenAPI: %v", err)
+			}
+			if doc.Info.Contact.Name != "HaoHaoAccounting Maintainers" {
+				t.Fatalf("info.contact.name = %q", doc.Info.Contact.Name)
+			}
+			if doc.Info.Contact.URL != "https://github.com/QX-hao/HaoHaoAccounting/security" {
+				t.Fatalf("info.contact.url = %q", doc.Info.Contact.URL)
+			}
+		})
+	}
+}
+
+func TestOpenAPIDocumentsExternalContractLinks(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		data        []byte
+		description string
+		url         string
+	}{
+		{
+			name:        "business",
+			data:        readOpenAPI(t),
+			description: "Repository API contract and verification workflow.",
+			url:         "https://github.com/QX-hao/HaoHaoAccounting/tree/dev-pxhao#协作与安全",
+		},
+		{
+			name:        "health",
+			data:        readHealthOpenAPI(t),
+			description: "Health route runtime contract and composition notes.",
+			url:         "https://github.com/QX-hao/HaoHaoAccounting/blob/dev-pxhao/backend/internal/app/README.md",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc openAPIDocument
+			if err := yaml.Unmarshal(tc.data, &doc); err != nil {
+				t.Fatalf("parse OpenAPI: %v", err)
+			}
+			if doc.ExternalDocs.Description != tc.description {
+				t.Fatalf("externalDocs.description = %q", doc.ExternalDocs.Description)
+			}
+			if doc.ExternalDocs.URL != tc.url {
+				t.Fatalf("externalDocs.url = %q", doc.ExternalDocs.URL)
+			}
+		})
+	}
+}
+
 func TestHealthOpenAPIResponsesDeclareNoCacheHeaders(t *testing.T) {
 	data := readHealthOpenAPI(t)
 	var doc openAPIDocument
@@ -122,6 +180,32 @@ func TestHealthOpenAPIResponsesDeclareNoCacheHeaders(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("health OpenAPI does not define any responses")
+	}
+}
+
+func TestHealthOpenAPIGetResponsesDeclareJSONContentTypeHeader(t *testing.T) {
+	data := readHealthOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse health-openapi.yaml: %v", err)
+	}
+
+	checked := 0
+	for path, item := range doc.Paths {
+		for _, operation := range item.operations(doc.Components.Parameters) {
+			if operation.method != http.MethodGet {
+				continue
+			}
+			for status, response := range operation.responses {
+				checked++
+				if !resolvedResponseHasHeader(response, doc.Components.Responses, "Content-Type") {
+					t.Fatalf("%s %s %s response is missing Content-Type header", operation.method, path, status)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("health OpenAPI does not define any GET responses")
 	}
 }
 
@@ -177,6 +261,28 @@ func TestHealthOpenAPIOperationsHaveStableDocumentation(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("health OpenAPI does not define any operations")
+	}
+}
+
+func TestHealthOpenAPIIsExplicitlyPublic(t *testing.T) {
+	data := readHealthOpenAPI(t)
+	var doc openAPIDocument
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse health-openapi.yaml: %v", err)
+	}
+
+	if doc.Security == nil || len(doc.Security) != 0 {
+		t.Fatalf("health OpenAPI security = %#v, want explicit public security: []", doc.Security)
+	}
+	if len(doc.Components.SecuritySchemes) != 0 {
+		t.Fatalf("health OpenAPI securitySchemes = %#v, want none", doc.Components.SecuritySchemes)
+	}
+	for path, item := range doc.Paths {
+		for _, operation := range item.operations(doc.Components.Parameters) {
+			if operation.securityOverride {
+				t.Fatalf("%s %s declares operation security, health probes must inherit public root security", operation.method, path)
+			}
+		}
 	}
 }
 
@@ -1056,9 +1162,25 @@ func mappingValue(node *yaml.Node, key string) *yaml.Node {
 }
 
 type openAPIDocument struct {
-	Security   []map[string][]string      `yaml:"security"`
-	Paths      map[string]openAPIPathItem `yaml:"paths"`
-	Components openAPIComponents          `yaml:"components"`
+	Info         openAPIInfo                `yaml:"info"`
+	ExternalDocs openAPIExternalDocs        `yaml:"externalDocs"`
+	Security     []map[string][]string      `yaml:"security"`
+	Paths        map[string]openAPIPathItem `yaml:"paths"`
+	Components   openAPIComponents          `yaml:"components"`
+}
+
+type openAPIInfo struct {
+	Contact openAPIContact `yaml:"contact"`
+}
+
+type openAPIContact struct {
+	Name string `yaml:"name"`
+	URL  string `yaml:"url"`
+}
+
+type openAPIExternalDocs struct {
+	Description string `yaml:"description"`
+	URL         string `yaml:"url"`
 }
 
 type openAPIComponents struct {

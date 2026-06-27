@@ -33,7 +33,9 @@ const schemas = Object.fromEntries(schemaNames.map((name, index) => {
 }));
 
 validateOpenAPIDescription(source);
+validateOpenAPIInfoContact(source);
 validateOpenAPIServers(source);
+validateOpenAPIExternalDocs(source);
 validateOpenAPITags(source);
 validateSchemaRefs(source, new Set(schemaNames));
 validateSchemaConstraints(schemas);
@@ -69,6 +71,17 @@ function validateOpenAPIDescription(openapi) {
   }
 }
 
+function validateOpenAPIInfoContact(openapi) {
+  const info = topLevelBlock(openapi, 'info');
+  const contact = nestedBlock(info, 'contact:');
+  if (!contact.includes('name: HaoHaoAccounting Maintainers')) {
+    throw new Error('OpenAPI info.contact must identify HaoHaoAccounting maintainers');
+  }
+  if (!contact.includes('url: https://github.com/QX-hao/HaoHaoAccounting/security')) {
+    throw new Error('OpenAPI info.contact must link to the repository security contact path');
+  }
+}
+
 function validateOpenAPIServers(openapi) {
   const servers = topLevelBlock(openapi, 'servers');
   if (!servers.includes('url: http://localhost:8080/api/v1')) {
@@ -76,6 +89,16 @@ function validateOpenAPIServers(openapi) {
   }
   if (!servers.includes('description: Local development API server.')) {
     throw new Error('OpenAPI local server must include a human-readable description');
+  }
+}
+
+function validateOpenAPIExternalDocs(openapi) {
+  const externalDocs = topLevelBlock(openapi, 'externalDocs');
+  if (!externalDocs.includes('description: Repository API contract and verification workflow.')) {
+    throw new Error('OpenAPI externalDocs must describe the repository API contract workflow');
+  }
+  if (!externalDocs.includes('url: https://github.com/QX-hao/HaoHaoAccounting/tree/dev-pxhao#协作与安全')) {
+    throw new Error('OpenAPI externalDocs must link to repository API contract documentation');
   }
 }
 

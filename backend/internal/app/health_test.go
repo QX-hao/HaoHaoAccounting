@@ -49,6 +49,7 @@ func TestHealthLivezReturnsOK(t *testing.T) {
 	if !strings.Contains(resp.Body.String(), `"status":"ok"`) {
 		t.Fatalf("body = %s", resp.Body.String())
 	}
+	assertJSONContentType(t, resp)
 	assertNoCacheHeaders(t, resp)
 }
 
@@ -91,6 +92,7 @@ func TestReadmeDocumentsRouteContracts(t *testing.T) {
 		"`Pragma: no-cache`",
 		"`Expires: 0`",
 		"Health probe responses use `Cache-Control: no-cache`",
+		"Health probe `GET` responses use `Content-Type: application/json; charset=utf-8`",
 		"Health probes support both `GET` and `HEAD`",
 		"Non-API health probe fallbacks remain cache-neutral",
 	} {
@@ -308,6 +310,7 @@ func TestReadyzReturnsOKWhenDatabaseIsReadyAndRedisDisabled(t *testing.T) {
 	if body.Status != "ok" || body.Checks["database"]["status"] != "ok" || body.Checks["redis"]["status"] != "disabled" {
 		t.Fatalf("body = %#v", body)
 	}
+	assertJSONContentType(t, resp)
 	assertNoCacheHeaders(t, resp)
 }
 
@@ -375,7 +378,16 @@ func TestReadyzReturnsUnavailableWhenRedisFails(t *testing.T) {
 	if strings.Contains(resp.Body.String(), internalError) || strings.Contains(resp.Body.String(), "secret") {
 		t.Fatalf("health response leaked internal dependency error: %s", resp.Body.String())
 	}
+	assertJSONContentType(t, resp)
 	assertNoCacheHeaders(t, resp)
+}
+
+func assertJSONContentType(t *testing.T, resp *httptest.ResponseRecorder) {
+	t.Helper()
+
+	if got := resp.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("Content-Type = %q", got)
+	}
 }
 
 func assertNoCacheHeaders(t *testing.T, resp *httptest.ResponseRecorder) {

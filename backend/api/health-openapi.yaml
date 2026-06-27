@@ -7,12 +7,19 @@ info:
     business API prefix. Load balancers and orchestrators should rely on HTTP
     status codes; response bodies are intentionally small and omit dependency
     error details.
+  contact:
+    name: HaoHaoAccounting Maintainers
+    url: https://github.com/QX-hao/HaoHaoAccounting/security
 servers:
   - url: http://localhost:8080
     description: Local development server root.
+externalDocs:
+  description: Health route runtime contract and composition notes.
+  url: https://github.com/QX-hao/HaoHaoAccounting/blob/dev-pxhao/backend/internal/app/README.md
 tags:
   - name: health
     description: Liveness and readiness probes for runtime infrastructure.
+security: []
 paths:
   /livez:
     get:
@@ -75,6 +82,12 @@ paths:
           $ref: '#/components/responses/HeadUnavailable'
 components:
   headers:
+    ContentTypeJSON:
+      description: JSON response media type for health probe bodies.
+      schema:
+        type: string
+        pattern: '^application/json(;.*)?$'
+      example: application/json; charset=utf-8
     CacheControl:
       description: Health probes require revalidation before reuse.
       schema:
@@ -97,6 +110,8 @@ components:
     LivezOK:
       description: Process is alive.
       headers:
+        Content-Type:
+          $ref: '#/components/headers/ContentTypeJSON'
         Cache-Control:
           $ref: '#/components/headers/CacheControl'
         Pragma:
@@ -112,6 +127,8 @@ components:
     ReadyzOK:
       description: Dependencies are ready.
       headers:
+        Content-Type:
+          $ref: '#/components/headers/ContentTypeJSON'
         Cache-Control:
           $ref: '#/components/headers/CacheControl'
         Pragma:
@@ -132,6 +149,8 @@ components:
     ReadyzUnavailable:
       description: A required dependency is unavailable.
       headers:
+        Content-Type:
+          $ref: '#/components/headers/ContentTypeJSON'
         Cache-Control:
           $ref: '#/components/headers/CacheControl'
         Pragma:
