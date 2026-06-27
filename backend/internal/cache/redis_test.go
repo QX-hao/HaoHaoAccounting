@@ -2,11 +2,19 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+func TestNewRequiresRedisAddress(t *testing.T) {
+	if _, err := New(Config{}); err == nil {
+		t.Fatal("expected empty redis addr to fail")
+	}
+}
 
 func TestRedisCacheCloseDisablesClientAndIsIdempotent(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
@@ -59,6 +67,25 @@ func TestRedisCacheOperationsAreNoopsAfterClose(t *testing.T) {
 	}
 }
 
+func TestRedisCacheDeleteByPrefixRejectsEmptyPrefix(t *testing.T) {
+	c := &RedisCache{client: redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})}
+	defer func() { _ = c.Close() }()
+
+	if err := c.DeleteByPrefix(context.Background(), ""); !errors.Is(err, errEmptyDeletePrefix) {
+		t.Fatalf("DeleteByPrefix empty prefix = %v, want %v", err, errEmptyDeletePrefix)
+	}
+}
+
+func TestRedisCacheSetJSONReturnsMarshalError(t *testing.T) {
+	c := &RedisCache{client: redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})}
+	defer func() { _ = c.Close() }()
+
+	value := map[string]any{"invalid": func() {}}
+	if err := c.SetJSON(context.Background(), "key", value, time.Minute); err == nil {
+		t.Fatal("expected marshal error")
+	}
+}
+
 func TestRedisCacheCloseIsSafeWithConcurrentEnabledChecks(t *testing.T) {
 	c := &RedisCache{client: redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})}
 
@@ -78,5 +105,28 @@ func TestRedisCacheCloseIsSafeWithConcurrentEnabledChecks(t *testing.T) {
 	wg.Wait()
 	if c.Enabled() {
 		t.Fatal("expected cache to be disabled after Close")
+	}
+}
+
+func TestCacheKeysAreStableAndScoped(t *testing.T) {
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	end := time.Date(2026, 1, 3, 3, 4, 5, 0, time.UTC)
+
+	tests := map[string]string{
+		"report prefix": UserReportPrefix(42),
+		"report key":    UserReportKey(42, start, end),
+		"ai parse key":  UserAIParseKey(42, "记一笔早餐12.5"),
+		"revoked token": RevokedTokenKey("abc123"),
+	}
+	want := map[string]string{
+		"report prefix": "report:summary:u:42:",
+		"report key":    "report:summary:u:42:2026-01-02T03:04:05Z:2026-01-03T03:04:05Z",
+		"ai parse key":  "ai:parse:u:42:e8aeb0e4b880e7ac94e697a9e9a49031322e35",
+		"revoked token": "auth:revoked:abc123",
+	}
+	for name, got := range tests {
+		if got != want[name] {
+			t.Fatalf("%s key = %q, want %q", name, got, want[name])
+		}
 	}
 }

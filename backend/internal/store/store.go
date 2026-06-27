@@ -118,6 +118,19 @@ func ApplyPoolConfig(db *gorm.DB, cfg PoolConfig) error {
 	return nil
 }
 
+// DBWithContext 统一给 GORM 会话绑定请求上下文；nil context 会退回 Background，避免调用方重复兜底。
+func (s *Store) DBWithContext(ctx context.Context) *gorm.DB {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.DB.WithContext(ctx)
+}
+
+// Transaction 用 GORM 的闭包事务封装提交/回滚规则：fn 返回错误时回滚，返回 nil 时提交。
+func (s *Store) Transaction(ctx context.Context, fn func(*gorm.DB) error) error {
+	return s.DBWithContext(ctx).Transaction(fn)
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	if s == nil || s.DB == nil {
 		return errors.New("database is not configured")

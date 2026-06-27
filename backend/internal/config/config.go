@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +24,9 @@ const (
 	defaultHTTPRequestTimeout = 60 * time.Second
 	minJWTSecretLength        = 32
 	hstsPreloadMinMaxAge      = 31536000
+	developmentJWTSecret      = "haohao-dev-jwt-secret-change-me-32chars"
+	developmentAdminPassword  = "haohao123"
+	developmentRedisPassword  = "haohao123"
 )
 
 type Config struct {
@@ -51,23 +55,25 @@ type RedisConfig struct {
 }
 
 type HTTPConfig struct {
-	GinMode                   string
-	CORSAllowOrigins          []string
-	TrustedProxies            []string
-	ReadTimeout               time.Duration
-	ReadHeaderTimeout         time.Duration
-	WriteTimeout              time.Duration
-	IdleTimeout               time.Duration
-	ShutdownTimeout           time.Duration
-	RequestTimeout            time.Duration
-	MaxHeaderBytes            int
-	MaxBodyBytes              int64
-	MetricsEnabled            bool
-	MetricsToken              string
-	HSTSMaxAgeSeconds         int
-	HSTSIncludeSubDomains     bool
-	HSTSPreload               bool
-	CrossOriginEmbedderPolicy string
+	GinMode                    string
+	CORSAllowOrigins           []string
+	TrustedProxies             []string
+	ReadTimeout                time.Duration
+	ReadHeaderTimeout          time.Duration
+	WriteTimeout               time.Duration
+	IdleTimeout                time.Duration
+	ShutdownTimeout            time.Duration
+	RequestTimeout             time.Duration
+	MaxHeaderBytes             int
+	MaxBodyBytes               int64
+	MetricsEnabled             bool
+	MetricsToken               string
+	MetricsMaxRequestsInFlight int
+	MetricsTimeout             time.Duration
+	HSTSMaxAgeSeconds          int
+	HSTSIncludeSubDomains      bool
+	HSTSPreload                bool
+	CrossOriginEmbedderPolicy  string
 }
 
 type AdminConfig struct {
@@ -89,6 +95,7 @@ type JWTConfig struct {
 	Audience  string
 }
 
+// LoadDotEnv 从 dotenv 文件补齐尚未显式设置的环境变量，缺失文件会被视为无操作。
 func LoadDotEnv(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -111,9 +118,12 @@ func LoadDotEnv(path string) error {
 			continue
 		}
 		key = strings.TrimSpace(key)
+		if !validDotEnvKey(key) {
+			continue
+		}
 		value = parseDotEnvValue(value)
 		// 显式环境变量优先级高于 .env；即使值为空，也视为调用方主动设置。
-		if _, exists := os.LookupEnv(key); key == "" || exists {
+		if _, exists := os.LookupEnv(key); exists {
 			continue
 		}
 		if err := os.Setenv(key, value); err != nil {
@@ -131,6 +141,23 @@ func trimDotEnvExportPrefix(line string) string {
 		return line
 	}
 	return strings.TrimSpace(line[len("export"):])
+}
+
+// dotenv key 按 shell 环境变量名收紧，避免空格、短横线等误写被注入进进程环境。
+func validDotEnvKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for index, char := range key {
+		if char == '_' || char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' {
+			continue
+		}
+		if index > 0 && char >= '0' && char <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func parseDotEnvValue(value string) string {
@@ -195,6 +222,7 @@ func isDotEnvSpace(char rune) bool {
 	return char == ' ' || char == '\t'
 }
 
+// Load 按环境变量和本地开发默认值构造配置；非法环境值会先回退，严格校验交给 LoadStrict。
 func Load() Config {
 	driver := stringEnv("DB_DRIVER", "postgres")
 	return Config{
@@ -213,23 +241,25 @@ func Load() Config {
 			DB:       intEnv("REDIS_DB", 0),
 		},
 		HTTP: HTTPConfig{
-			GinMode:                   stringEnv("GIN_MODE", "release"),
-			CORSAllowOrigins:          corsAllowOrigins(),
-			TrustedProxies:            csvEnv("TRUSTED_PROXIES"),
-			ReadTimeout:               durationEnv("HTTP_READ_TIMEOUT", 15*time.Second),
-			ReadHeaderTimeout:         durationEnv("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
-			WriteTimeout:              durationEnv("HTTP_WRITE_TIMEOUT", 30*time.Second),
-			IdleTimeout:               durationEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
-			ShutdownTimeout:           durationEnv("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
-			RequestTimeout:            nonNegativeDurationEnv("HTTP_REQUEST_TIMEOUT", defaultHTTPRequestTimeout),
-			MaxHeaderBytes:            positiveIntEnv("HTTP_MAX_HEADER_BYTES", 1<<20),
-			MaxBodyBytes:              int64Env("HTTP_MAX_BODY_BYTES", 6*1024*1024),
-			MetricsEnabled:            boolEnv("HTTP_METRICS_ENABLED", false),
-			MetricsToken:              strings.TrimSpace(os.Getenv("HTTP_METRICS_TOKEN")),
-			HSTSMaxAgeSeconds:         nonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS", 0),
-			HSTSIncludeSubDomains:     boolEnv("HTTP_HSTS_INCLUDE_SUBDOMAINS", false),
-			HSTSPreload:               boolEnv("HTTP_HSTS_PRELOAD", false),
-			CrossOriginEmbedderPolicy: crossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
+			GinMode:                    stringEnv("GIN_MODE", "release"),
+			CORSAllowOrigins:           corsAllowOrigins(),
+			TrustedProxies:             csvEnv("TRUSTED_PROXIES"),
+			ReadTimeout:                durationEnv("HTTP_READ_TIMEOUT", 15*time.Second),
+			ReadHeaderTimeout:          durationEnv("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
+			WriteTimeout:               durationEnv("HTTP_WRITE_TIMEOUT", 30*time.Second),
+			IdleTimeout:                durationEnv("HTTP_IDLE_TIMEOUT", 60*time.Second),
+			ShutdownTimeout:            durationEnv("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
+			RequestTimeout:             nonNegativeDurationEnv("HTTP_REQUEST_TIMEOUT", defaultHTTPRequestTimeout),
+			MaxHeaderBytes:             positiveIntEnv("HTTP_MAX_HEADER_BYTES", 1<<20),
+			MaxBodyBytes:               int64Env("HTTP_MAX_BODY_BYTES", 6*1024*1024),
+			MetricsEnabled:             boolEnv("HTTP_METRICS_ENABLED", false),
+			MetricsToken:               strings.TrimSpace(os.Getenv("HTTP_METRICS_TOKEN")),
+			MetricsMaxRequestsInFlight: positiveIntEnv("HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT", 1),
+			MetricsTimeout:             durationEnv("HTTP_METRICS_TIMEOUT", 10*time.Second),
+			HSTSMaxAgeSeconds:          nonNegativeIntEnv("HTTP_HSTS_MAX_AGE_SECONDS", 0),
+			HSTSIncludeSubDomains:      boolEnv("HTTP_HSTS_INCLUDE_SUBDOMAINS", false),
+			HSTSPreload:                boolEnv("HTTP_HSTS_PRELOAD", false),
+			CrossOriginEmbedderPolicy:  crossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
 		},
 		Admin: AdminConfig{
 			Username: strings.TrimSpace(os.Getenv("ADMIN_USERNAME")),
@@ -237,8 +267,8 @@ func Load() Config {
 			Name:     stringEnv("ADMIN_NAME", "好好用户"),
 		},
 		LoginRateLimit: LoginRateLimitConfig{
-			MaxFailures: intEnv("LOGIN_RATE_LIMIT_MAX_FAILURES", 5),
-			Window:      durationEnv("LOGIN_RATE_LIMIT_WINDOW", 10*time.Minute),
+			MaxFailures: nonNegativeIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES", 5),
+			Window:      nonNegativeDurationEnv("LOGIN_RATE_LIMIT_WINDOW", 10*time.Minute),
 		},
 		JWT: JWTConfig{
 			Secret:    strings.TrimSpace(os.Getenv("JWT_SECRET")),
@@ -250,6 +280,7 @@ func Load() Config {
 	}
 }
 
+// LoadStrict 先解析环境变量格式，再校验完整配置，适合服务启动时失败退出。
 func LoadStrict() (Config, error) {
 	cfg := Load()
 	if err := validateEnvValues(); err != nil {
@@ -261,6 +292,7 @@ func LoadStrict() (Config, error) {
 	return cfg, nil
 }
 
+// Validate 聚合所有配置段错误，让启动失败时一次性看到所有不合法项。
 func (c Config) Validate() error {
 	var errs []error
 	if err := validatePort(c.Port); err != nil {
@@ -284,7 +316,52 @@ func (c Config) Validate() error {
 	if err := c.Admin.Validate(); err != nil {
 		errs = append(errs, err)
 	}
+	if err := c.validatePublicDeploymentSecrets(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+func (c Config) validatePublicDeploymentSecrets() error {
+	if !hasPublicCORSOrigin(c.HTTP.CORSAllowOrigins) {
+		return nil
+	}
+	var errs []error
+	if c.JWT.Secret == developmentJWTSecret {
+		errs = append(errs, errors.New("JWT_SECRET must not use the development example value when CORS_ALLOW_ORIGINS contains a public origin"))
+	}
+	if c.Admin.Password == developmentAdminPassword {
+		errs = append(errs, errors.New("ADMIN_PASSWORD must not use the development example value when CORS_ALLOW_ORIGINS contains a public origin"))
+	}
+	if c.Redis.Password == developmentRedisPassword && !redisAddrIsLoopback(c.Redis.Addr) {
+		errs = append(errs, errors.New("REDIS_PASSWORD must not use the development example value when Redis is remote and CORS_ALLOW_ORIGINS contains a public origin"))
+	}
+	return errors.Join(errs...)
+}
+
+func hasPublicCORSOrigin(origins []string) bool {
+	for _, origin := range origins {
+		if originHostIsPublic(origin) {
+			return true
+		}
+	}
+	return false
+}
+
+func originHostIsPublic(origin string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(origin))
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	addr, err := netip.ParseAddr(host)
+	return err != nil || !addr.IsLoopback()
 }
 
 func validatePort(port string) error {
@@ -321,8 +398,11 @@ func validateEnvValues() error {
 		validateBoolEnv("HTTP_HSTS_PRELOAD"),
 		validateCrossOriginEmbedderPolicyEnv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY"),
 		validateBoolEnv("HTTP_METRICS_ENABLED"),
-		validatePositiveIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES"),
-		validatePositiveDurationEnv("LOGIN_RATE_LIMIT_WINDOW"),
+		validateBearerTokenEnv("HTTP_METRICS_TOKEN"),
+		validatePositiveIntEnv("HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT"),
+		validatePositiveDurationEnv("HTTP_METRICS_TIMEOUT"),
+		validateNonNegativeIntEnv("LOGIN_RATE_LIMIT_MAX_FAILURES"),
+		validateNonNegativeDurationEnv("LOGIN_RATE_LIMIT_WINDOW"),
 		validatePositiveDurationEnv("JWT_TTL"),
 		validateNonNegativeDurationEnv("JWT_CLOCK_SKEW"),
 	}
@@ -507,6 +587,11 @@ func isLoopbackRedisHost(host string) bool {
 	return err == nil && addr.IsLoopback()
 }
 
+func redisAddrIsLoopback(addr string) bool {
+	host, err := redisHost(addr)
+	return err == nil && isLoopbackRedisHost(host)
+}
+
 func (c HTTPConfig) Validate() error {
 	var errs []error
 	switch strings.ToLower(strings.TrimSpace(c.GinMode)) {
@@ -535,6 +620,12 @@ func (c HTTPConfig) Validate() error {
 	if c.MaxBodyBytes <= 0 {
 		errs = append(errs, errors.New("HTTP_MAX_BODY_BYTES must be positive"))
 	}
+	if c.MetricsMaxRequestsInFlight <= 0 {
+		errs = append(errs, errors.New("HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT must be positive"))
+	}
+	if c.MetricsTimeout <= 0 {
+		errs = append(errs, errors.New("HTTP_METRICS_TIMEOUT must be positive"))
+	}
 	if c.HSTSMaxAgeSeconds < 0 {
 		errs = append(errs, errors.New("HTTP_HSTS_MAX_AGE_SECONDS must be non-negative"))
 	}
@@ -542,7 +633,10 @@ func (c HTTPConfig) Validate() error {
 		errs = append(errs, errors.New("HTTP_REQUEST_TIMEOUT must be non-negative"))
 	}
 	if c.MetricsToken != "" && !middleware.ValidBearerTokenValue(c.MetricsToken) {
-		errs = append(errs, errors.New("HTTP_METRICS_TOKEN must contain only RFC 6750 bearer token characters"))
+		errs = append(errs, errors.New("HTTP_METRICS_TOKEN must be a RFC 6750 bearer token value up to 4096 bytes"))
+	}
+	if !validCrossOriginEmbedderPolicy(c.CrossOriginEmbedderPolicy) {
+		errs = append(errs, errors.New("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY must be empty or one of: require-corp, credentialless, unsafe-none"))
 	}
 	if !validCrossOriginEmbedderPolicy(c.CrossOriginEmbedderPolicy) {
 		errs = append(errs, errors.New("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY must be empty or one of: require-corp, credentialless, unsafe-none"))
@@ -571,6 +665,19 @@ func validateCrossOriginEmbedderPolicyEnv(key string) func() error {
 		}
 		if !validCrossOriginEmbedderPolicy(os.Getenv(key)) {
 			return fmt.Errorf("%s must be empty or one of: require-corp, credentialless, unsafe-none", key)
+		}
+		return nil
+	}
+}
+
+func validateBearerTokenEnv(key string) func() error {
+	return func() error {
+		value, exists := os.LookupEnv(key)
+		if !exists || strings.TrimSpace(value) == "" {
+			return nil
+		}
+		if !middleware.ValidBearerTokenValue(strings.TrimSpace(value)) {
+			return fmt.Errorf("%s must be a RFC 6750 bearer token value up to 4096 bytes", key)
 		}
 		return nil
 	}
@@ -627,11 +734,11 @@ func (c AdminConfig) Validate() error {
 
 func (c LoginRateLimitConfig) Validate() error {
 	var errs []error
-	if c.MaxFailures <= 0 {
-		errs = append(errs, errors.New("LOGIN_RATE_LIMIT_MAX_FAILURES must be positive"))
+	if c.MaxFailures < 0 {
+		errs = append(errs, errors.New("LOGIN_RATE_LIMIT_MAX_FAILURES must be non-negative"))
 	}
-	if c.Window <= 0 {
-		errs = append(errs, errors.New("LOGIN_RATE_LIMIT_WINDOW must be positive"))
+	if c.Window < 0 {
+		errs = append(errs, errors.New("LOGIN_RATE_LIMIT_WINDOW must be non-negative"))
 	}
 	return errors.Join(errs...)
 }
@@ -658,6 +765,7 @@ func (c JWTConfig) Validate() error {
 	return nil
 }
 
+// ExplicitDatabaseDSN 返回调用方显式提供的 DB_DSN，用于区分默认本地 DSN 和真实配置。
 func ExplicitDatabaseDSN() string {
 	return strings.TrimSpace(os.Getenv("DB_DSN"))
 }

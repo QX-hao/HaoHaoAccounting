@@ -78,6 +78,46 @@ func TestContentTypeAllowsParameters(t *testing.T) {
 	}
 }
 
+func TestContentTypeRejectsMultipartWithoutBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name        string
+		contentType string
+	}{
+		{name: "missing boundary", contentType: "multipart/form-data"},
+		{name: "empty boundary", contentType: `multipart/form-data; boundary=""`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handlerCalled := false
+			router := gin.New()
+			router.Use(ContentType([]ContentTypeRule{{
+				Method:       http.MethodPost,
+				Path:         "/upload",
+				AllowedTypes: []string{"multipart/form-data"},
+			}}))
+			router.POST("/upload", func(c *gin.Context) {
+				handlerCalled = true
+				c.Status(http.StatusNoContent)
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(""))
+			req.Header.Set("Content-Type", tt.contentType)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusUnsupportedMediaType {
+				t.Fatalf("status = %d, want 415, body = %s", resp.Code, resp.Body.String())
+			}
+			if handlerCalled {
+				t.Fatal("handler ran after multipart request without a boundary")
+			}
+		})
+	}
+}
+
 func TestContentTypeAllowsStructuredJSONMediaTypes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -124,6 +164,63 @@ func TestContentTypeRejectsStructuredJSONOutsideApplicationType(t *testing.T) {
 	}
 }
 
+func TestContentTypeRejectsMalformedHeaderParameters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handlerCalled := false
+	router := gin.New()
+	router.Use(ContentType([]ContentTypeRule{{
+		Method:       http.MethodPost,
+		Path:         "/json",
+		AllowedTypes: []string{"application/json"},
+	}}))
+	router.POST("/json", func(c *gin.Context) {
+		handlerCalled = true
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/json", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", `application/json; charset="unterminated`)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415, body = %s", resp.Code, resp.Body.String())
+	}
+	if handlerCalled {
+		t.Fatal("handler ran after malformed Content-Type header")
+	}
+}
+
+func TestContentTypeRejectsDuplicateHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handlerCalled := false
+	router := gin.New()
+	router.Use(ContentType([]ContentTypeRule{{
+		Method:       http.MethodPost,
+		Path:         "/json",
+		AllowedTypes: []string{"application/json"},
+	}}))
+	router.POST("/json", func(c *gin.Context) {
+		handlerCalled = true
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/json", strings.NewReader("{}"))
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Content-Type", "text/plain")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415, body = %s", resp.Code, resp.Body.String())
+	}
+	if handlerCalled {
+		t.Fatal("handler ran after duplicate Content-Type headers")
+	}
+}
+
 func TestContentTypeIgnoresUnmatchedRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -142,6 +239,74 @@ func TestContentTypeIgnoresUnmatchedRoutes(t *testing.T) {
 
 	if resp.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestContentTypeIgnoresRulesWithoutValidMediaTypes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(ContentType([]ContentTypeRule{{
+		Method:       http.MethodPost,
+		Path:         "/api/v1/example",
+		AllowedTypes: []string{"invalid", "application/"},
+	}}))
+	router.POST("/api/v1/example", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/example", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "text/plain")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestContentTypeIgnoresWildcardAllowedTypes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(ContentType([]ContentTypeRule{{
+		Method:       http.MethodPost,
+		Path:         "/api/v1/example",
+		AllowedTypes: []string{"*/*", "application/*", "application/*+json"},
+	}}))
+	router.POST("/api/v1/example", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/example", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "text/plain")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestNormalizeMediaTypesDeduplicatesAndRejectsInvalidValues(t *testing.T) {
+	got := normalizeMediaTypes([]string{
+		" Application/JSON ",
+		"application/json",
+		"text/csv",
+		"*/*",
+		"application/*",
+		"application/*+json",
+		"application/json; charset=utf-8",
+		"text/csv; header=present",
+		"application/json ; charset=utf-8",
+		"invalid",
+		"",
+		"application/",
+	})
+	want := []string{"application/json", "text/csv"}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeMediaTypes() = %#v, want %#v", got, want)
 	}
 }
 
@@ -243,11 +408,15 @@ type openAPIComponents struct {
 }
 
 type openAPIPathItem struct {
-	Delete *openAPIOperation `yaml:"delete"`
-	Get    *openAPIOperation `yaml:"get"`
-	Patch  *openAPIOperation `yaml:"patch"`
-	Post   *openAPIOperation `yaml:"post"`
-	Put    *openAPIOperation `yaml:"put"`
+	// 覆盖 OpenAPI Path Item 的标准 HTTP 操作，避免契约测试漏掉未来新增的方法。
+	Delete  *openAPIOperation `yaml:"delete"`
+	Get     *openAPIOperation `yaml:"get"`
+	Head    *openAPIOperation `yaml:"head"`
+	Options *openAPIOperation `yaml:"options"`
+	Patch   *openAPIOperation `yaml:"patch"`
+	Post    *openAPIOperation `yaml:"post"`
+	Put     *openAPIOperation `yaml:"put"`
+	Trace   *openAPIOperation `yaml:"trace"`
 }
 
 type openAPIOperation struct {
@@ -277,9 +446,12 @@ func (item openAPIPathItem) operations() []openAPIOperationWithMethod {
 	}{
 		{method: http.MethodDelete, operation: item.Delete},
 		{method: http.MethodGet, operation: item.Get},
+		{method: http.MethodHead, operation: item.Head},
+		{method: http.MethodOptions, operation: item.Options},
 		{method: http.MethodPatch, operation: item.Patch},
 		{method: http.MethodPost, operation: item.Post},
 		{method: http.MethodPut, operation: item.Put},
+		{method: http.MethodTrace, operation: item.Trace},
 	}
 
 	result := make([]openAPIOperationWithMethod, 0, len(operations))

@@ -1,0 +1,24 @@
+# Default reviewer for all repository changes.
+* @QX-hao
+
+# Repository automation and contribution policy.
+/.github/ @QX-hao
+/CONTRIBUTING.md @QX-hao
+/SECURITY.md @QX-hao
+
+# API contracts and generated client pipeline.
+/backend/api/ @QX-hao
+/scripts/generate-api-types.mjs @QX-hao
+/scripts/tests/generate-api-types.test.mjs @QX-hao
+/web/shared/api/ @QX-hao
+/mobile/src/shared/api/ @QX-hao
+
+# Backend runtime, middleware, config, and deployment.
+/backend/cmd/server/ @QX-hao
+/backend/internal/app/ @QX-hao
+/backend/internal/httputil/ @QX-hao
+/backend/internal/middleware/ @QX-hao
+/backend/internal/config/ @QX-hao
+/docker-compose.yaml @QX-hao
+/docker-compose.local.yaml @QX-hao
+/Dockerfile.* @QX-hao

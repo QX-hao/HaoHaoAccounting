@@ -96,10 +96,7 @@ func (s *Service) Delete(ctx context.Context, userID, id uint) error {
 }
 
 func (s *Service) db(ctx context.Context) *gorm.DB {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.store.DB.WithContext(ctx)
+	return s.store.DBWithContext(ctx)
 }
 
 // invalidateUser 清理报表缓存；即使请求已取消，也尽量完成这类写后清理动作。

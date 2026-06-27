@@ -8,6 +8,7 @@ const TOKEN_KEY = 'haohao_token';
 type ApiErrorCode = ErrorResponse['code'] | 'network_error' | '';
 type ApiErrorBody = Partial<ErrorResponse>;
 const API_REQUEST_TIMEOUT_MS = 30_000;
+const sessionInvalidationListeners = new Set<() => void>();
 
 export type ApiResponse<T> = {
   data: T;
@@ -67,6 +68,13 @@ export async function clearToken() {
   await AsyncStorage.removeItem(TOKEN_KEY);
 }
 
+export function onSessionInvalidated(listener: () => void) {
+  sessionInvalidationListeners.add(listener);
+  return () => {
+    sessionInvalidationListeners.delete(listener);
+  };
+}
+
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await requestWithResponse<T>(path, init);
   return response.data;
@@ -95,6 +103,7 @@ export async function requestWithResponse<T>(path: string, init: RequestInit = {
     if (resp.status === 401) {
       // 移动端没有统一路由守卫，收到 401 时先清 token，让页面回到未登录态。
       await clearToken();
+      notifySessionInvalidated();
     }
     const data = await parseErrorBody(resp);
     throw apiError(resp, data);
@@ -126,7 +135,7 @@ export async function download(path: string, accept = '*/*'): Promise<DownloadRe
   const resp = await downloadResponse(path, accept);
   return {
     bytes: new Uint8Array(await resp.arrayBuffer()),
-    filename: filenameFromDisposition(resp.headers.get('Content-Disposition')),
+    filename: filenameFromDisposition(resp.headers.get('Content-Disposition')) || 'download',
     contentType: resp.headers.get('Content-Type') || accept,
   };
 }
@@ -147,6 +156,7 @@ async function downloadResponse(path: string, accept: string) {
   if (!resp.ok) {
     if (resp.status === 401) {
       await clearToken();
+      notifySessionInvalidated();
     }
     const data = await parseErrorBody(resp);
     throw apiError(resp, data);
@@ -157,11 +167,20 @@ async function downloadResponse(path: string, accept: string) {
 export async function logout() {
   const token = await getToken();
   if (!token) return;
+  // 本地先退出，再尽力撤销服务端 token；离线或网络失败时也不会继续复用旧凭据。
+  await clearToken();
+  notifySessionInvalidated();
 
   await fetchAPI('/auth/logout', {
     method: 'POST',
     headers: withRequestId({ Accept: 'application/json', Authorization: `Bearer ${token}` }),
   }).catch(() => undefined);
+}
+
+function notifySessionInvalidated() {
+  for (const listener of sessionInvalidationListeners) {
+    listener();
+  }
 }
 
 function ensureRequestId(headers: Headers) {
@@ -183,10 +202,15 @@ function newRequestId() {
 async function parseErrorBody(resp: Response): Promise<ApiErrorBody> {
   const contentType = resp.headers.get('Content-Type') || '';
   if (isJSONContentType(contentType)) {
-    return resp.json().catch(() => ({}));
+    const data = await resp.json().catch(() => ({}));
+    return isObjectRecord(data) ? data as ApiErrorBody : {};
   }
   const text = await resp.text().catch(() => '');
   return text ? { error: text } : {};
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isJSONContentType(contentType: string) {
@@ -196,19 +220,23 @@ function isJSONContentType(contentType: string) {
 }
 
 async function fetchAPI(path: string, init: RequestInit = {}) {
-  const { signal, cleanup } = requestSignal(init.signal);
+  const request = requestSignal(init.signal);
   try {
-    return await fetch(`${API_BASE}${path}`, { ...init, signal });
+    return await fetch(`${API_BASE}${path}`, { ...init, credentials: 'omit', signal: request.signal });
   } catch (err) {
-    throw networkError(err);
+    throw networkError(err, request.timedOut());
   } finally {
-    cleanup();
+    request.cleanup();
   }
 }
 
 function requestSignal(callerSignal?: AbortSignal | null) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, API_REQUEST_TIMEOUT_MS);
   const abort = () => controller.abort();
   if (callerSignal) {
     if (callerSignal.aborted) {
@@ -219,6 +247,7 @@ function requestSignal(callerSignal?: AbortSignal | null) {
   }
   return {
     signal: controller.signal,
+    timedOut: () => timedOut,
     cleanup: () => {
       // 清理定时器和外部 signal 监听，避免频繁请求后残留回调。
       clearTimeout(timeout);
@@ -227,7 +256,10 @@ function requestSignal(callerSignal?: AbortSignal | null) {
   };
 }
 
-function networkError(err: unknown) {
+function networkError(err: unknown, timedOut = false) {
+  if (timedOut) {
+    return new ApiError('请求超时', 0, 'request_timeout', '', null, null, null, null, '', err);
+  }
   const message = err instanceof Error && err.message ? err.message : '网络请求失败';
   return new ApiError(message, 0, 'network_error', '', null, null, null, null, '', err);
 }
@@ -249,7 +281,7 @@ function apiError(resp: Response, data: ApiErrorBody): ApiError {
 
 function responseStatus(resp: Response, data: ApiErrorBody) {
   const status = data.status;
-  return typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? status : resp.status;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599 ? status : resp.status;
 }
 
 function nonNegativeIntegerHeader(resp: Response, name: string): number | null {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/stringutil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -45,6 +47,36 @@ func TestRequestLogFormatterIncludesRequestID(t *testing.T) {
 	}
 }
 
+func TestRequestLogFormatterRejectsUnsafeRequestID(t *testing.T) {
+	for _, requestID := range []string{
+		strings.Repeat("a", 129),
+		"bad\nid",
+		"bad id",
+	} {
+		t.Run(requestID, func(t *testing.T) {
+			line := requestLogFormatter(gin.LogFormatterParams{
+				TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+				StatusCode: 200,
+				Latency:    10 * time.Millisecond,
+				ClientIP:   "127.0.0.1",
+				Method:     "GET",
+				Path:       "/health",
+				BodySize:   32,
+				Keys: map[string]any{
+					middleware.RequestIDContextKey: requestID,
+				},
+			})
+
+			if !strings.Contains(line, `request_id="-"`) {
+				t.Fatalf("log line = %q, want unsafe request id placeholder", line)
+			}
+			if strings.Contains(line, requestID) {
+				t.Fatalf("log line leaked unsafe request id: %q", line)
+			}
+		})
+	}
+}
+
 func TestRequestLogFormatterDropsQueryString(t *testing.T) {
 	line := requestLogFormatter(gin.LogFormatterParams{
 		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
@@ -60,6 +92,200 @@ func TestRequestLogFormatterDropsQueryString(t *testing.T) {
 	}
 	if strings.Contains(line, "token=secret") || strings.Contains(line, "?start=") {
 		t.Fatalf("log line leaked query string: %s", line)
+	}
+}
+
+func TestRequestLogFormatterIncludesRouteTemplate(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts/123",
+		Keys: map[string]any{
+			requestLogRouteContextKey: "/api/v1/accounts/:id",
+		},
+	})
+
+	if !strings.Contains(line, `path="/api/v1/accounts/123"`) {
+		t.Fatalf("log line = %q, missing concrete path", line)
+	}
+	if !strings.Contains(line, `route="/api/v1/accounts/:id"`) {
+		t.Fatalf("log line = %q, missing route template", line)
+	}
+}
+
+func TestRequestLogFormatterUsesUnmatchedRoutePlaceholder(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 404,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/not-found",
+	})
+
+	if !strings.Contains(line, `route="unmatched"`) {
+		t.Fatalf("log line = %q, missing unmatched route placeholder", line)
+	}
+}
+
+func TestRequestLogFormatterUsesRootForEmptyPath(t *testing.T) {
+	for _, path := range []string{"", "?token=secret"} {
+		t.Run(path, func(t *testing.T) {
+			line := requestLogFormatter(gin.LogFormatterParams{
+				TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+				StatusCode: 200,
+				Latency:    10 * time.Millisecond,
+				ClientIP:   "127.0.0.1",
+				Method:     "GET",
+				Path:       path,
+			})
+
+			if !strings.Contains(line, `path="/"`) {
+				t.Fatalf("log line = %q, missing root path placeholder", line)
+			}
+			if strings.Contains(line, "token=secret") {
+				t.Fatalf("log line leaked query string: %q", line)
+			}
+		})
+	}
+}
+
+func TestRequestLogFormatterBoundsPathLength(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/" + strings.Repeat("a", maxLoggedPathLength+20) + "?token=secret",
+	})
+
+	want := "/" + strings.Repeat("a", maxLoggedPathLength-4) + "..."
+	if !strings.Contains(line, `path="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated path", line)
+	}
+	if strings.Contains(line, strings.Repeat("a", maxLoggedPathLength+1)) || strings.Contains(line, "token=secret") {
+		t.Fatalf("log line contains unbounded or unsanitized path: %q", line)
+	}
+}
+
+func TestRequestLogFormatterTruncatesPathOnCharacterBoundary(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/" + strings.Repeat("好", maxLoggedPathLength+20),
+	})
+
+	want := "/" + strings.Repeat("好", maxLoggedPathLength-4) + "..."
+	if !strings.Contains(line, `path="`+want+`"`) {
+		t.Fatalf("log line = %q, missing character-safe truncated path", line)
+	}
+}
+
+func TestRequestLogFormatterBoundsRouteLength(t *testing.T) {
+	longRoute := "/api/v1/" + strings.Repeat("segment/", maxLoggedRouteLength)
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts",
+		Keys: map[string]any{
+			requestLogRouteContextKey: longRoute,
+		},
+	})
+
+	want := stringutil.TruncateRunes(longRoute, maxLoggedRouteLength)
+	if !strings.Contains(line, `route="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated route", line)
+	}
+	if strings.Contains(line, longRoute) {
+		t.Fatalf("log line contains unbounded route: %q", line)
+	}
+}
+
+func TestRequestLogFormatterEscapesClientControlledFields(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+	req.Header.Set("User-Agent", "HaoHao\nMobile")
+
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:      req,
+		TimeStamp:    time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode:   500,
+		Latency:      10 * time.Millisecond,
+		ClientIP:     "127.0.0.1",
+		Method:       "GET",
+		Path:         "/api/v1/accounts\nforged",
+		ErrorMessage: "db\nfailed",
+	})
+
+	for _, want := range []string{`path="/api/v1/accounts\nforged"`, `user_agent="HaoHao\nMobile"`, `error="db\nfailed"`} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("log line = %q, missing escaped field %s", line, want)
+		}
+	}
+	if strings.Count(line, "\n") != 1 || !strings.HasSuffix(line, "\n") {
+		t.Fatalf("log line should stay single-line: %q", line)
+	}
+}
+
+func TestRequestLogFormatterEscapesMethod(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET\nFORGED",
+		Path:       "/api/v1/accounts",
+	})
+
+	if !strings.Contains(line, `method="GET\nFORGED"`) {
+		t.Fatalf("log line = %q, missing escaped method", line)
+	}
+	if strings.Count(line, "\n") != 1 || !strings.HasSuffix(line, "\n") {
+		t.Fatalf("log line should stay single-line: %q", line)
+	}
+}
+
+func TestRequestLogFormatterBoundsMethodLength(t *testing.T) {
+	method := strings.Repeat("M", maxLoggedMethodLength+20)
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     method,
+		Path:       "/api/v1/accounts",
+	})
+
+	want := stringutil.TruncateRunes(method, maxLoggedMethodLength)
+	if !strings.Contains(line, `method="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated method", line)
+	}
+	if strings.Contains(line, method) {
+		t.Fatalf("log line contains unbounded method: %q", line)
+	}
+}
+
+func TestRequestLogFormatterUsesPlaceholderForEmptyMethod(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "  ",
+		Path:       "/api/v1/accounts",
+	})
+
+	if !strings.Contains(line, `method="-"`) {
+		t.Fatalf("log line = %q, missing empty method placeholder", line)
 	}
 }
 
@@ -81,6 +307,104 @@ func TestRequestLogFormatterIncludesProtocolAndUserAgent(t *testing.T) {
 		if !strings.Contains(line, want) {
 			t.Fatalf("log line = %q, missing %s", line, want)
 		}
+	}
+}
+
+func TestRequestLogFormatterBoundsUserAgentLength(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+	req.Header.Set("User-Agent", strings.Repeat("a", maxLoggedUserAgentLength+20))
+
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:    req,
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts",
+	})
+
+	want := strings.Repeat("a", maxLoggedUserAgentLength-3) + "..."
+	if !strings.Contains(line, `user_agent="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated user agent", line)
+	}
+	if strings.Contains(line, strings.Repeat("a", maxLoggedUserAgentLength+1)) {
+		t.Fatalf("log line contains unbounded user agent: %q", line)
+	}
+}
+
+func TestRequestLogFormatterTruncatesUserAgentOnCharacterBoundary(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil)
+	req.Header.Set("User-Agent", strings.Repeat("好", maxLoggedUserAgentLength+20))
+
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:    req,
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts",
+	})
+
+	want := strings.Repeat("好", maxLoggedUserAgentLength-3) + "..."
+	if !strings.Contains(line, `user_agent="`+want+`"`) {
+		t.Fatalf("log line = %q, missing character-safe truncated user agent", line)
+	}
+}
+
+func TestRequestLogFormatterUsesPlaceholderForMissingUserAgent(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:    httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil),
+		TimeStamp:  time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode: 200,
+		Latency:    10 * time.Millisecond,
+		ClientIP:   "127.0.0.1",
+		Method:     "GET",
+		Path:       "/api/v1/accounts",
+	})
+
+	if !strings.Contains(line, `user_agent="-"`) {
+		t.Fatalf("log line = %q, missing empty user agent placeholder", line)
+	}
+}
+
+func TestRequestLogFormatterBoundsErrorLength(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:      httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil),
+		TimeStamp:    time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode:   500,
+		Latency:      10 * time.Millisecond,
+		ClientIP:     "127.0.0.1",
+		Method:       "GET",
+		Path:         "/api/v1/accounts",
+		ErrorMessage: strings.Repeat("a", maxLoggedErrorLength+20),
+	})
+
+	want := strings.Repeat("a", maxLoggedErrorLength-3) + "..."
+	if !strings.Contains(line, `error="`+want+`"`) {
+		t.Fatalf("log line = %q, missing truncated error", line)
+	}
+	if strings.Contains(line, strings.Repeat("a", maxLoggedErrorLength+1)) {
+		t.Fatalf("log line contains unbounded error: %q", line)
+	}
+}
+
+func TestRequestLogFormatterTruncatesErrorOnCharacterBoundary(t *testing.T) {
+	line := requestLogFormatter(gin.LogFormatterParams{
+		Request:      httptest.NewRequest(http.MethodGet, "/api/v1/accounts", nil),
+		TimeStamp:    time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+		StatusCode:   500,
+		Latency:      10 * time.Millisecond,
+		ClientIP:     "127.0.0.1",
+		Method:       "GET",
+		Path:         "/api/v1/accounts",
+		ErrorMessage: strings.Repeat("好", maxLoggedErrorLength+20),
+	})
+
+	want := strings.Repeat("好", maxLoggedErrorLength-3) + "..."
+	if !strings.Contains(line, `error="`+want+`"`) {
+		t.Fatalf("log line = %q, missing character-safe truncated error", line)
 	}
 }
 
@@ -125,21 +449,51 @@ func TestReadmeDocumentsStartupAndMiddlewareContracts(t *testing.T) {
 		"`CORS_ALLOW_ORIGINS`",
 		"explicit `http` or `https` origins",
 		"wildcards",
+		"trimmed, normalized",
+		"deduplicated",
+		"normalized to browser `Origin` header form",
+		"lowercase scheme/host and default ports removed",
 		"credentials disabled",
 		"`gin-contrib/cors`",
 		"queued resource locations",
 		"`TRUSTED_PROXIES`",
-		"`RequestID` -> `HTTPMetrics` -> `RequestTimeout` -> logger -> `Recovery` -> `SecurityHeaders` -> CORS -> `NoStoreAPI` -> `BodyLimit` -> `ContentType` -> `Accept`",
+		"Leave it empty for direct traffic",
+		"client-supplied `X-Forwarded-*` headers are ignored",
+		"trusted reverse proxy IPs or CIDRs",
+		"`RequestID` -> `HTTPMetrics` -> `RequestTimeout` -> logger -> `captureLogRoute` -> `Recovery` -> `SecurityHeaders` -> `NoStoreAPI` -> CORS -> `BodyLimit` -> `ContentType` -> `Accept`",
 		"no-store API cache headers",
 		"being counted by request metrics",
 		"per-request",
 		"`HTTP_REQUEST_TIMEOUT` defaults to `60s`",
 		"`0s`",
-		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
+		"`SecurityHeaders` writes baseline browser security headers",
+		"`HTTP_HSTS_MAX_AGE_SECONDS`",
+		"`HTTP_HSTS_PRELOAD=true` requires `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`",
+		"`HTTP_CROSS_ORIGIN_EMBEDDER_POLICY`",
+		"`require-corp`, `credentialless`, or `unsafe-none`",
+		"access log records `time`, `status`, `latency`, `client_ip`, `method`, sanitized `path`, low-cardinality Gin `route`, `proto`, `user_agent`, `request_id`, response `bytes`, and `error`",
+		"Dynamic route parameters stay in the `path` field",
+		"replaced by the Gin route pattern in `route`",
+		"`/api/v1/accounts/:id`",
+		"`method` values are trimmed to 32 characters before logging",
+		"`path` values are trimmed to 512 characters before logging",
+		"`route` values are trimmed to 256 characters before logging",
+		"`user_agent` values are trimmed to 256 characters before logging",
+		"`error` values are trimmed to 512 characters before logging",
 		"`HTTP_METRICS_ENABLED=true`",
 		"`HTTP_METRICS_TOKEN`",
 		"`/metrics`",
+		"`promhttp_metric_handler_errors_total`",
+		"scrape gathering or encoding failures",
+		"in-flight HTTP request gauge",
+		"completed HTTP request metrics",
+		"`HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT` limits concurrent scrapes",
+		"`HTTP_METRICS_TIMEOUT` bounds one scrape duration",
+		"`503 Service Unavailable`",
 		"Keep it disabled unless the backend port is protected",
+		"registered before API middleware",
+		"not affected by API `Accept` and `Content-Type` negotiation",
+		"still applies `RequestID`, `Recovery`, `SecurityHeaders`, and `NoCache` revalidation headers",
 		"method, Gin route pattern, and status",
 		"early rejections",
 		"`X-Request-ID`",
@@ -185,13 +539,21 @@ func TestMetricsEndpointExportsHTTPMetrics(t *testing.T) {
 	if secondMetricsResp.Code != http.StatusOK {
 		t.Fatalf("second metrics status = %d, body = %s", secondMetricsResp.Code, secondMetricsResp.Body.String())
 	}
+	if !middleware.ValidRequestID(secondMetricsResp.Header().Get(middleware.RequestIDHeader)) {
+		t.Fatalf("metrics response missing valid request id header: %#v", secondMetricsResp.Header())
+	}
+	assertMetricsNoCacheHeaders(t, secondMetricsResp)
+	assertMetricsSecurityHeaders(t, secondMetricsResp)
 	body := secondMetricsResp.Body.String()
 	for _, want := range []string{
 		`haohao_http_requests_total{method="GET",route="/api/v1/accounts/:id",status="204"} 1`,
 		`haohao_http_request_duration_seconds_bucket{method="GET",route="/api/v1/accounts/:id",status="204"`,
+		`haohao_http_requests_in_flight `,
 		`go_goroutines `,
 		`process_cpu_seconds_total `,
 		`promhttp_metric_handler_requests_total{code="200"} 1`,
+		`promhttp_metric_handler_errors_total{cause="gathering"} 0`,
+		`promhttp_metric_handler_errors_total{cause="encoding"} 0`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q: %s", want, body)
@@ -281,6 +643,163 @@ func TestMetricsEndpointCanRequireBearerToken(t *testing.T) {
 			if resp.Code != tc.status {
 				t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
 			}
+			if !middleware.ValidRequestID(resp.Header().Get(middleware.RequestIDHeader)) {
+				t.Fatalf("metrics response missing valid request id header: %#v", resp.Header())
+			}
+			assertMetricsNoCacheHeaders(t, resp)
+			assertMetricsSecurityHeaders(t, resp)
+		})
+	}
+}
+
+func TestMetricsEndpointRejectsDuplicateAuthorizationHeaders(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	router := gin.New()
+	installMetrics(router, config.Config{HTTP: config.HTTPConfig{
+		MetricsEnabled: true,
+		MetricsToken:   "scrape-secret",
+	}})
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Add("Authorization", "Bearer scrape-secret")
+	req.Header.Add("Authorization", "Bearer scrape-secret")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if !middleware.ValidRequestID(resp.Header().Get(middleware.RequestIDHeader)) {
+		t.Fatalf("metrics response missing valid request id header: %#v", resp.Header())
+	}
+	assertMetricsNoCacheHeaders(t, resp)
+	assertMetricsSecurityHeaders(t, resp)
+}
+
+func TestMetricsEndpointLimitsConcurrentScrapes(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	router := gin.New()
+	registry := prometheus.NewRegistry()
+	registerMetricsRoute(router, registry, config.Config{HTTP: config.HTTPConfig{
+		MetricsEnabled:             true,
+		MetricsMaxRequestsInFlight: 1,
+	}})
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "haohao_test_blocking_metric",
+		Help: "Blocks collection so concurrent scrape limiting can be observed.",
+	}, func() float64 {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+		<-release
+		return 1
+	}))
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		if resp.Code != http.StatusOK {
+			t.Errorf("first scrape status = %d, body = %s", resp.Code, resp.Body.String())
+		}
+	}()
+
+	<-entered
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusServiceUnavailable {
+		close(release)
+		wg.Wait()
+		t.Fatalf("second scrape status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	close(release)
+	wg.Wait()
+}
+
+func TestMetricsEndpointTimesOutSlowScrapes(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	router := gin.New()
+	registry := prometheus.NewRegistry()
+	registerMetricsRoute(router, registry, config.Config{HTTP: config.HTTPConfig{
+		MetricsEnabled:             true,
+		MetricsMaxRequestsInFlight: 1,
+		MetricsTimeout:             time.Nanosecond,
+	}})
+	registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "haohao_test_slow_metric",
+		Help: "Sleeps so scrape timeout behavior can be observed.",
+	}, func() float64 {
+		time.Sleep(time.Second)
+		return 1
+	}))
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func assertMetricsNoCacheHeaders(t *testing.T, resp *httptest.ResponseRecorder) {
+	t.Helper()
+	for header, want := range map[string]string{
+		"Cache-Control": "no-cache",
+		"Pragma":        "no-cache",
+		"Expires":       "0",
+	} {
+		if got := resp.Header().Get(header); got != want {
+			t.Fatalf("%s = %q, want %q", header, got, want)
+		}
+	}
+}
+
+func assertMetricsSecurityHeaders(t *testing.T, resp *httptest.ResponseRecorder) {
+	t.Helper()
+	for header, want := range map[string]string{
+		"Content-Security-Policy":    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+		"Cross-Origin-Opener-Policy": "same-origin",
+		"Referrer-Policy":            "no-referrer",
+		"X-Content-Type-Options":     "nosniff",
+		"X-Frame-Options":            "DENY",
+	} {
+		if got := resp.Header().Get(header); got != want {
+			t.Fatalf("%s = %q, want %q", header, got, want)
+		}
+	}
+}
+
+func TestConstantTimeTokenEqualMatchesExactTokenOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+		ok   bool
+	}{
+		{name: "same", got: "scrape-secret", want: "scrape-secret", ok: true},
+		{name: "different same length", got: "scrape-secret", want: "scrape-secreu", ok: false},
+		{name: "different shorter", got: "short", want: "scrape-secret", ok: false},
+		{name: "different longer", got: "scrape-secret-extra", want: "scrape-secret", ok: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := constantTimeTokenEqual(tc.got, tc.want); got != tc.ok {
+				t.Fatalf("constantTimeTokenEqual(%q, %q) = %v, want %v", tc.got, tc.want, got, tc.ok)
+			}
 		})
 	}
 }
@@ -319,15 +838,17 @@ func TestValidateStartupConfig(t *testing.T) {
 		},
 		Redis: config.RedisConfig{Addr: "127.0.0.1:6379", DB: 0},
 		HTTP: config.HTTPConfig{
-			GinMode:           gin.ReleaseMode,
-			CORSAllowOrigins:  []string{"https://app.example.com"},
-			ReadTimeout:       15 * time.Second,
-			ReadHeaderTimeout: 5 * time.Second,
-			WriteTimeout:      30 * time.Second,
-			IdleTimeout:       60 * time.Second,
-			ShutdownTimeout:   10 * time.Second,
-			MaxHeaderBytes:    1 << 20,
-			MaxBodyBytes:      6 * 1024 * 1024,
+			GinMode:                    gin.ReleaseMode,
+			CORSAllowOrigins:           []string{"https://app.example.com"},
+			ReadTimeout:                15 * time.Second,
+			ReadHeaderTimeout:          5 * time.Second,
+			WriteTimeout:               30 * time.Second,
+			IdleTimeout:                60 * time.Second,
+			ShutdownTimeout:            10 * time.Second,
+			MaxHeaderBytes:             1 << 20,
+			MaxBodyBytes:               6 * 1024 * 1024,
+			MetricsMaxRequestsInFlight: 1,
+			MetricsTimeout:             10 * time.Second,
 		},
 		LoginRateLimit: config.LoginRateLimitConfig{MaxFailures: 5, Window: 10 * time.Minute},
 		Admin:          config.AdminConfig{Username: "admin", Password: "secret-password"},
@@ -378,6 +899,44 @@ func TestApplyGinMode(t *testing.T) {
 	}
 }
 
+func TestTrustedProxiesControlForwardedClientIP(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	for _, tc := range []struct {
+		name           string
+		trustedProxies []string
+		wantClientIP   string
+	}{
+		{name: "untrusted direct client", wantClientIP: "198.51.100.10"},
+		{name: "trusted reverse proxy", trustedProxies: []string{"198.51.100.10"}, wantClientIP: "203.0.113.42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			if err := router.SetTrustedProxies(tc.trustedProxies); err != nil {
+				t.Fatalf("SetTrustedProxies: %v", err)
+			}
+			router.GET("/client-ip", func(c *gin.Context) {
+				c.String(http.StatusOK, c.ClientIP())
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/client-ip", nil)
+			req.RemoteAddr = "198.51.100.10:12345"
+			req.Header.Set("X-Forwarded-For", "203.0.113.42")
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+			}
+			if got := resp.Body.String(); got != tc.wantClientIP {
+				t.Fatalf("ClientIP = %q, want %q", got, tc.wantClientIP)
+			}
+		})
+	}
+}
+
 func TestNewCORSConfigIncludesRequestIDHeader(t *testing.T) {
 	cfg := config.Config{
 		HTTP: config.HTTPConfig{
@@ -410,15 +969,60 @@ func TestNewCORSConfigIncludesRequestIDHeader(t *testing.T) {
 	if !slices.Contains(corsConfig.ExposeHeaders, "Allow") {
 		t.Fatalf("ExposeHeaders = %#v, missing Allow", corsConfig.ExposeHeaders)
 	}
+	if !slices.Contains(corsConfig.ExposeHeaders, "Clear-Site-Data") {
+		t.Fatalf("ExposeHeaders = %#v, missing Clear-Site-Data", corsConfig.ExposeHeaders)
+	}
 	if !slices.Contains(corsConfig.ExposeHeaders, "Location") {
 		t.Fatalf("ExposeHeaders = %#v, missing Location", corsConfig.ExposeHeaders)
+	}
+}
+
+func TestCORSHeaderListsStayMinimalAndDeduplicated(t *testing.T) {
+	corsConfig := newCORSConfig(config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+		},
+	})
+
+	wantAllowHeaders := []string{
+		"Origin",
+		"Content-Type",
+		"Accept",
+		"Authorization",
+		middleware.RequestIDHeader,
+	}
+	if !slices.Equal(corsConfig.AllowHeaders, wantAllowHeaders) {
+		t.Fatalf("AllowHeaders = %#v, want %#v", corsConfig.AllowHeaders, wantAllowHeaders)
+	}
+
+	for name, headers := range map[string][]string{
+		"AllowHeaders":  corsConfig.AllowHeaders,
+		"ExposeHeaders": corsConfig.ExposeHeaders,
+	} {
+		if duplicates := duplicateHeaderNames(headers); len(duplicates) > 0 {
+			t.Fatalf("%s = %#v, duplicate headers = %#v", name, headers, duplicates)
+		}
+	}
+
+	if hasHeaderName(corsConfig.AllowHeaders, "X-Admin-Override") {
+		t.Fatalf("AllowHeaders = %#v, should not allow internal admin override header", corsConfig.AllowHeaders)
+	}
+	for _, header := range []string{"Set-Cookie", "Cookie", "Authorization"} {
+		if hasHeaderName(corsConfig.ExposeHeaders, header) {
+			t.Fatalf("ExposeHeaders = %#v, should not expose %s", corsConfig.ExposeHeaders, header)
+		}
 	}
 }
 
 func TestNewCORSConfigKeepsExplicitOriginsAndNoCredentials(t *testing.T) {
 	cfg := config.Config{
 		HTTP: config.HTTPConfig{
-			CORSAllowOrigins: []string{"https://app.example.com"},
+			CORSAllowOrigins: []string{
+				" https://app.example.com ",
+				"",
+				" http://localhost:3000 ",
+				"https://app.example.com",
+			},
 		},
 	}
 
@@ -430,8 +1034,42 @@ func TestNewCORSConfigKeepsExplicitOriginsAndNoCredentials(t *testing.T) {
 	if corsConfig.AllowCredentials {
 		t.Fatal("AllowCredentials must stay disabled")
 	}
-	if got := corsConfig.AllowOrigins; !slices.Equal(got, []string{"https://app.example.com"}) {
+	if got := corsConfig.AllowOrigins; !slices.Equal(got, []string{"https://app.example.com", "http://localhost:3000"}) {
 		t.Fatalf("AllowOrigins = %#v", got)
+	}
+}
+
+func TestNormalizedCORSOriginsTrimsEmptyAndDeduplicatesInOrder(t *testing.T) {
+	got := normalizedCORSOrigins([]string{
+		" https://app.example.com ",
+		"",
+		"http://localhost:3000",
+		"https://app.example.com",
+		" http://localhost:3000 ",
+	})
+	want := []string{"https://app.example.com", "http://localhost:3000"}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("normalizedCORSOrigins() = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizedCORSOriginsCanonicalizesBrowserOriginForm(t *testing.T) {
+	got := normalizedCORSOrigins([]string{
+		" https://APP.example.com:443 ",
+		"https://app.example.com",
+		"HTTP://LOCALHOST:80",
+		"http://localhost",
+		"http://127.0.0.1:3000",
+	})
+	want := []string{
+		"https://app.example.com",
+		"http://localhost",
+		"http://127.0.0.1:3000",
+	}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("normalizedCORSOrigins() = %#v, want %#v", got, want)
 	}
 }
 
@@ -456,6 +1094,63 @@ func TestCORSAllowMethodsCoverRegisteredAPIMethods(t *testing.T) {
 		if !slices.Contains(corsConfig.AllowMethods, route.Method) {
 			t.Fatalf("AllowMethods = %#v, missing %s for %s", corsConfig.AllowMethods, route.Method, route.Path)
 		}
+	}
+}
+
+func TestCORSAllowMethodsStayMinimalAndDeduplicated(t *testing.T) {
+	corsConfig := newCORSConfig(config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+		},
+	})
+
+	want := []string{
+		http.MethodGet,
+		http.MethodHead,
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodDelete,
+		http.MethodOptions,
+	}
+	if !slices.Equal(corsConfig.AllowMethods, want) {
+		t.Fatalf("AllowMethods = %#v, want %#v", corsConfig.AllowMethods, want)
+	}
+	if slices.Contains(corsConfig.AllowMethods, http.MethodTrace) || slices.Contains(corsConfig.AllowMethods, http.MethodConnect) {
+		t.Fatalf("AllowMethods = %#v, must not expose TRACE or CONNECT", corsConfig.AllowMethods)
+	}
+	if len(corsConfig.AllowMethods) != len(slices.Compact(slices.Clone(corsConfig.AllowMethods))) {
+		t.Fatalf("AllowMethods = %#v, contains duplicates", corsConfig.AllowMethods)
+	}
+}
+
+func TestCORSAllowsCanonicalizedConfiguredOrigins(t *testing.T) {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	cfg := config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://APP.example.com:443"},
+			MaxBodyBytes:     6 * 1024 * 1024,
+		},
+	}
+	router := gin.New()
+	applyGlobalMiddleware(router, cfg, middleware.NewHTTPMetrics(prometheus.NewRegistry()))
+	router.GET("/api/v1/me", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
 	}
 }
 
@@ -571,11 +1266,15 @@ type serverTestOpenAPIComponents struct {
 }
 
 type serverTestOpenAPIPathItem struct {
-	Delete *serverTestOpenAPIOperation `yaml:"delete"`
-	Get    *serverTestOpenAPIOperation `yaml:"get"`
-	Patch  *serverTestOpenAPIOperation `yaml:"patch"`
-	Post   *serverTestOpenAPIOperation `yaml:"post"`
-	Put    *serverTestOpenAPIOperation `yaml:"put"`
+	// 覆盖 OpenAPI Path Item 的标准 HTTP 操作，避免 CORS 响应头契约漏检。
+	Delete  *serverTestOpenAPIOperation `yaml:"delete"`
+	Get     *serverTestOpenAPIOperation `yaml:"get"`
+	Head    *serverTestOpenAPIOperation `yaml:"head"`
+	Options *serverTestOpenAPIOperation `yaml:"options"`
+	Patch   *serverTestOpenAPIOperation `yaml:"patch"`
+	Post    *serverTestOpenAPIOperation `yaml:"post"`
+	Put     *serverTestOpenAPIOperation `yaml:"put"`
+	Trace   *serverTestOpenAPIOperation `yaml:"trace"`
 }
 
 type serverTestOpenAPIOperation struct {
@@ -588,7 +1287,16 @@ type serverTestOpenAPIResponse struct {
 }
 
 func (item serverTestOpenAPIPathItem) operations() []*serverTestOpenAPIOperation {
-	operations := []*serverTestOpenAPIOperation{item.Delete, item.Get, item.Patch, item.Post, item.Put}
+	operations := []*serverTestOpenAPIOperation{
+		item.Delete,
+		item.Get,
+		item.Head,
+		item.Options,
+		item.Patch,
+		item.Post,
+		item.Put,
+		item.Trace,
+	}
 	result := make([]*serverTestOpenAPIOperation, 0, len(operations))
 	for _, operation := range operations {
 		if operation != nil {
@@ -636,6 +1344,7 @@ func TestValidateCORSConfig(t *testing.T) {
 		{"https://app.example.com:bad"},
 		{"https:///app.example.com"},
 		{},
+		{" ", ""},
 	} {
 		t.Run(strings.Join(origins, ","), func(t *testing.T) {
 			cfg := config.Config{HTTP: config.HTTPConfig{CORSAllowOrigins: origins}}
@@ -750,6 +1459,34 @@ func TestLoggerConfigIncludesStructuredErrorSummary(t *testing.T) {
 	}
 	if strings.Contains(got, "password=secret") || strings.Contains(got, "raw user input") {
 		t.Fatalf("api log leaked response message: %q", got)
+	}
+}
+
+func TestLoggerConfigIncludesCapturedRouteTemplate(t *testing.T) {
+	previousMode := gin.Mode()
+	previousWriter := gin.DefaultWriter
+	t.Cleanup(func() {
+		gin.SetMode(previousMode)
+		gin.DefaultWriter = previousWriter
+	})
+	gin.SetMode(gin.TestMode)
+
+	var logOutput bytes.Buffer
+	gin.DefaultWriter = &logOutput
+	router := gin.New()
+	router.Use(gin.LoggerWithConfig(newLoggerConfig()), captureLogRoute())
+	router.GET("/api/v1/accounts/:id", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/accounts/123", nil))
+
+	got := logOutput.String()
+	if !strings.Contains(got, `path="/api/v1/accounts/123"`) {
+		t.Fatalf("api log = %q, missing concrete path", got)
+	}
+	if !strings.Contains(got, `route="/api/v1/accounts/:id"`) {
+		t.Fatalf("api log = %q, missing route template", got)
 	}
 }
 
@@ -883,8 +1620,42 @@ func TestCORSPreflightKeepsGlobalMiddlewareHeaders(t *testing.T) {
 	if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q", got)
 	}
+	if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := resp.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q", got)
+	}
+	if got := resp.Header().Get("Expires"); got != "0" {
+		t.Fatalf("Expires = %q", got)
+	}
 	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-preflight" {
 		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
+	}
+}
+
+func TestCORSPreflightAllowsHEADProbes(t *testing.T) {
+	router := newCORSMiddlewareTestRouter(t)
+	router.HEAD("/readyz", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/readyz", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	req.Header.Set("Access-Control-Request-Method", http.MethodHead)
+	req.Header.Set("Access-Control-Request-Headers", middleware.RequestIDHeader)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body = %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Methods"); !headerHasToken(got, http.MethodHead) {
+		t.Fatalf("Access-Control-Allow-Methods = %q, missing %s", got, http.MethodHead)
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Headers"); !headerHasToken(got, middleware.RequestIDHeader) {
+		t.Fatalf("Access-Control-Allow-Headers = %q, missing %s", got, middleware.RequestIDHeader)
 	}
 }
 
@@ -912,8 +1683,20 @@ func TestCORSAllowedOriginExposesClientHeaders(t *testing.T) {
 	if got := resp.Header().Get("Access-Control-Allow-Credentials"); got != "" {
 		t.Fatalf("Access-Control-Allow-Credentials = %q, want empty", got)
 	}
+	if got := resp.Header().Get("Vary"); !headerHasToken(got, "Origin") {
+		t.Fatalf("Vary = %q, missing Origin", got)
+	}
+	if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := resp.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q", got)
+	}
+	if got := resp.Header().Get("Expires"); got != "0" {
+		t.Fatalf("Expires = %q", got)
+	}
 	exposeHeaders := resp.Header().Get("Access-Control-Expose-Headers")
-	for _, header := range []string{"Allow", "Content-Disposition", "Link", "Location", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "WWW-Authenticate", "Retry-After", "X-Total-Count", middleware.RequestIDHeader} {
+	for _, header := range []string{"Allow", "Clear-Site-Data", "Content-Disposition", "Link", "Location", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset", "WWW-Authenticate", "Retry-After", "X-Total-Count", middleware.RequestIDHeader} {
 		if !headerHasToken(exposeHeaders, header) {
 			t.Fatalf("Access-Control-Expose-Headers = %q, missing %s", exposeHeaders, header)
 		}
@@ -924,6 +1707,97 @@ func TestCORSAllowedOriginExposesClientHeaders(t *testing.T) {
 	if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-cors-expose" {
 		t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
 	}
+}
+
+func TestCORSExposesRuntimeRateLimitHeaders(t *testing.T) {
+	router := newCORSAppRouter(t, config.LoginRateLimitConfig{MaxFailures: 1, Window: time.Minute})
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		req.Header.Set("Origin", "https://app.example.com")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(middleware.RequestIDHeader, "request-rate-limit")
+		resp := httptest.NewRecorder()
+
+		router.ServeHTTP(resp, req)
+
+		if attempt == 1 {
+			if resp.Code != http.StatusUnauthorized {
+				t.Fatalf("first login status = %d, want 401, body = %s", resp.Code, resp.Body.String())
+			}
+			continue
+		}
+		if resp.Code != http.StatusTooManyRequests {
+			t.Fatalf("blocked login status = %d, want 429, body = %s", resp.Code, resp.Body.String())
+		}
+		for header, want := range map[string]string{
+			"Retry-After":         "60",
+			"RateLimit-Limit":     "1",
+			"RateLimit-Remaining": "0",
+			"RateLimit-Reset":     "60",
+		} {
+			if got := resp.Header().Get(header); got != want {
+				t.Fatalf("%s = %q, want %q", header, got, want)
+			}
+			if expose := resp.Header().Get("Access-Control-Expose-Headers"); !headerHasToken(expose, header) {
+				t.Fatalf("Access-Control-Expose-Headers = %q, missing %s", expose, header)
+			}
+		}
+		if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+			t.Fatalf("Access-Control-Allow-Origin = %q", got)
+		}
+	}
+}
+
+func TestCORSExposesRuntimeAuthenticateChallenge(t *testing.T) {
+	router := newCORSAppRouter(t, config.LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	req.Header.Set(middleware.RequestIDHeader, "request-auth-challenge")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api"` {
+		t.Fatalf("WWW-Authenticate = %q", got)
+	}
+	if expose := resp.Header().Get("Access-Control-Expose-Headers"); !headerHasToken(expose, "WWW-Authenticate") {
+		t.Fatalf("Access-Control-Expose-Headers = %q, missing WWW-Authenticate", expose)
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+	if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+func newCORSAppRouter(t *testing.T, limiter config.LoginRateLimitConfig) *gin.Engine {
+	t.Helper()
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	cfg := config.Config{
+		HTTP: config.HTTPConfig{
+			CORSAllowOrigins: []string{"https://app.example.com"},
+			MaxBodyBytes:     6 * 1024 * 1024,
+		},
+		Admin:          config.AdminConfig{Username: "admin", Password: "secret-password", Name: "管理员"},
+		LoginRateLimit: config.LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		JWT:            config.JWTConfig{Secret: "test-jwt-secret-with-at-least-32-chars", TTL: time.Hour, Issuer: "issuer", Audience: "api"},
+	}
+	cfg.LoginRateLimit = limiter
+	router := gin.New()
+	applyGlobalMiddleware(router, cfg, middleware.NewHTTPMetrics(prometheus.NewRegistry()))
+	if err := app.RegisterRoutesWithConfig(router, testutil.NewStore(t), nil, cfg); err != nil {
+		t.Fatalf("register routes: %v", err)
+	}
+	return router
 }
 
 func TestCORSIgnoresSameOriginRequestsWithOriginHeader(t *testing.T) {
@@ -1039,6 +1913,15 @@ func TestCORSRejectsUntrustedOriginsWithoutAllowHeaders(t *testing.T) {
 			if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 				t.Fatalf("X-Content-Type-Options = %q", got)
 			}
+			if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control = %q", got)
+			}
+			if got := resp.Header().Get("Pragma"); got != "no-cache" {
+				t.Fatalf("Pragma = %q", got)
+			}
+			if got := resp.Header().Get("Expires"); got != "0" {
+				t.Fatalf("Expires = %q", got)
+			}
 			if got := resp.Header().Get(middleware.RequestIDHeader); got != "request-denied-cors" {
 				t.Fatalf("%s = %q", middleware.RequestIDHeader, got)
 			}
@@ -1070,6 +1953,26 @@ func headerHasToken(value, token string) bool {
 		}
 	}
 	return false
+}
+
+func hasHeaderName(headers []string, name string) bool {
+	return slices.ContainsFunc(headers, func(header string) bool {
+		return strings.EqualFold(strings.TrimSpace(header), name)
+	})
+}
+
+func duplicateHeaderNames(headers []string) []string {
+	seen := make(map[string]struct{}, len(headers))
+	var duplicates []string
+	for _, header := range headers {
+		normalized := strings.ToLower(strings.TrimSpace(header))
+		if _, ok := seen[normalized]; ok {
+			duplicates = append(duplicates, header)
+			continue
+		}
+		seen[normalized] = struct{}{}
+	}
+	return duplicates
 }
 
 func TestFallbackResponsesKeepGlobalMiddlewareHeaders(t *testing.T) {

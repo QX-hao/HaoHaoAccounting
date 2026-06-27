@@ -2,6 +2,7 @@ package dataio
 
 import (
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,13 +36,14 @@ func (h *Handler) Register(group *gin.RouterGroup) {
 func (h *Handler) exportData(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	var query exportQuery
-	if err := c.ShouldBindQuery(&query); err != nil {
+	if err := httputil.BindQuery(c, &query); err != nil {
 		httputil.InvalidRequest(c, "invalid query parameters")
 		return
 	}
-	format := strings.TrimSpace(query.Format)
-	if format == "" {
-		format = "csv"
+	format, ok := normalizedExportFormat(query.Format)
+	if !ok {
+		httputil.InvalidRequest(c, "format must be csv or xlsx")
+		return
 	}
 	start, end, err := timeutil.ResolveRangeStrict(query.Start, query.End)
 	if err != nil {
@@ -66,19 +68,30 @@ func (h *Handler) exportData(c *gin.Context) {
 	}
 }
 
+func normalizedExportFormat(value string) (string, bool) {
+	format := strings.ToLower(strings.TrimSpace(value))
+	if format == "" {
+		return "csv", true
+	}
+	if format == "csv" || format == "xlsx" {
+		return format, true
+	}
+	return "", false
+}
+
 func (h *Handler) importData(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	file, err := c.FormFile("file")
-	if err != nil {
-		if middleware.HandleBodyReadError(c, err) {
-			return
-		}
-		httputil.BadRequest(c, "file is required")
+	file, ok := requiredImportFile(c)
+	if !ok {
+		return
+	}
+	skipDuplicates, ok := importSkipDuplicates(c)
+	if !ok {
 		return
 	}
 
 	result, err := h.service.ImportWithOptions(c.Request.Context(), uid, file, ImportOptions{
-		SkipDuplicates: parseBoolDefault(c.PostForm("skipDuplicates"), true),
+		SkipDuplicates: skipDuplicates,
 	})
 	if err != nil {
 		httputil.BadRequest(c, err.Error())
@@ -89,12 +102,8 @@ func (h *Handler) importData(c *gin.Context) {
 
 func (h *Handler) previewImport(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	file, err := c.FormFile("file")
-	if err != nil {
-		if middleware.HandleBodyReadError(c, err) {
-			return
-		}
-		httputil.BadRequest(c, "file is required")
+	file, ok := requiredImportFile(c)
+	if !ok {
 		return
 	}
 
@@ -108,24 +117,47 @@ func (h *Handler) previewImport(c *gin.Context) {
 
 func (h *Handler) createImportJob(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
-	file, err := c.FormFile("file")
-	if err != nil {
-		if middleware.HandleBodyReadError(c, err) {
-			return
-		}
-		httputil.BadRequest(c, "file is required")
+	file, ok := requiredImportFile(c)
+	if !ok {
+		return
+	}
+	skipDuplicates, ok := importSkipDuplicates(c)
+	if !ok {
 		return
 	}
 
 	job, err := h.service.StartImportJob(c.Request.Context(), uid, file, ImportOptions{
-		SkipDuplicates: parseBoolDefault(c.PostForm("skipDuplicates"), true),
+		SkipDuplicates: skipDuplicates,
 	})
 	if err != nil {
 		httputil.BadRequest(c, err.Error())
 		return
 	}
-	httputil.SetCreatedLocation(c, job.ID)
+	httputil.SetResourceLocation(c, job.ID)
 	c.JSON(http.StatusAccepted, job)
+}
+
+// requiredImportFile 统一读取 multipart 的必填 file 字段，并保留上传体超限时的 413 映射。
+func requiredImportFile(c *gin.Context) (*multipart.FileHeader, bool) {
+	file, err := c.FormFile("file")
+	if err == nil {
+		return file, true
+	}
+	if middleware.HandleBodyReadError(c, err) {
+		return nil, false
+	}
+	httputil.InvalidRequest(c, "file is required")
+	return nil, false
+}
+
+// importSkipDuplicates 解析导入表单的 skipDuplicates；缺省为 true，显式非法值返回 invalid_request。
+func importSkipDuplicates(c *gin.Context) (bool, bool) {
+	value, ok := parseBoolDefault(c.PostForm("skipDuplicates"), true)
+	if !ok {
+		httputil.InvalidRequest(c, "skipDuplicates must be a boolean")
+		return false, false
+	}
+	return value, true
 }
 
 func (h *Handler) listImportJobs(c *gin.Context) {
@@ -203,14 +235,15 @@ func importLineError(index int, err error) string {
 	return fmt.Sprintf("line %d: %v", index+2, err)
 }
 
-func parseBoolDefault(value string, fallback bool) bool {
+// parseBoolDefault 只在字段缺省时使用默认值；显式传入非法布尔值时返回 ok=false。
+func parseBoolDefault(value string, fallback bool) (parsed bool, ok bool) {
 	clean := strings.TrimSpace(value)
 	if clean == "" {
-		return fallback
+		return fallback, true
 	}
 	parsed, err := strconv.ParseBool(clean)
 	if err != nil {
-		return fallback
+		return false, false
 	}
-	return parsed
+	return parsed, true
 }

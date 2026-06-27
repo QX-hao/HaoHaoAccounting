@@ -79,6 +79,7 @@ func TestCreateRejectsInvalidRequestBody(t *testing.T) {
 		`{"name":"","type":"income"}`,
 		`{"name":"Bonus","type":""}`,
 		`{"name":"Bonus","type":"transfer"}`,
+		`{"name":"Bonus","name":"Salary","type":"income"}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/categories", strings.NewReader(body))

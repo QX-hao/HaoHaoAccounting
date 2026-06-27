@@ -14,7 +14,11 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 )
 
-const userContextKey = "user_id"
+const (
+	userContextKey        = "user_id"
+	bearerTokenContextKey = "bearer_token"
+	maxBearerTokenLength  = 4096
+)
 
 type jwtClaims struct {
 	jwt.RegisteredClaims
@@ -32,10 +36,12 @@ type TokenService struct {
 	audience string
 }
 
+// NewTokenService 使用生产默认 issuer/audience 和有效期创建 JWT 服务。
 func NewTokenService(secret string) (*TokenService, error) {
 	return NewTokenServiceWithTTL(secret, 7*24*time.Hour, 30*time.Second, "haohao-accounting", "haohao-accounting-api")
 }
 
+// NewTokenServiceWithTTL 校验 JWT 密钥、有效期、时钟偏移、issuer 和 audience 后创建服务。
 func NewTokenServiceWithTTL(secret string, ttl, leeway time.Duration, issuer, audience string) (*TokenService, error) {
 	secret = strings.TrimSpace(secret)
 	issuer = strings.TrimSpace(issuer)
@@ -61,10 +67,12 @@ func NewTokenServiceWithTTL(secret string, ttl, leeway time.Duration, issuer, au
 	return &TokenService{secret: secret, ttl: ttl, leeway: leeway, issuer: issuer, audience: audience}, nil
 }
 
+// BuildToken 按默认有效期为用户生成 HS256 JWT。
 func (s *TokenService) BuildToken(userID uint) (string, error) {
 	return s.BuildTokenWithTTL(userID, s.ttl)
 }
 
+// BuildTokenWithTTL 按指定有效期生成带 subject、issuer、audience、iat 和 exp 的 HS256 JWT。
 func (s *TokenService) BuildTokenWithTTL(userID uint, ttl time.Duration) (string, error) {
 	if ttl <= 0 {
 		return "", errors.New("JWT_TTL must be positive")
@@ -76,6 +84,7 @@ func (s *TokenService) BuildTokenWithTTL(userID uint, ttl time.Duration) (string
 			Issuer:    s.issuer,
 			Audience:  jwt.ClaimStrings{s.audience},
 			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
 	}
@@ -83,6 +92,7 @@ func (s *TokenService) BuildTokenWithTTL(userID uint, ttl time.Duration) (string
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(s.secret))
 }
 
+// ParseToken 校验签名算法、过期时间、签发时间、issuer 和 audience，并返回正整数用户 id。
 func (s *TokenService) ParseToken(token string) (uint, error) {
 	claims, err := s.parseClaims(token)
 	if err != nil {
@@ -99,6 +109,7 @@ func (s *TokenService) ParseToken(token string) (uint, error) {
 	return uint(id), nil
 }
 
+// TokenExpiresAt 返回 token 的过期时间，供撤销缓存计算保留时长。
 func (s *TokenService) TokenExpiresAt(token string) (time.Time, error) {
 	claims, err := s.parseClaims(token)
 	if err != nil {
@@ -117,6 +128,7 @@ func maxUint() uint64 {
 	return math.MaxUint64
 }
 
+// TokenRevocationExpiresAt 返回撤销记录应保留到的时间，包含解析 token 时允许的时钟偏移。
 func (s *TokenService) TokenRevocationExpiresAt(token string) (time.Time, error) {
 	expiresAt, err := s.TokenExpiresAt(token)
 	if err != nil {
@@ -153,9 +165,16 @@ func RequireAuth() gin.HandlerFunc {
 	return RequireAuthWithRevocation(nil, nil)
 }
 
+// RequireAuthWithRevocation 校验 Bearer JWT，并在撤销检查失败或 token 已撤销时失败关闭。
 func RequireAuthWithRevocation(checker TokenRevocationChecker, tokenService *TokenService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token, ok := BearerToken(c.GetHeader("Authorization"))
+		values := c.Request.Header.Values("Authorization")
+		if len(values) != 1 {
+			httputil.Unauthorized(c, "invalid Authorization format")
+			c.Abort()
+			return
+		}
+		token, ok := BearerToken(values[0])
 		if !ok {
 			httputil.Unauthorized(c, "invalid Authorization format")
 			c.Abort()
@@ -186,11 +205,15 @@ func RequireAuthWithRevocation(checker TokenRevocationChecker, tokenService *Tok
 				return
 			}
 		}
+		// 认证成功后不再把明文 Authorization 头透传给业务 handler，降低日志或错误处理误泄露 token 的风险。
+		c.Request.Header.Del("Authorization")
 		c.Set(userContextKey, userID)
+		c.Set(bearerTokenContextKey, token)
 		c.Next()
 	}
 }
 
+// BearerToken 按 RFC 6750 从 Authorization 头解析 Bearer token68 凭据。
 func BearerToken(auth string) (string, bool) {
 	scheme, token, ok := splitBearerCredentials(strings.TrimSpace(auth))
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
@@ -218,8 +241,9 @@ func splitBearerCredentials(auth string) (string, string, bool) {
 	return auth[:separatorStart], auth[separatorEnd:], true
 }
 
+// ValidBearerTokenValue 校验 token68 字符集和尾部 padding 规则。
 func ValidBearerTokenValue(token string) bool {
-	if token == "" {
+	if token == "" || len(token) > maxBearerTokenLength {
 		return false
 	}
 	paddingStarted := false
@@ -256,6 +280,7 @@ func isBearerTokenChar(r rune) bool {
 		r == '/'
 }
 
+// UserIDFromContext 读取认证中间件写入的用户 id，缺失或类型不匹配时返回 0。
 func UserIDFromContext(c *gin.Context) uint {
 	v, ok := c.Get(userContextKey)
 	if !ok {
@@ -266,4 +291,17 @@ func UserIDFromContext(c *gin.Context) uint {
 		return 0
 	}
 	return id
+}
+
+// BearerTokenFromContext 返回认证中间件已经校验过的 token，供刷新/登出时写入撤销列表。
+func BearerTokenFromContext(c *gin.Context) (string, bool) {
+	v, ok := c.Get(bearerTokenContextKey)
+	if !ok {
+		return "", false
+	}
+	token, ok := v.(string)
+	if !ok || !ValidBearerTokenValue(token) {
+		return "", false
+	}
+	return token, true
 }

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -81,22 +82,81 @@ func TestRequestTimeoutWritesGatewayTimeoutWhenHandlerLeavesResponseEmpty(t *tes
 	}
 }
 
-func TestRequestTimeoutDisabledDoesNotSetDeadline(t *testing.T) {
+func TestRequestTimeoutMapsCanceledParentContextToClientClosedRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	router.Use(RequestTimeout(0))
-	router.GET("/ping", func(c *gin.Context) {
-		if _, ok := c.Request.Context().Deadline(); ok {
-			t.Fatal("expected no request context deadline")
-		}
-		c.Status(http.StatusNoContent)
+	router.Use(RequestID(), RequestTimeout(time.Second))
+	router.GET("/slow", func(c *gin.Context) {
+		<-c.Request.Context().Done()
+	})
+
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "/slow", nil).WithContext(parent)
+	req.Header.Set(RequestIDHeader, "request-canceled")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != httputil.StatusClientClosedRequest {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get(RequestIDHeader); got != "request-canceled" {
+		t.Fatalf("request id header = %q", got)
+	}
+	var body httputil.ErrorResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Code != httputil.CodeClientClosedRequest || body.RequestID != "request-canceled" {
+		t.Fatalf("body = %#v", body)
+	}
+	if body.Error != "client closed request" {
+		t.Fatalf("error = %q", body.Error)
+	}
+}
+
+func TestRequestTimeoutDoesNotOverwriteWrittenResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(RequestTimeout(10 * time.Millisecond))
+	router.GET("/stream", func(c *gin.Context) {
+		c.String(http.StatusAccepted, "accepted")
+		<-c.Request.Context().Done()
 	})
 
 	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/ping", nil))
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/stream", nil))
 
-	if resp.Code != http.StatusNoContent {
+	if resp.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); got != "accepted" {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestRequestTimeoutDisabledDoesNotSetDeadline(t *testing.T) {
+	for _, timeout := range []time.Duration{0, -time.Second} {
+		t.Run(timeout.String(), func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+
+			router := gin.New()
+			router.Use(RequestTimeout(timeout))
+			router.GET("/ping", func(c *gin.Context) {
+				if _, ok := c.Request.Context().Deadline(); ok {
+					t.Fatal("expected no request context deadline")
+				}
+				c.Status(http.StatusNoContent)
+			})
+
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/ping", nil))
+
+			if resp.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+			}
+		})
 	}
 }

@@ -27,9 +27,11 @@ The HTTP server still keeps GORM `AutoMigrate` for local compatibility, but prod
 
 ## API Contract
 
-The OpenAPI contract lives in `api/openapi.yaml`. Regenerate web/mobile TypeScript types from the repository root:
+The business API contract lives in `api/openapi.yaml`. Regenerate web/mobile TypeScript types from the repository root:
 
 ```bash
 npm run generate:api-types
 npm run verify:api-contract
 ```
+
+The root health probe contract lives separately in `api/health-openapi.yaml` because `/livez`, `/readyz`, and `/health` are operational endpoints, not generated business-client endpoints.

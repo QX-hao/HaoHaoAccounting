@@ -24,7 +24,7 @@ func (h *Handler) Register(group *gin.RouterGroup) {
 func (h *Handler) summary(c *gin.Context) {
 	uid := middleware.UserIDFromContext(c)
 	var query summaryQuery
-	if err := c.ShouldBindQuery(&query); err != nil {
+	if err := httputil.BindQuery(c, &query); err != nil {
 		httputil.InvalidRequest(c, "invalid query parameters")
 		return
 	}

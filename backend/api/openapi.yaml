@@ -6,9 +6,19 @@ info:
     Cross-origin browser requests must come from an origin configured in CORS_ALLOW_ORIGINS.
     Requests from other origins are rejected by CORS middleware with 403 before route handlers run
     and do not include Access-Control-Allow-Origin.
+    API paths are matched exactly as documented; trailing slash or extra slash variants are not
+    redirected or normalized and return the structured not_found response.
+    Query parameters are single-value unless an operation explicitly documents an array; repeated scalar query keys return the structured invalid_request response.
+    JSON request bodies reject unknown fields, duplicate object keys, and multiple top-level JSON values before binding validation.
+  contact:
+    name: HaoHaoAccounting Maintainers
+    url: https://github.com/QX-hao/HaoHaoAccounting/security
 servers:
   - url: http://localhost:8080/api/v1
     description: Local development API server.
+externalDocs:
+  description: Repository API contract and verification workflow.
+  url: https://github.com/QX-hao/HaoHaoAccounting/tree/dev-pxhao#协作与安全
 tags:
   - name: auth
     description: Authentication and current user endpoints.
@@ -43,6 +53,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/LoginRequest'
       responses:
@@ -77,7 +88,7 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '406':
           $ref: '#/components/responses/NotAcceptable'
         '405':
@@ -86,6 +97,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -128,6 +141,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /auth/logout:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -138,7 +153,24 @@ paths:
       description: Revokes the presented bearer token so it cannot be used for later authenticated requests.
       responses:
         '200':
-          $ref: '#/components/responses/Ok'
+          description: Logout success
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Pragma:
+              $ref: '#/components/headers/Pragma'
+            Expires:
+              $ref: '#/components/headers/Expires'
+            Vary:
+              $ref: '#/components/headers/Vary'
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+            Clear-Site-Data:
+              $ref: '#/components/headers/ClearSiteData'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -149,6 +181,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /me:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -187,6 +221,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /accounts:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -225,6 +261,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [accounts]
       operationId: postAccounts
@@ -235,6 +273,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/AccountRequest'
       responses:
@@ -258,7 +297,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Account'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -269,6 +308,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -288,6 +329,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/AccountRequest'
       responses:
@@ -309,7 +351,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Account'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -322,6 +364,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -348,6 +392,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /budgets:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -385,7 +431,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/Budget'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -396,6 +442,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [budgets]
       operationId: postBudgets
@@ -406,6 +454,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/BudgetRequest'
       responses:
@@ -429,7 +478,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Budget'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -442,6 +491,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -461,6 +512,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/BudgetRequest'
       responses:
@@ -482,7 +534,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Budget'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -495,6 +547,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -523,6 +577,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /categories:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -559,7 +615,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/Category'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -570,6 +626,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [categories]
       operationId: postCategories
@@ -580,6 +638,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/CategoryRequest'
       responses:
@@ -603,7 +662,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Category'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -614,6 +673,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -633,6 +694,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/CategoryRequest'
       responses:
@@ -654,7 +716,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Category'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -669,6 +731,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -699,6 +763,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /transactions:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -789,7 +855,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TransactionListResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -800,6 +866,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [transactions]
       operationId: postTransactions
@@ -810,6 +878,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/TransactionRequest'
       responses:
@@ -833,7 +902,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Transaction'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -844,6 +913,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -863,6 +934,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/TransactionRequest'
       responses:
@@ -884,7 +956,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Transaction'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -897,6 +969,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
@@ -923,6 +997,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /ai/parse:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -936,6 +1012,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/AIParseRequest'
       responses:
@@ -957,7 +1034,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AIParseResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1032,7 +1109,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Summary'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -1043,6 +1120,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
   /io/import/preview:
     parameters:
       - $ref: '#/components/parameters/RequestID'
@@ -1056,6 +1135,7 @@ paths:
         required: true
         content:
           multipart/form-data:
+            description: 'Accepts `Content-Type: multipart/form-data; boundary=<non-empty-boundary>` with a required `file` field.'
             schema:
               $ref: '#/components/schemas/ImportFileRequest'
       responses:
@@ -1077,7 +1157,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportPreview'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1101,6 +1181,7 @@ paths:
         required: true
         content:
           multipart/form-data:
+            description: 'Accepts `Content-Type: multipart/form-data; boundary=<non-empty-boundary>` with a required `file` field.'
             schema:
               $ref: '#/components/schemas/ImportFileRequest'
       responses:
@@ -1122,7 +1203,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1171,6 +1252,8 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
     post:
       tags: [dataio]
       operationId: postIoImportJobs
@@ -1181,6 +1264,7 @@ paths:
         required: true
         content:
           multipart/form-data:
+            description: 'Accepts `Content-Type: multipart/form-data; boundary=<non-empty-boundary>` with a required `file` field.'
             schema:
               $ref: '#/components/schemas/ImportFileRequest'
       responses:
@@ -1204,7 +1288,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportJob'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1264,6 +1348,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/ImportTextRequest'
       responses:
@@ -1285,7 +1370,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportPreview'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1309,6 +1394,7 @@ paths:
         required: true
         content:
           application/json:
+            description: 'Accepts `Content-Type: application/json`, optional media type parameters such as `charset=utf-8`, and `application/*+json` structured JSON media types.'
             schema:
               $ref: '#/components/schemas/ImportTextRequest'
       responses:
@@ -1330,7 +1416,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '413':
@@ -1352,7 +1438,7 @@ paths:
       parameters:
         - name: format
           in: query
-          description: Export file format. Defaults to csv when omitted.
+          description: Export file format. Values are trimmed and case-insensitive; defaults to csv when omitted.
           schema:
             type: string
             enum: [csv, xlsx]
@@ -1398,7 +1484,7 @@ paths:
                 type: string
                 format: binary
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '406':
@@ -1409,13 +1495,16 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+        '499':
+          $ref: '#/components/responses/ClientClosedRequest'
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: 'Send the access token as `Authorization: Bearer <JWT>`.'
+      description: >
+        Send the access token as `Authorization: Bearer <JWT>`. At runtime, repeated `Authorization` headers are rejected, and issued JWTs include an `nbf` not-before claim.
   parameters:
     Id:
       name: id
@@ -1430,7 +1519,7 @@ components:
       name: X-Request-ID
       in: header
       required: false
-      description: Optional request correlation id. The API trims surrounding whitespace and returns the normalized value when valid, otherwise it generates one.
+      description: Optional request correlation id. The API trims surrounding whitespace and returns the normalized value when valid; missing, duplicate, or invalid values are replaced with a server-generated id that remains unique even if the system entropy source is unavailable.
       schema:
         type: string
         minLength: 1
@@ -1439,7 +1528,7 @@ components:
       example: client-request-123
   headers:
     RequestID:
-      description: Request correlation id for tracing logs and API calls.
+      description: Request correlation id for tracing logs and API calls. Generated ids remain unique even if the system entropy source is unavailable.
       schema:
         type: string
         minLength: 1
@@ -1447,7 +1536,7 @@ components:
         pattern: '^[!-~]+$'
       example: client-request-123
     Link:
-      description: RFC 8288 pagination links for first, previous, next, and last pages when available.
+      description: RFC 8288 pagination links for first, previous, next, and last pages when available; sensitive query parameters are omitted from generated links.
       schema:
         type: string
       example: </api/v1/transactions?page=2&pageSize=20>; rel="next", </api/v1/transactions?page=5&pageSize=20>; rel="last"
@@ -1458,10 +1547,10 @@ components:
         minimum: 0
       example: 95
     ContentDisposition:
-      description: Attachment disposition for downloaded files. Includes both filename and RFC 5987 filename* parameters.
+      description: Attachment disposition for downloaded files. Includes an ASCII-safe filename fallback and an RFC 5987 filename* parameter; clients should prefer filename* when present to preserve non-ASCII names.
       schema:
         type: string
-      example: attachment; filename="transactions.csv"; filename*=UTF-8''transactions.csv
+      example: attachment; filename="download.csv"; filename*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95.csv
     Location:
       description: Relative URL of the created or queued API resource.
       schema:
@@ -1495,6 +1584,11 @@ components:
       schema:
         type: string
       example: GET, POST
+    ClearSiteData:
+      description: Browser-side data cleared after logout for this origin.
+      schema:
+        type: string
+      example: '"cache", "cookies", "storage"'
     WWWAuthenticate:
       description: Authentication challenge for protected resources. Challenges use realm="haohao-accounting-api"; invalid bearer tokens also include error="invalid_token" and error_description per RFC 6750.
       schema:
@@ -1542,6 +1636,26 @@ components:
           example:
             error: validation failed
             code: bad_request
+            status: 400
+            requestId: api-20260620-example
+    InvalidRequest:
+      description: Request parameters or body failed parsing or binding.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: invalid request body
+            code: invalid_request
             status: 400
             requestId: api-20260620-example
     Unauthorized:
@@ -1758,6 +1872,26 @@ components:
             code: request_timeout
             status: 504
             requestId: api-20260620-example
+    ClientClosedRequest:
+      description: Client canceled the request before the server finished processing.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/CacheControl'
+        Pragma:
+          $ref: '#/components/headers/Pragma'
+        Expires:
+          $ref: '#/components/headers/Expires'
+        X-Request-ID:
+          $ref: '#/components/headers/RequestID'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: client closed request
+            code: client_closed_request
+            status: 499
+            requestId: api-20260620-example
     Error:
       description: Error response. Prefer a status-specific response component when possible.
       headers:
@@ -1806,6 +1940,7 @@ components:
       properties:
         id:
           type: integer
+          readOnly: true
         name:
           type: string
         username:
@@ -1830,6 +1965,8 @@ components:
         password:
           type: string
           minLength: 1
+          format: password
+          writeOnly: true
     LoginResponse:
       type: object
       additionalProperties: false
@@ -1846,6 +1983,7 @@ components:
       properties:
         token:
           type: string
+          readOnly: true
         user:
           $ref: '#/components/schemas/CurrentUser'
     Account:
@@ -1855,8 +1993,10 @@ components:
       properties:
         id:
           type: integer
+          readOnly: true
         userId:
           type: integer
+          readOnly: true
         name:
           type: string
         type:
@@ -1866,9 +2006,11 @@ components:
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
     AccountRequest:
       type: object
       additionalProperties: false
@@ -1895,8 +2037,10 @@ components:
       properties:
         id:
           type: integer
+          readOnly: true
         userId:
           type: integer
+          readOnly: true
         month:
           type: string
         categoryId:
@@ -1906,9 +2050,11 @@ components:
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
     BudgetRequest:
       type: object
       additionalProperties: false
@@ -1931,8 +2077,10 @@ components:
       properties:
         id:
           type: integer
+          readOnly: true
         userId:
           type: integer
+          readOnly: true
         name:
           type: string
         type:
@@ -1942,9 +2090,11 @@ components:
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
     CategoryRequest:
       type: object
       additionalProperties: false
@@ -1962,8 +2112,10 @@ components:
       properties:
         id:
           type: integer
+          readOnly: true
         userId:
           type: integer
+          readOnly: true
         type:
           $ref: '#/components/schemas/TransactionType'
         amount:
@@ -1988,9 +2140,11 @@ components:
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
     TransactionRequest:
       type: object
       additionalProperties: false
@@ -2100,124 +2254,216 @@ components:
     CategoryStat:
       type: object
       additionalProperties: false
-      required: [category, amount]
+      required: [categoryId, category, amount]
+      example:
+        categoryId: 1
+        category: 餐饮
+        amount: 250
       properties:
         categoryId:
           type: integer
+          minimum: 1
         category:
           type: string
         amount:
           type: number
+          minimum: 0
+          multipleOf: 0.01
     AccountStat:
       type: object
       additionalProperties: false
-      required: [account, amount]
+      required: [accountId, account, amount]
+      example:
+        accountId: 1
+        account: 现金
+        amount: 250
       properties:
         accountId:
           type: integer
+          minimum: 1
         account:
           type: string
         amount:
           type: number
+          minimum: 0
+          multipleOf: 0.01
     MonthTrend:
       type: object
       additionalProperties: false
       required: [month, income, expense]
+      example:
+        month: '2026-06'
+        income: 3000
+        expense: 250
       properties:
         month:
           type: string
+          pattern: '^\d{4}-\d{2}$'
         income:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         expense:
           type: number
+          minimum: 0
+          multipleOf: 0.01
     TrendPoint:
       type: object
       additionalProperties: false
       required: [period, income, expense]
+      example:
+        period: '2026-06-01'
+        income: 3000
+        expense: 100
       properties:
         period:
           type: string
         income:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         expense:
           type: number
+          minimum: 0
+          multipleOf: 0.01
     CategoryTrendPoint:
       type: object
       additionalProperties: false
       required: [period, categoryId, category, amount]
+      example:
+        period: '2026-06-01'
+        categoryId: 1
+        category: 餐饮
+        amount: 100
       properties:
         period:
           type: string
         categoryId:
           type: integer
+          minimum: 1
         category:
           type: string
         amount:
           type: number
+          minimum: 0
+          multipleOf: 0.01
     AccountBalancePoint:
       type: object
       additionalProperties: false
       required: [period, accountId, account, net, balance]
+      example:
+        period: '2026-06-02'
+        accountId: 1
+        account: 现金
+        net: -150
+        balance: 2750
       properties:
         period:
           type: string
         accountId:
           type: integer
+          minimum: 1
         account:
           type: string
         net:
           type: number
+          multipleOf: 0.01
         balance:
           type: number
+          multipleOf: 0.01
     BudgetExecution:
       type: object
       additionalProperties: false
       required: [budgetId, month, categoryId, category, budget, expense, remaining, usageRate]
+      example:
+        budgetId: 1
+        month: '2026-06'
+        categoryId: 1
+        category: 餐饮
+        budget: 500
+        expense: 250
+        remaining: 250
+        usageRate: 0.5
       properties:
         budgetId:
           type: integer
+          minimum: 1
         month:
           type: string
+          pattern: '^\d{4}-\d{2}$'
         categoryId:
           type: integer
+          minimum: 0
         category:
           type: string
         budget:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         expense:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         remaining:
           type: number
+          multipleOf: 0.01
         usageRate:
           type: number
+          minimum: 0
     SummaryTableRow:
       type: object
       additionalProperties: false
       required: [period, income, expense, balance, txCount]
+      example:
+        period: '2026-06-02'
+        income: 0
+        expense: 150
+        balance: -150
+        txCount: 1
       properties:
         period:
           type: string
         income:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         expense:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         balance:
           type: number
+          multipleOf: 0.01
         txCount:
           type: integer
+          minimum: 0
     PeriodTotals:
       type: object
       additionalProperties: false
       required: [income, expense]
+      example:
+        income: 3000
+        expense: 250
       properties:
         income:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         expense:
           type: number
+          minimum: 0
+          multipleOf: 0.01
     PeriodCompare:
       type: object
       additionalProperties: false
       required: [current, previous]
+      example:
+        current:
+          income: 3000
+          expense: 250
+        previous:
+          income: 0
+          expense: 0
       properties:
         current:
           $ref: '#/components/schemas/PeriodTotals'
@@ -2227,6 +2473,71 @@ components:
       type: object
       additionalProperties: false
       required: [start, end, income, expense, balance, byCategory, byAccount, monthlyTrend, trendGranularity, trend, categoryTrend, accountBalanceTrend, budgetExecution, dailySummaries, monthlySummaries, periodCompare]
+      example:
+        start: '2026-06-01T00:00:00Z'
+        end: '2026-06-30T23:59:59Z'
+        income: 3000
+        expense: 250
+        balance: 2750
+        byCategory:
+          - categoryId: 1
+            category: 餐饮
+            amount: 250
+        byAccount:
+          - accountId: 1
+            account: 现金
+            amount: 250
+        monthlyTrend:
+          - month: '2026-06'
+            income: 3000
+            expense: 250
+        trendGranularity: day
+        trend:
+          - period: '2026-06-01'
+            income: 3000
+            expense: 100
+          - period: '2026-06-02'
+            income: 0
+            expense: 150
+        categoryTrend:
+          - period: '2026-06-01'
+            categoryId: 1
+            category: 餐饮
+            amount: 100
+        accountBalanceTrend:
+          - period: '2026-06-02'
+            accountId: 1
+            account: 现金
+            net: -150
+            balance: 2750
+        budgetExecution:
+          - budgetId: 1
+            month: '2026-06'
+            categoryId: 1
+            category: 餐饮
+            budget: 500
+            expense: 250
+            remaining: 250
+            usageRate: 0.5
+        dailySummaries:
+          - period: '2026-06-02'
+            income: 0
+            expense: 150
+            balance: -150
+            txCount: 1
+        monthlySummaries:
+          - period: '2026-06'
+            income: 3000
+            expense: 250
+            balance: 2750
+            txCount: 3
+        periodCompare:
+          current:
+            income: 3000
+            expense: 250
+          previous:
+            income: 0
+            expense: 0
       properties:
         start:
           type: string
@@ -2236,10 +2547,15 @@ components:
           format: date-time
         income:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         expense:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         balance:
           type: number
+          multipleOf: 0.01
         byCategory:
           type: array
           items:
@@ -2254,6 +2570,7 @@ components:
             $ref: '#/components/schemas/MonthTrend'
         trendGranularity:
           type: string
+          enum: [day, week, month]
         trend:
           type: array
           items:
@@ -2292,6 +2609,8 @@ components:
           description: CSV or XLSX file. The first row must start with occurred_at,type,amount,category,account,note,tags; a UTF-8 BOM on the first header is accepted.
         skipDuplicates:
           type: boolean
+          description: skipDuplicates defaults to true when omitted; invalid values return invalid_request.
+          default: true
     ImportTextRequest:
       type: object
       additionalProperties: false
@@ -2306,19 +2625,37 @@ components:
           maxLength: 5242880
         skipDuplicates:
           type: boolean
+          description: skipDuplicates defaults to true when omitted.
+          default: true
     ImportPreviewRow:
       type: object
       additionalProperties: false
       required: [line, occurredAt, type, amount, category, account, note, tags, valid, duplicate]
+      example:
+        line: 2
+        occurredAt: '2026-06-01T12:30:00+08:00'
+        type: expense
+        amount: 35.5
+        category: 餐饮
+        account: 现金
+        note: 午饭
+        tags: 工作日
+        valid: true
+        duplicate: false
       properties:
         line:
           type: integer
+          minimum: 1
         occurredAt:
           type: string
         type:
-          $ref: '#/components/schemas/TransactionType'
+          type: string
+          description: Valid rows use income or expense; failed rows may return an empty string before parsing reaches the type field.
+          enum: [income, expense, '']
         amount:
           type: number
+          minimum: 0
+          multipleOf: 0.01
         category:
           type: string
         account:
@@ -2339,43 +2676,94 @@ components:
       type: object
       additionalProperties: false
       required: [filename, size, totalRows, validRows, failedRows, duplicateRows, maxRows, maxFileBytes, truncated, rows]
+      example:
+        filename: preview.csv
+        size: 154
+        totalRows: 2
+        validRows: 1
+        failedRows: 1
+        duplicateRows: 0
+        maxRows: 5000
+        maxFileBytes: 5242880
+        truncated: false
+        rows:
+          - line: 2
+            occurredAt: '2026-06-01T12:30:00+08:00'
+            type: expense
+            amount: 35.5
+            category: 餐饮
+            account: 现金
+            note: 午饭
+            tags: 工作日
+            valid: true
+            duplicate: false
+          - line: 3
+            occurredAt: ''
+            type: ''
+            amount: 0
+            category: ''
+            account: ''
+            note: ''
+            tags: ''
+            valid: false
+            duplicate: false
+            error: invalid occurred_at
       properties:
         filename:
           type: string
         size:
           type: integer
+          minimum: 0
         totalRows:
           type: integer
+          minimum: 0
           description: Non-empty data rows excluding the header and blank rows.
         validRows:
           type: integer
+          minimum: 0
         failedRows:
           type: integer
+          minimum: 0
         duplicateRows:
           type: integer
+          minimum: 0
         maxRows:
           type: integer
+          minimum: 0
         maxFileBytes:
           type: integer
+          minimum: 0
         truncated:
           type: boolean
         rows:
           type: array
+          maxItems: 20
           items:
             $ref: '#/components/schemas/ImportPreviewRow'
     ImportResult:
       type: object
       additionalProperties: false
       required: [total, success, failed, skipped, errors]
+      example:
+        total: 2
+        success: 1
+        failed: 1
+        skipped: 0
+        errors:
+          - 'line 3: invalid occurred_at'
       properties:
         total:
           type: integer
+          minimum: 0
         success:
           type: integer
+          minimum: 0
         failed:
           type: integer
+          minimum: 0
         skipped:
           type: integer
+          minimum: 0
         errors:
           type: array
           items:
@@ -2384,9 +2772,23 @@ components:
       type: object
       additionalProperties: false
       required: [id, filename, status, total, success, failed, skipped, errors, createdAt, updatedAt]
+      example:
+        id: 1
+        filename: import.csv
+        status: completed
+        total: 2
+        success: 1
+        failed: 1
+        skipped: 0
+        errors:
+          - 'line 3: invalid occurred_at'
+        createdAt: '2026-06-01T12:30:00+08:00'
+        updatedAt: '2026-06-01T12:30:05+08:00'
       properties:
         id:
           type: integer
+          minimum: 1
+          readOnly: true
         filename:
           type: string
         status:
@@ -2394,12 +2796,16 @@ components:
           enum: [queued, running, completed, failed]
         total:
           type: integer
+          minimum: 0
         success:
           type: integer
+          minimum: 0
         failed:
           type: integer
+          minimum: 0
         skipped:
           type: integer
+          minimum: 0
         errors:
           type: array
           items:
@@ -2407,9 +2813,11 @@ components:
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
     ErrorResponse:
       type: object
       additionalProperties: false
@@ -2427,7 +2835,7 @@ components:
           enum: [bad_request, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, rate_limited, payload_too_large, unsupported_media_type, not_acceptable, request_timeout, client_closed_request, internal_error]
         status:
           type: integer
-          minimum: 100
+          minimum: 400
           maximum: 599
         requestId:
           type: string

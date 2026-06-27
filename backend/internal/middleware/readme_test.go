@@ -17,7 +17,9 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"`RequestID`",
 		"`RequestTimeout`",
 		"structured `504` timeout response",
+		"`499 client_closed_request` response",
 		"`Recovery`",
+		"panic values are escaped so logs stay single-line",
 		"`SecurityHeaders`",
 		"`BodyLimit`",
 		"`ContentType`",
@@ -27,7 +29,10 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"`NoStore`",
 		"`RequireAuth`",
 		"128 visible ASCII characters",
+		"missing, duplicate, or invalid values are replaced",
 		"invalid values are replaced",
+		"cryptographic randomness",
+		"system entropy source is unavailable",
 		"Strict-Transport-Security",
 		"Cross-Origin-Embedder-Policy",
 		"opt-in through HTTP config",
@@ -36,33 +41,48 @@ func TestMiddlewareReadmeDocumentsGlobalContracts(t *testing.T) {
 		"connection reset",
 		"already-written response",
 		"http.MaxBytesReader",
+		"`charset=utf-8`",
+		"Content-Type parameters",
+		"multipart form data must include a non-empty `boundary` parameter",
 		"application/*+json",
+		"bare concrete types without parameters or wildcards",
+		"normalized, deduplicated",
+		"invalid values are ignored",
 		"structured syntax suffixes",
+		"repeated `Accept` header fields are combined",
 		"`q=0` media ranges as explicit exclusions",
 		"Vary: Accept",
+		"duplicate or invalid rule entries",
+		"current in-flight request gauge",
 		"low-cardinality Prometheus counters and duration histograms",
 		"Gin route pattern",
 		"unmatched",
 		"Cache-Control: no-store",
 		"API prefix",
 		"early global rejections",
+		"`NoCache`",
 		"`SetNoCache`",
 		"health probes",
+		"metrics",
 		"revalidated before reuse",
 		"bearer JWT signature",
+		"`nbf` not-before claim",
+		"RFC 6750 token68 character set",
+		"at most 4096 bytes",
 		"expiration",
 		"issued-at time",
 		"issuer",
 		"audience",
+		"repeated `Authorization` headers are rejected",
 		"fail closed",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("README.md is missing middleware guidance %q", want)
 		}
 	}
-	for header := range defaultSecurityHeaders() {
-		if !strings.Contains(source, header) {
-			t.Fatalf("README.md is missing default security header %q", header)
+	for _, header := range defaultSecurityHeaders {
+		if !strings.Contains(source, header.Key) {
+			t.Fatalf("README.md is missing default security header %q", header.Key)
 		}
 	}
 }

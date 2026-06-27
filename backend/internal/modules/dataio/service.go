@@ -250,7 +250,7 @@ func (s *Service) ImportRowsWithOptions(ctx context.Context, userID uint, source
 	}
 
 	if len(records) > 0 {
-		if err := s.db(ctx).Transaction(func(dbtx *gorm.DB) error {
+		if err := s.store.Transaction(ctx, func(dbtx *gorm.DB) error {
 			requests := make([]transactions.Request, 0, len(records))
 			for _, record := range records {
 				category, err := s.store.FindOrCreateCategoryWithDB(dbtx, userID, record.Type, record.Category)
@@ -322,10 +322,7 @@ func importOptionsFromRequest(req ImportTextRequest) ImportOptions {
 }
 
 func (s *Service) db(ctx context.Context) *gorm.DB {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.store.DB.WithContext(ctx)
+	return s.store.DBWithContext(ctx)
 }
 
 // detachedContext 去掉请求取消信号，避免用户关闭页面后后台导入任务被提前中断。

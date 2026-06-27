@@ -18,41 +18,59 @@ type AcceptRule struct {
 	Offered      func(*gin.Context) []string
 }
 
+type compiledAcceptRule struct {
+	offeredTypes []string
+	offered      func(*gin.Context) []string
+}
+
+// Accept 按路由声明的响应媒体类型检查 Accept 头，拒绝无法协商的请求并补充 Vary: Accept。
 func Accept(rules []AcceptRule) gin.HandlerFunc {
-	lookup := make(map[string][]string, len(rules))
+	lookup := make(map[string]compiledAcceptRule, len(rules))
 	for _, rule := range rules {
 		method := strings.ToUpper(strings.TrimSpace(rule.Method))
 		path := strings.TrimSpace(rule.Path)
 		if method == "" || path == "" || len(rule.OfferedTypes) == 0 {
 			continue
 		}
-		lookup[method+" "+path] = normalizeMediaTypes(rule.OfferedTypes)
+		if offered := normalizeMediaTypes(rule.OfferedTypes); len(offered) > 0 {
+			// 规则在中间件创建时预编译，避免每个请求重复扫描完整规则列表。
+			lookup[method+" "+path] = compiledAcceptRule{offeredTypes: offered, offered: rule.Offered}
+		}
 	}
 
 	return func(c *gin.Context) {
 		key := c.Request.Method + " " + c.FullPath()
-		offered, ok := lookup[key]
+		rule, ok := lookup[key]
 		if !ok {
 			c.Next()
 			return
 		}
-		for _, rule := range rules {
-			method := strings.ToUpper(strings.TrimSpace(rule.Method))
-			path := strings.TrimSpace(rule.Path)
-			if method+" "+path == key && rule.Offered != nil {
-				offered = normalizeMediaTypes(rule.Offered(c))
-				break
+		offered := rule.offeredTypes
+		if rule.offered != nil {
+			if dynamicOffered := normalizeMediaTypes(rule.offered(c)); len(dynamicOffered) > 0 {
+				offered = dynamicOffered
 			}
 		}
 		appendVary(c.Writer.Header(), "Accept")
 
-		if !acceptsAnyOfferedType(c.GetHeader("Accept"), offered) {
+		if !acceptsAnyOfferedType(combinedHeaderValue(c.Request.Header.Values("Accept")), offered) {
 			httputil.NotAcceptable(c, notAcceptableMessage(offered))
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
+}
+
+func combinedHeaderValue(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 func acceptsAnyOfferedType(header string, offered []string) bool {
@@ -97,7 +115,13 @@ func parseAcceptMediaRanges(header string) []acceptMediaRange {
 }
 
 func mediaQuality(params map[string]string) float64 {
-	raw := strings.TrimSpace(params["q"])
+	raw := ""
+	for name, value := range params {
+		if strings.EqualFold(name, "q") {
+			raw = strings.TrimSpace(value)
+			break
+		}
+	}
 	if raw == "" {
 		return 1
 	}
@@ -205,6 +229,7 @@ func appendVary(headers http.Header, field string) {
 	headers.Set("Vary", current+", "+field)
 }
 
+// APIAcceptRules 从当前 API/OpenAPI 契约整理响应媒体类型规则，文件下载接口按 format 动态收窄类型。
 func APIAcceptRules() []AcceptRule {
 	rules := []AcceptRule{
 		{
@@ -212,10 +237,14 @@ func APIAcceptRules() []AcceptRule {
 			Path:         "/api/v1/io/export",
 			OfferedTypes: []string{"text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
 			Offered: func(c *gin.Context) []string {
-				if strings.TrimSpace(c.Query("format")) == "xlsx" {
+				switch exportFormatFromQuery(c.Query("format")) {
+				case "xlsx":
 					return []string{"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+				case "csv":
+					return []string{"text/csv"}
+				default:
+					return []string{"text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
 				}
-				return []string{"text/csv"}
 			},
 		},
 	}
@@ -227,6 +256,17 @@ func APIAcceptRules() []AcceptRule {
 		})
 	}
 	return rules
+}
+
+func exportFormatFromQuery(value string) string {
+	format := strings.ToLower(strings.TrimSpace(value))
+	if format == "" {
+		return "csv"
+	}
+	if format == "csv" || format == "xlsx" {
+		return format
+	}
+	return ""
 }
 
 type apiRoute struct {

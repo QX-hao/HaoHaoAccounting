@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,6 +24,33 @@ import (
 )
 
 var errFailingWrite = errors.New("write failed")
+
+func TestReadmeDocumentsExportDownloadAndSpreadsheetSafetyContracts(t *testing.T) {
+	data, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"`Content-Disposition`",
+		"ASCII-safe `filename` fallback",
+		"`filename`",
+		"`filename*`",
+		"without losing non-ASCII names",
+		"`safeCSVCell`",
+		"case normalization",
+		"`invalid_request`",
+		"formula prefixes",
+		"leading whitespace",
+		"`skipDuplicates`",
+		"defaults to true",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("README.md is missing dataio maintenance guidance %q", want)
+		}
+	}
+}
 
 func TestExportRejectsInvalidQueryParameters(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -47,26 +75,70 @@ func TestExportRejectsInvalidQueryParameters(t *testing.T) {
 	}
 }
 
-func TestExportAcceptsDefaultQueryParameters(t *testing.T) {
+func TestExportInvalidFormatReturnsBadRequestAfterAcceptNegotiation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Accept(middleware.APIAcceptRules()))
+	store := testutil.NewStore(t)
+	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group("/api/v1"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/io/export?format=pdf", nil)
+	req.Header.Set("Accept", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+	}
+	assertErrorCode(t, resp, httputil.CodeInvalidRequest)
+}
+
+func TestExportAcceptsDefaultAndCaseInsensitiveFormatQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	store := testutil.NewStore(t)
 	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group(""))
 
-	req := httptest.NewRequest(http.MethodGet, "/io/export", nil)
-	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
+	for _, path := range []string{"/io/export", "/io/export?format=CSV", "/io/export?format=%20csv%20"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
 
-	if resp.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+			if resp.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+			}
+			if got := resp.Header().Get("Content-Type"); got != "text/csv; charset=utf-8" {
+				t.Fatalf("Content-Type = %q", got)
+			}
+			if got := resp.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment;") ||
+				!strings.Contains(got, `filename="transactions_`) ||
+				!strings.Contains(got, "filename*=UTF-8''transactions_") {
+				t.Fatalf("Content-Disposition = %q", got)
+			}
+		})
 	}
-	if got := resp.Header().Get("Content-Type"); got != "text/csv; charset=utf-8" {
-		t.Fatalf("Content-Type = %q", got)
-	}
-	if got := resp.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment;") ||
-		!strings.Contains(got, `filename="transactions_`) ||
-		!strings.Contains(got, "filename*=UTF-8''transactions_") {
-		t.Fatalf("Content-Disposition = %q", got)
+}
+
+func TestNormalizedExportFormat(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		value     string
+		want      string
+		wantValid bool
+	}{
+		{name: "empty defaults to csv", want: "csv", wantValid: true},
+		{name: "csv", value: "csv", want: "csv", wantValid: true},
+		{name: "uppercase csv", value: " CSV ", want: "csv", wantValid: true},
+		{name: "uppercase xlsx", value: "XLSX", want: "xlsx", wantValid: true},
+		{name: "invalid", value: "pdf", wantValid: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := normalizedExportFormat(tc.value)
+			if got != tc.want || ok != tc.wantValid {
+				t.Fatalf("normalizedExportFormat(%q) = (%q, %v), want (%q, %v)", tc.value, got, ok, tc.want, tc.wantValid)
+			}
+		})
 	}
 }
 
@@ -76,6 +148,120 @@ func TestWriteCSVReturnsWriterError(t *testing.T) {
 
 	if err := writeCSV(c, nil); !errors.Is(err, errFailingWrite) {
 		t.Fatalf("writeCSV error = %v, want %v", err, errFailingWrite)
+	}
+}
+
+func TestAttachmentDispositionIncludesFallbackAndEncodedFilename(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{
+			name:     "ascii",
+			filename: "transactions.csv",
+			want:     `attachment; filename="transactions.csv"; filename*=UTF-8''transactions.csv`,
+		},
+		{
+			name:     "non-ascii",
+			filename: "交易记录.csv",
+			want:     `attachment; filename="download.csv"; filename*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95.csv`,
+		},
+		{
+			name:     "all non-ascii",
+			filename: "交易记录",
+			want:     `attachment; filename="download"; filename*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := attachmentDisposition(tc.filename); got != tc.want {
+				t.Fatalf("attachmentDisposition(%q) = %q, want %q", tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASCIIFilenameFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{name: "ascii", filename: "transactions.csv", want: "transactions.csv"},
+		{name: "non-ascii", filename: "交易记录.csv", want: "download.csv"},
+		{name: "all non-ascii", filename: "交易记录", want: "download"},
+		{name: "control", filename: "bad\nname.csv", want: "bad_name.csv"},
+		{name: "path separators", filename: "../reports\\transactions:2026.csv", want: "reports_transactions_2026.csv"},
+		{name: "leading separators", filename: "__hidden.csv", want: "hidden.csv"},
+		{name: "blank", filename: "  ", want: "download"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := asciiFilenameFallback(tc.filename); got != tc.want {
+				t.Fatalf("asciiFilenameFallback(%q) = %q, want %q", tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASCIIFilenameStemHasAlphanumeric(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		filename string
+		want     bool
+	}{
+		{name: "ascii stem", filename: "transactions.csv", want: true},
+		{name: "non-ascii stem with ascii extension", filename: "____.csv", want: false},
+		{name: "digit stem", filename: "202606.csv", want: true},
+		{name: "underscore stem", filename: "____", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := asciiFilenameStemHasAlphanumeric(tc.filename); got != tc.want {
+				t.Fatalf("asciiFilenameStemHasAlphanumeric(%q) = %v, want %v", tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASCIIFilenameExtension(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{name: "extension", filename: "____.csv", want: ".csv"},
+		{name: "no extension", filename: "____", want: ""},
+		{name: "trailing dot", filename: "____.", want: ""},
+		{name: "unsafe extension", filename: "____.c\nsv", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := asciiFilenameExtension(tc.filename); got != tc.want {
+				t.Fatalf("asciiFilenameExtension(%q) = %q, want %q", tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASCIIFilenameCharAllowed(t *testing.T) {
+	for _, tc := range []struct {
+		r    rune
+		want bool
+	}{
+		{r: 'a', want: true},
+		{r: 'Z', want: true},
+		{r: '7', want: true},
+		{r: '.', want: true},
+		{r: '_', want: true},
+		{r: '-', want: true},
+		{r: '/', want: false},
+		{r: '\\', want: false},
+		{r: ':', want: false},
+		{r: '交', want: false},
+	} {
+		t.Run(string(tc.r), func(t *testing.T) {
+			if got := asciiFilenameCharAllowed(tc.r); got != tc.want {
+				t.Fatalf("asciiFilenameCharAllowed(%q) = %v, want %v", tc.r, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -91,7 +277,7 @@ func TestWriteCSVNeutralizesFormulaCells(t *testing.T) {
 		Account:     models.Account{Name: "+account"},
 		Note:        "-note",
 		Tags:        "@tags",
-		Source:      "\t=source",
+		Source:      "  =source",
 		OccurredAt:  time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}}
 
@@ -107,7 +293,7 @@ func TestWriteCSVNeutralizesFormulaCells(t *testing.T) {
 		t.Fatalf("record count = %d, want 2", len(records))
 	}
 
-	want := []string{"'=category", "'+account", "'-note", "'@tags", "'\t=source"}
+	want := []string{"'=category", "'+account", "'-note", "'@tags", "'  =source"}
 	for i, value := range records[1][3:] {
 		if value != want[i] {
 			t.Fatalf("field %d = %q, want %q", i+3, value, want[i])
@@ -127,7 +313,7 @@ func TestWriteXLSXNeutralizesFormulaCells(t *testing.T) {
 		Account:     models.Account{Name: "+account"},
 		Note:        "-note",
 		Tags:        "@tags",
-		Source:      "\t=source",
+		Source:      "  =source",
 		OccurredAt:  time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}}
 
@@ -151,7 +337,7 @@ func TestWriteXLSXNeutralizesFormulaCells(t *testing.T) {
 		"E2": "'+account",
 		"F2": "'-note",
 		"G2": "'@tags",
-		"H2": "'\t=source",
+		"H2": "'  =source",
 	} {
 		got, err := f.GetCellValue(sheet, cell)
 		if err != nil {
@@ -178,10 +364,37 @@ func TestSafeCSVCellNeutralizesDangerousPrefixes(t *testing.T) {
 		{name: "tab", value: "\t=cmd", want: "'\t=cmd"},
 		{name: "carriage-return", value: "\r=cmd", want: "'\r=cmd"},
 		{name: "newline", value: "\n=cmd", want: "'\n=cmd"},
+		{name: "leading spaces", value: "  =cmd", want: "'  =cmd"},
+		{name: "leading spaces before at", value: "  @cmd", want: "'  @cmd"},
+		{name: "only whitespace with tab", value: " \t\n", want: "' \t\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := safeCSVCell(tc.value); got != tc.want {
 				t.Fatalf("safeCSVCell(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDangerousCSVFormulaPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "empty", value: "", want: false},
+		{name: "plain", value: "groceries", want: false},
+		{name: "equals", value: "=1+1", want: true},
+		{name: "tab", value: "\ttext", want: true},
+		{name: "carriage return", value: "\rtext", want: true},
+		{name: "newline", value: "\ntext", want: true},
+		{name: "spaces before formula", value: "  +1", want: true},
+		{name: "spaces before tab", value: " \ttext", want: true},
+		{name: "only spaces", value: "   ", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := dangerousCSVFormulaPrefix(tc.value); got != tc.want {
+				t.Fatalf("dangerousCSVFormulaPrefix(%q) = %v, want %v", tc.value, got, tc.want)
 			}
 		})
 	}
@@ -240,6 +453,54 @@ func TestCreateImportJobReturnsLocationHeader(t *testing.T) {
 	}
 }
 
+func TestMultipartImportRejectsInvalidSkipDuplicates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	store := testutil.NewStore(t)
+	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group(""))
+
+	for _, path := range []string{"/io/import", "/io/import/jobs"} {
+		t.Run(path, func(t *testing.T) {
+			body, contentType := multipartBodyWithFields(t, "file", "transactions.csv", "occurred_at,type,amount,category,account,note,tags\n", map[string]string{
+				"skipDuplicates": "maybe",
+			})
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+			req.Header.Set("Content-Type", contentType)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+			}
+			assertErrorCode(t, resp, httputil.CodeInvalidRequest)
+		})
+	}
+}
+
+func TestMultipartImportRejectsMissingFileAsInvalidRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	store := testutil.NewStore(t)
+	NewHandler(NewService(store, transactions.NewService(store, nil), nil)).Register(router.Group(""))
+
+	for _, path := range []string{"/io/import/preview", "/io/import", "/io/import/jobs"} {
+		t.Run(path, func(t *testing.T) {
+			body, contentType := multipartFieldsOnly(t, map[string]string{
+				"skipDuplicates": "true",
+			})
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+			req.Header.Set("Content-Type", contentType)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+			}
+			assertErrorCode(t, resp, httputil.CodeInvalidRequest)
+		})
+	}
+}
+
 func TestImportTextRejectsInvalidRequestBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -266,6 +527,31 @@ func TestImportTextRejectsInvalidRequestBody(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestParseBoolDefaultRequiresValidExplicitValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		fallback  bool
+		wantValue bool
+		wantOK    bool
+	}{
+		{name: "empty true default", value: "", fallback: true, wantValue: true, wantOK: true},
+		{name: "empty false default", value: " ", fallback: false, wantValue: false, wantOK: true},
+		{name: "explicit true", value: "true", fallback: false, wantValue: true, wantOK: true},
+		{name: "explicit false", value: "false", fallback: true, wantValue: false, wantOK: true},
+		{name: "invalid", value: "maybe", fallback: true, wantValue: false, wantOK: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotValue, gotOK := parseBoolDefault(tc.value, tc.fallback)
+			if gotValue != tc.wantValue || gotOK != tc.wantOK {
+				t.Fatalf("parseBoolDefault(%q, %v) = (%v, %v), want (%v, %v)", tc.value, tc.fallback, gotValue, gotOK, tc.wantValue, tc.wantOK)
+			}
+		})
 	}
 }
 
@@ -303,7 +589,11 @@ func TestMultipartImportMapsStreamingBodyLimitToPayloadTooLarge(t *testing.T) {
 
 func multipartBody(t *testing.T, fieldName string, fileName string, content string) ([]byte, string) {
 	t.Helper()
+	return multipartBodyWithFields(t, fieldName, fileName, content, nil)
+}
 
+func multipartBodyWithFields(t *testing.T, fieldName string, fileName string, content string, fields map[string]string) ([]byte, string) {
+	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	part, err := writer.CreateFormFile(fieldName, fileName)
@@ -313,10 +603,41 @@ func multipartBody(t *testing.T, fieldName string, fileName string, content stri
 	if _, err := part.Write([]byte(content)); err != nil {
 		t.Fatalf("write multipart file: %v", err)
 	}
+	for name, value := range fields {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatalf("write multipart field %s: %v", name, err)
+		}
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close multipart writer: %v", err)
 	}
 	return body.Bytes(), writer.FormDataContentType()
+}
+
+func multipartFieldsOnly(t *testing.T, fields map[string]string) ([]byte, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for name, value := range fields {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatalf("write multipart field %s: %v", name, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	return body.Bytes(), writer.FormDataContentType()
+}
+
+func assertErrorCode(t *testing.T, resp *httptest.ResponseRecorder, want string) {
+	t.Helper()
+	var errorBody httputil.ErrorResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &errorBody); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if errorBody.Code != want {
+		t.Fatalf("code = %q, want %q", errorBody.Code, want)
+	}
 }
 
 type failingResponseWriter struct {

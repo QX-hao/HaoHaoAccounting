@@ -26,6 +26,7 @@ func TestListRejectsInvalidQueryParameters(t *testing.T) {
 		"/transactions?categoryId=0",
 		"/transactions?categoryId=abc",
 		"/transactions?accountId=0",
+		"/transactions?page=1&page=2",
 		"/transactions?start=not-a-date",
 		"/transactions?end=not-a-date",
 		"/transactions?start=2026-07-01&end=2026-06-30",

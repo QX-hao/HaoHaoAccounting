@@ -1,10 +1,17 @@
 ## Summary
 
 - 
+- Related issue:
 
 ## Changes
 
 - 
+
+## Reviewer Notes
+
+- Review focus:
+- Screenshots or recording:
+- Security, dependency, or Dependabot notes:
 
 ## Tests
 

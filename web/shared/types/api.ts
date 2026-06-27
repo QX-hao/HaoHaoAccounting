@@ -128,13 +128,13 @@ export type AIParseResponse = {
 };
 
 export type CategoryStat = {
-  categoryId?: number;
+  categoryId: number;
   category: string;
   amount: number;
 };
 
 export type AccountStat = {
-  accountId?: number;
+  accountId: number;
   account: string;
   amount: number;
 };
@@ -204,7 +204,7 @@ export type Summary = {
   byCategory: CategoryStat[];
   byAccount: AccountStat[];
   monthlyTrend: MonthTrend[];
-  trendGranularity: string;
+  trendGranularity: "day" | "week" | "month";
   trend: TrendPoint[];
   categoryTrend: CategoryTrendPoint[];
   accountBalanceTrend: AccountBalancePoint[];
@@ -228,7 +228,7 @@ export type ImportTextRequest = {
 export type ImportPreviewRow = {
   line: number;
   occurredAt: string;
-  type: TransactionType;
+  type: "income" | "expense" | "";
   amount: number;
   category: string;
   account: string;

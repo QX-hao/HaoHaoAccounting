@@ -10,11 +10,13 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build \
+    -buildvcs=false \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/haohaoaccounting \
     ./cmd/server \
     && CGO_ENABLED=0 GOOS=linux go build \
+    -buildvcs=false \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/dbmigrate \

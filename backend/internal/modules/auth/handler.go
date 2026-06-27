@@ -72,6 +72,7 @@ func (h *Handler) login(c *gin.Context) {
 	var user models.User
 	err := h.store.DB.Where("username = ?", req.Username).First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		_ = verifyPasswordOrDummy("", req.Password)
 		h.recordLoginFailure(limiterKey)
 		httputil.Unauthorized(c, "用户名或密码错误")
 		return
@@ -79,7 +80,7 @@ func (h *Handler) login(c *gin.Context) {
 		httputil.InternalError(c, err)
 		return
 	}
-	if !verifyPassword(user.PasswordHash, req.Password) {
+	if !verifyPasswordOrDummy(user.PasswordHash, req.Password) {
 		h.recordLoginFailure(limiterKey)
 		httputil.Unauthorized(c, "用户名或密码错误")
 		return
@@ -111,7 +112,7 @@ func (h *Handler) refresh(c *gin.Context) {
 		httputil.NotFound(c, "user not found")
 		return
 	}
-	if token, ok := middleware.BearerToken(c.GetHeader("Authorization")); ok {
+	if token, ok := middleware.BearerTokenFromContext(c); ok {
 		invalidToken, err := h.revokeTokenFromContext(c, token)
 		if invalidToken {
 			httputil.InvalidToken(c, "invalid token")
@@ -126,7 +127,7 @@ func (h *Handler) refresh(c *gin.Context) {
 }
 
 func (h *Handler) logout(c *gin.Context) {
-	token, ok := middleware.BearerToken(c.GetHeader("Authorization"))
+	token, ok := middleware.BearerTokenFromContext(c)
 	if !ok {
 		httputil.Unauthorized(c, "missing Authorization header")
 		return
@@ -140,6 +141,8 @@ func (h *Handler) logout(c *gin.Context) {
 		httputil.InternalError(c, err)
 		return
 	}
+	// 登出成功时提示浏览器清理同源缓存和存储，避免旧会话数据残留在前端环境。
+	c.Header("Clear-Site-Data", `"cache", "cookies", "storage"`)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 

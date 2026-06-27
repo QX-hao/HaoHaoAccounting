@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { logout } from '@/shared/api/client';
-import { clearToken } from '@/lib/auth';
 
 const navItems = [
   { href: '/overview', label: '首页', icon: '⌂' },
@@ -52,7 +51,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           className="logout"
           onClick={async () => {
             await logout();
-            clearToken();
             router.replace('/login');
           }}
         >

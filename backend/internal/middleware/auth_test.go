@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,31 @@ func TestBuildAndParseToken(t *testing.T) {
 	}
 	if userID != 42 {
 		t.Fatalf("userID = %d", userID)
+	}
+}
+
+func TestBuildTokenIncludesNotBeforeClaim(t *testing.T) {
+	tokenService := testTokenService(t)
+
+	before := time.Now().Add(-time.Second)
+	token, err := tokenService.BuildToken(42)
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+	after := time.Now().Add(time.Second)
+
+	claims, err := tokenService.parseClaims(token)
+	if err != nil {
+		t.Fatalf("parse token claims: %v", err)
+	}
+	if claims.NotBefore == nil {
+		t.Fatal("token NotBefore claim is missing")
+	}
+	if claims.NotBefore.Time.Before(before) || claims.NotBefore.Time.After(after) {
+		t.Fatalf("notBefore = %s, want between %s and %s", claims.NotBefore.Time, before, after)
+	}
+	if claims.IssuedAt == nil {
+		t.Fatal("token IssuedAt claim is missing")
 	}
 }
 
@@ -138,6 +164,32 @@ func TestParseTokenAcceptsSmallClockSkew(t *testing.T) {
 	}
 	if _, err := tokenService.ParseToken(token); err != nil {
 		t.Fatalf("parse token with leeway: %v", err)
+	}
+}
+
+func TestParseTokenRejectsFutureNotBefore(t *testing.T) {
+	tokenService, err := NewTokenServiceWithTTL("test-jwt-secret-with-at-least-32-chars", time.Hour, time.Second, "haohao-accounting", "haohao-accounting-api")
+	if err != nil {
+		t.Fatalf("token service: %v", err)
+	}
+
+	now := time.Now()
+	claims := jwtClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "42",
+			Issuer:    tokenService.issuer,
+			Audience:  jwt.ClaimStrings{tokenService.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now.Add(time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+		},
+	}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(tokenService.secret))
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+	if _, err := tokenService.ParseToken(token); err == nil {
+		t.Fatal("expected future not-before token error")
 	}
 }
 
@@ -324,6 +376,77 @@ func TestRequireAuthFailsClosedWhenRevocationCheckErrors(t *testing.T) {
 	}
 }
 
+func TestRequireAuthStoresTokenAndRemovesAuthorizationHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tokenService := testTokenService(t)
+
+	token, err := tokenService.BuildToken(42)
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+
+	called := false
+	router := gin.New()
+	router.GET("/private", RequireAuthWithRevocation(nil, tokenService), func(c *gin.Context) {
+		called = true
+		if got := c.GetHeader("Authorization"); got != "" {
+			t.Fatalf("Authorization header leaked to handler: %q", got)
+		}
+		contextToken, ok := BearerTokenFromContext(c)
+		if !ok || contextToken != token {
+			t.Fatalf("BearerTokenFromContext = %q, %v, want token", contextToken, ok)
+		}
+		if got := UserIDFromContext(c); got != 42 {
+			t.Fatalf("user id = %d, want 42", got)
+		}
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/private", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if !called {
+		t.Fatal("handler was not called")
+	}
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.Code)
+	}
+}
+
+func TestBearerTokenFromContextRejectsInvalidContextValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name      string
+		value     any
+		setValue  bool
+		wantToken string
+		wantOK    bool
+	}{
+		{name: "missing"},
+		{name: "wrong type", setValue: true, value: 42},
+		{name: "empty", setValue: true, value: ""},
+		{name: "invalid character", setValue: true, value: "token,part"},
+		{name: "padding only", setValue: true, value: "=="},
+		{name: "too long", setValue: true, value: strings.Repeat("a", maxBearerTokenLength+1)},
+		{name: "valid", setValue: true, value: "header.payload.signature", wantToken: "header.payload.signature", wantOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			if tc.setValue {
+				c.Set(bearerTokenContextKey, tc.value)
+			}
+
+			token, ok := BearerTokenFromContext(c)
+			if token != tc.wantToken || ok != tc.wantOK {
+				t.Fatalf("BearerTokenFromContext = %q, %v, want %q, %v", token, ok, tc.wantToken, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestRequireAuthSetsAuthenticateChallenge(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -364,6 +487,39 @@ func TestRequireAuthRejectsMalformedBearerHeader(t *testing.T) {
 	}
 }
 
+func TestRequireAuthRejectsDuplicateAuthorizationHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tokenService := testTokenService(t)
+	token, err := tokenService.BuildToken(42)
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+
+	called := false
+	router := gin.New()
+	router.GET("/private", RequireAuthWithRevocation(nil, tokenService), func(c *gin.Context) {
+		called = true
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/private", nil)
+	req.Header.Add("Authorization", "Bearer "+token)
+	req.Header.Add("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if called {
+		t.Fatal("handler was called for duplicate Authorization headers")
+	}
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.Code)
+	}
+	if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="haohao-accounting-api"` {
+		t.Fatalf("WWW-Authenticate = %q", got)
+	}
+}
+
 func TestBearerTokenParsesRFC6750Credentials(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -382,6 +538,8 @@ func TestBearerTokenParsesRFC6750Credentials(t *testing.T) {
 		{name: "invalid character", header: "Bearer token,part", wantOK: false},
 		{name: "padding only", header: "Bearer ==", wantOK: false},
 		{name: "padding before token char", header: "Bearer abc=def", wantOK: false},
+		{name: "max length token", header: "Bearer " + strings.Repeat("a", maxBearerTokenLength), wantToken: strings.Repeat("a", maxBearerTokenLength), wantOK: true},
+		{name: "too long token", header: "Bearer " + strings.Repeat("a", maxBearerTokenLength+1), wantOK: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			token, ok := BearerToken(tc.header)

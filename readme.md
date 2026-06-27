@@ -102,6 +102,14 @@ npm run verify:mobile
 npm run verify:web:e2e
 ```
 
+## 协作与安全
+
+- 贡献流程见 `CONTRIBUTING.md`，PR 需要说明关联 issue、测试结果、风险和回滚方案。
+- 漏洞或敏感信息问题不要发公开 issue，按 `SECURITY.md` 走私密报告流程。
+- 关键区域 reviewer 由 `.github/CODEOWNERS` 维护，API 合约、运行时中间件、部署配置和 GitHub 配置变更会自动归属仓库 owner。
+- 业务 API 合约在 `backend/api/openapi.yaml`，健康检查合约在 `backend/api/health-openapi.yaml`；接口结构变化后需要同步生成客户端并运行 `npm run verify:api-contract`。
+- GitHub Actions 包含 CI 和 CodeQL。CI 运行 compose/API/backend/web/mobile 验证，CodeQL 对 Go 和 JavaScript/TypeScript 做静态安全分析。
+
 ### 3. 启动 Web
 
 ```bash
@@ -227,7 +235,7 @@ Web 端使用 Next.js standalone 输出。`NEXT_PUBLIC_API_BASE` 会在构建时
 - `HTTP_MAX_HEADER_BYTES`（可选，默认 `1048576`，1 MiB）
 - `HTTP_MAX_BODY_BYTES`（可选，默认 `6291456`，约 6 MiB）
 - `HTTP_METRICS_ENABLED`（可选，默认 `false`；仅在 backend 端口受保护时开启 `/metrics`）
-- `HTTP_METRICS_TOKEN`（可选；设置后 `/metrics` 需要 `Authorization: Bearer <token>`）
+- `HTTP_METRICS_TOKEN`（可选；设置后 `/metrics` 需要 `Authorization: Bearer <token>`；token 必须符合 RFC 6750 token68 字符集且最长 4096 字节）
 - `HTTP_HSTS_MAX_AGE_SECONDS`、`HTTP_HSTS_INCLUDE_SUBDOMAINS`、`HTTP_HSTS_PRELOAD`（可选，仅 HTTPS 部署启用）
 - `HTTP_CROSS_ORIGIN_EMBEDDER_POLICY`（可选，默认不发送；需要浏览器跨域隔离时设置为 `require-corp`、`credentialless` 或 `unsafe-none`）
 - `BACKEND_STOP_GRACE_PERIOD`（可选，Compose 停止 backend 容器的宽限期，默认 `30s`，应大于 `HTTP_SHUTDOWN_TIMEOUT`）
@@ -286,6 +294,8 @@ CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 
 后端会统一返回基础安全响应头，包括 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin` 和一个保守的 `Permissions-Policy`，默认关闭相机、定位、麦克风和支付能力。
 
+Web 的 Next 配置和 Mobile Web 的 Nginx 配置也会返回基础浏览器安全响应头，包括 `Referrer-Policy: strict-origin-when-cross-origin`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin`、`Origin-Agent-Cluster: ?1`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`X-DNS-Prefetch-Control: off`、`X-Download-Options: noopen`、`X-Permitted-Cross-Domain-Policies: none`、`X-XSS-Protection: 0` 和同样收紧相机、定位、麦克风、支付能力的 `Permissions-Policy`。静态前端默认不写 `Strict-Transport-Security`、`Content-Security-Policy` 或 `Cross-Origin-Embedder-Policy`，这些头需要在确认 HTTPS 覆盖、脚本资源和跨源隔离策略后再按部署启用。
+
 `Cross-Origin-Embedder-Policy` 默认不发送，避免 API 被嵌入到还没完成 CORP/CORS 标记的前端或第三方资源链路时出现浏览器拦截。只有确认部署需要浏览器跨域隔离能力时，再设置 `HTTP_CROSS_ORIGIN_EMBEDDER_POLICY=require-corp` 或 `credentialless`；启动校验会拒绝未知值。
 
 `Strict-Transport-Security` 默认不发送，避免本地 HTTP 调试或尚未确认 HTTPS 覆盖面的域名被浏览器长期记住为强制 HTTPS。生产环境确认 API 域名只通过 HTTPS 访问后，可以设置 `HTTP_HSTS_MAX_AGE_SECONDS=31536000`；只有确认所有子域也都支持 HTTPS 时再开启 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。准备加入浏览器 preload 列表时再开启 `HTTP_HSTS_PRELOAD=true`，此时启动校验会要求 `HTTP_HSTS_MAX_AGE_SECONDS>=31536000` 且 `HTTP_HSTS_INCLUDE_SUBDOMAINS=true`。
@@ -308,9 +318,11 @@ CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
 `HTTP_MAX_BODY_BYTES` 是全局请求体上限，用于在 HTTP 层提前拒绝过大的 JSON 或 multipart 请求。默认约 6 MiB，略高于导入文件 5 MiB 的业务上限，用于容纳 multipart 边界和表单字段开销。
 该上限同时覆盖已声明 `Content-Length` 的请求和 chunked/未知长度的流式请求；超限时接口返回结构化 `413 payload_too_large` 错误。
 
-`HTTP_METRICS_ENABLED=false` 默认不暴露 `/metrics`。只有在 backend 端口位于可信内网、被反向代理认证保护，或采集器通过受控网络访问时再开启；设置 `HTTP_METRICS_TOKEN` 后采集器还必须发送 `Authorization: Bearer <token>`。该端点会包含 Go runtime、process 和低基数 HTTP 指标。
+`HTTP_METRICS_ENABLED=false` 默认不暴露 `/metrics`。只有在 backend 端口位于可信内网、被反向代理认证保护，或采集器通过受控网络访问时再开启；设置 `HTTP_METRICS_TOKEN` 后采集器还必须发送 `Authorization: Bearer <token>`，token 使用 RFC 6750 token68 字符集且最长 4096 字节。该端点会包含 Go runtime、process 和低基数 HTTP 指标。
 
 Compose 对无状态的 `web` 和 `backend` 启用了只读根文件系统、`no-new-privileges`、`cap_drop: [ALL]` 和 `init: true`。临时写入只允许进入 `tmpfs`，数据库和 Redis 仍通过 volume 持久化数据。若迁移到不支持这些 Compose 选项的平台，需要用等价的安全上下文配置替代。
+
+生产 Compose 为所有服务统一配置了 Docker `json-file` 日志轮转，单文件上限 `10m`、最多保留 `5` 个文件，避免没有 daemon 级日志策略时容器日志持续占满磁盘。
 
 ### 2. 构建并启动
 

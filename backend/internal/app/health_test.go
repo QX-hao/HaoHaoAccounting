@@ -14,6 +14,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/modules/dataio"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/testutil"
 	"github.com/gin-gonic/gin"
 )
@@ -49,6 +50,24 @@ func TestHealthLivezReturnsOK(t *testing.T) {
 	if !strings.Contains(resp.Body.String(), `"status":"ok"`) {
 		t.Fatalf("body = %s", resp.Body.String())
 	}
+	assertJSONContentType(t, resp)
+	assertNoCacheHeaders(t, resp)
+}
+
+func TestHealthProbeHEADReturnsStatusAndHeadersOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	registerHealthRoutes(router, nil, nil)
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodHead, "/livez", nil))
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if resp.Body.Len() != 0 {
+		t.Fatalf("HEAD body = %q, want empty", resp.Body.String())
+	}
 	assertNoCacheHeaders(t, resp)
 }
 
@@ -64,20 +83,95 @@ func TestReadmeDocumentsRouteContracts(t *testing.T) {
 		"`/readyz` and `/health` check the database and optional Redis cache",
 		"`/metrics` owned by the server entrypoint",
 		"2 second dependency budget",
-		"Database failures return `503` with `status: unavailable`",
+		"Database or Redis failures return `503` with `status: unavailable`",
+		"do not expose raw dependency error details",
 		"Redis is reported as `disabled`",
 		"All `/api/v1` routes use `NoStore` cache headers",
 		"API fallback errors for missing routes and unsupported methods",
 		"shared structured error body with request IDs",
+		"API paths are matched exactly as documented",
+		"trailing slash variants are not redirected",
+		"extra slash variants are not normalized",
+		"multipart parsing memory budget is aligned with the import file size limit",
 		"`Cache-Control: no-store`",
 		"`Pragma: no-cache`",
 		"`Expires: 0`",
 		"Health probe responses use `Cache-Control: no-cache`",
+		"Health probe `GET` responses use `Content-Type: application/json; charset=utf-8`",
+		"Health probes support both `GET` and `HEAD`",
 		"Non-API health probe fallbacks remain cache-neutral",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("README.md is missing app route guidance %q", want)
 		}
+	}
+}
+
+func TestConfigureRouterKeepsAPIContractsExplicit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	configureRouter(router)
+
+	if router.RedirectTrailingSlash {
+		t.Fatal("RedirectTrailingSlash = true, want false")
+	}
+	if router.RedirectFixedPath {
+		t.Fatal("RedirectFixedPath = true, want false")
+	}
+	if router.RemoveExtraSlash {
+		t.Fatal("RemoveExtraSlash = true, want false")
+	}
+	if router.MaxMultipartMemory != dataio.MaxImportFileBytes {
+		t.Fatalf("MaxMultipartMemory = %d, want %d", router.MaxMultipartMemory, dataio.MaxImportFileBytes)
+	}
+}
+
+func TestAPISlashVariantsDoNotRedirectOrNormalize(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(middleware.RequestID())
+	if err := RegisterRoutesWithConfig(router, testutil.NewStore(t), nil, config.Config{
+		Admin: config.AdminConfig{
+			Username: "admin",
+			Password: "secret-password",
+			Name:     "管理员",
+		},
+		LoginRateLimit: config.LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		JWT:            config.JWTConfig{Secret: "test-jwt-secret-with-at-least-32-chars", TTL: time.Hour, Issuer: "issuer", Audience: "api"},
+	}); err != nil {
+		t.Fatalf("register routes: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		path      string
+		requestID string
+	}{
+		{name: "trailing slash", path: "/api/v1/accounts/", requestID: "request-trailing-slash"},
+		{name: "extra slash", path: "/api/v1//accounts", requestID: "request-extra-slash"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Header.Set(middleware.RequestIDHeader, tc.requestID)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+			}
+			if got := resp.Header().Get("Location"); got != "" {
+				t.Fatalf("Location = %q, want no redirect", got)
+			}
+			if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control = %q", got)
+			}
+			body := parseErrorBody(t, resp)
+			if body.Code != httputil.CodeNotFound || body.RequestID != tc.requestID {
+				t.Fatalf("body = %#v", body)
+			}
+		})
 	}
 }
 
@@ -171,7 +265,7 @@ func TestFallbackRoutesReturnStructuredErrors(t *testing.T) {
 	if methodResp.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("method status = %d, body = %s", methodResp.Code, methodResp.Body.String())
 	}
-	if got := methodResp.Header().Get("Allow"); got != http.MethodGet {
+	if got := methodResp.Header().Get("Allow"); got != "GET, HEAD" {
 		t.Fatalf("Allow = %q", got)
 	}
 	if got := methodResp.Header().Get("Cache-Control"); got != "" {
@@ -190,7 +284,7 @@ func TestFallbackRoutesReturnStructuredErrors(t *testing.T) {
 	if apiMethodResp.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("api method status = %d, body = %s", apiMethodResp.Code, apiMethodResp.Body.String())
 	}
-	if got := apiMethodResp.Header().Get("Allow"); got != "GET, POST" && got != "POST, GET" {
+	if got := apiMethodResp.Header().Get("Allow"); got != "GET, POST" {
 		t.Fatalf("api Allow = %q", got)
 	}
 	if got := apiMethodResp.Header().Get("Cache-Control"); got != "no-store" {
@@ -199,6 +293,17 @@ func TestFallbackRoutesReturnStructuredErrors(t *testing.T) {
 	apiMethodBody := parseErrorBody(t, apiMethodResp)
 	if apiMethodBody.Code != httputil.CodeMethodNotAllowed || apiMethodBody.RequestID != "request-api-405" {
 		t.Fatalf("api method body = %#v", apiMethodBody)
+	}
+}
+
+func TestNormalizeAllowHeaderUsesStableMethodOrder(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Allow", "POST, get, GET, DELETE, PATCH, UNKNOWN, OPTIONS, HEAD, PUT")
+
+	normalizeAllowHeader(headers)
+
+	if got := headers.Get("Allow"); got != "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, UNKNOWN" {
+		t.Fatalf("Allow = %q", got)
 	}
 }
 
@@ -278,13 +383,16 @@ func TestReadyzReturnsOKWhenDatabaseIsReadyAndRedisDisabled(t *testing.T) {
 	if body.Status != "ok" || body.Checks["database"]["status"] != "ok" || body.Checks["redis"]["status"] != "disabled" {
 		t.Fatalf("body = %#v", body)
 	}
+	assertJSONContentType(t, resp)
 	assertNoCacheHeaders(t, resp)
 }
 
 func TestReadyzReturnsUnavailableWhenDatabaseFails(t *testing.T) {
+	const internalError = "database down host=db.internal password=secret"
+
 	router := gin.New()
 	router.GET("/readyz", readyzWithDependencies(pingFunc(func(context.Context) error {
-		return errors.New("database down")
+		return errors.New(internalError)
 	}), nil))
 
 	resp := httptest.NewRecorder()
@@ -294,17 +402,40 @@ func TestReadyzReturnsUnavailableWhenDatabaseFails(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
 	}
 	body := parseHealthBody(t, resp)
-	if body.Status != "unavailable" || body.Checks["database"]["status"] != "error" || body.Checks["database"]["error"] != "database down" {
+	if body.Status != "unavailable" || body.Checks["database"]["status"] != "error" || body.Checks["database"]["error"] != "unavailable" {
 		t.Fatalf("body = %#v", body)
+	}
+	if strings.Contains(resp.Body.String(), internalError) || strings.Contains(resp.Body.String(), "secret") {
+		t.Fatalf("health response leaked internal dependency error: %s", resp.Body.String())
+	}
+	assertNoCacheHeaders(t, resp)
+}
+
+func TestReadyzHEADPreservesDependencyStatus(t *testing.T) {
+	router := gin.New()
+	router.HEAD("/readyz", readyzWithDependencies(pingFunc(func(context.Context) error {
+		return errors.New("database down")
+	}), nil))
+
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, httptest.NewRequest(http.MethodHead, "/readyz", nil))
+
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.Code)
+	}
+	if resp.Body.Len() != 0 {
+		t.Fatalf("HEAD body = %q, want empty", resp.Body.String())
 	}
 	assertNoCacheHeaders(t, resp)
 }
 
 func TestReadyzReturnsUnavailableWhenRedisFails(t *testing.T) {
+	const internalError = "redis down addr=redis.internal password=secret"
+
 	router := gin.New()
 	router.GET("/readyz", readyzWithDependencies(
 		pingFunc(func(context.Context) error { return nil }),
-		pingFunc(func(context.Context) error { return errors.New("redis down") }),
+		pingFunc(func(context.Context) error { return errors.New(internalError) }),
 	))
 
 	resp := httptest.NewRecorder()
@@ -314,10 +445,22 @@ func TestReadyzReturnsUnavailableWhenRedisFails(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
 	}
 	body := parseHealthBody(t, resp)
-	if body.Status != "unavailable" || body.Checks["redis"]["status"] != "error" || body.Checks["redis"]["error"] != "redis down" {
+	if body.Status != "unavailable" || body.Checks["redis"]["status"] != "error" || body.Checks["redis"]["error"] != "unavailable" {
 		t.Fatalf("body = %#v", body)
 	}
+	if strings.Contains(resp.Body.String(), internalError) || strings.Contains(resp.Body.String(), "secret") {
+		t.Fatalf("health response leaked internal dependency error: %s", resp.Body.String())
+	}
+	assertJSONContentType(t, resp)
 	assertNoCacheHeaders(t, resp)
+}
+
+func assertJSONContentType(t *testing.T, resp *httptest.ResponseRecorder) {
+	t.Helper()
+
+	if got := resp.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("Content-Type = %q", got)
+	}
 }
 
 func assertNoCacheHeaders(t *testing.T, resp *httptest.ResponseRecorder) {

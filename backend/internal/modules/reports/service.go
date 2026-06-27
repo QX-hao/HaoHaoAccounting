@@ -587,7 +587,7 @@ func (s *Service) weekExpression() string {
 }
 
 func (s *Service) db(ctx context.Context) *gorm.DB {
-	return s.store.DB.WithContext(requestContext(ctx))
+	return s.store.DBWithContext(ctx)
 }
 
 func requestContext(ctx context.Context) context.Context {

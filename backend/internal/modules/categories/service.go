@@ -97,10 +97,7 @@ func (s *Service) Delete(ctx context.Context, userID, id uint) error {
 }
 
 func (s *Service) db(ctx context.Context) *gorm.DB {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.store.DB.WithContext(ctx)
+	return s.store.DBWithContext(ctx)
 }
 
 func (s *Service) invalidateUser(ctx context.Context, userID uint) {

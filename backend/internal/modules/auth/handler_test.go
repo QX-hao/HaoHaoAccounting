@@ -181,6 +181,26 @@ func TestLoginPreservesPasswordWhitespace(t *testing.T) {
 	}
 }
 
+func TestLoginUsesGenericFailurePathForMissingUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	limiter := newLoginLimiter(1, time.Minute)
+	handler := &Handler{store: testutil.NewStore(t), loginLimiter: limiter, tokenService: testTokenService(t)}
+	handler.RegisterPublic(router.Group("/api/v1"))
+
+	resp := postLogin(t, router, `{"username":"missing","password":"secret-password"}`)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); !strings.Contains(got, "用户名或密码错误") {
+		t.Fatalf("body = %s", got)
+	}
+	if limiter.Allow(loginLimiterKey("192.0.2.1", "missing")) {
+		t.Fatal("expected missing-user failure to count toward rate limit")
+	}
+}
+
 func TestLoginRejectsMissingCredentialsAtBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -202,6 +222,19 @@ func TestLoginRejectsMissingCredentialsAtBinding(t *testing.T) {
 				t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
 			}
 		})
+	}
+}
+
+func TestVerifyPasswordOrDummyUsesDummyHashForMissingUsers(t *testing.T) {
+	if verifyPasswordOrDummy("", "secret-password") {
+		t.Fatal("dummy password hash should not verify caller-provided passwords")
+	}
+	hash, err := hashPassword("secret-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verifyPasswordOrDummy(hash, "secret-password") {
+		t.Fatal("real password hash should verify")
 	}
 }
 
@@ -356,12 +389,12 @@ func TestRefreshRevokesCurrentTokenWhenRevokerIsConfigured(t *testing.T) {
 
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
-		c.Set("user_id", user.ID)
 		c.Set("token_revoker", &TokenRevoker{cache: revocationStore})
 		c.Next()
 	})
 	handler := &Handler{store: s, tokenService: tokenService}
-	handler.RegisterPrivate(router.Group("/api/v1"))
+	group := router.Group("/api/v1", middleware.RequireAuthWithRevocation(nil, tokenService))
+	handler.RegisterPrivate(group)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -390,12 +423,12 @@ func TestRefreshReturnsInvalidTokenChallengeWhenRevocationTTLCannotBeComputed(t 
 
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
-		c.Set("user_id", user.ID)
 		c.Set("token_revoker", &TokenRevoker{cache: &recordingRevocationStore{enabled: true}})
 		c.Next()
 	})
 	handler := &Handler{store: s, tokenService: testTokenService(t)}
-	handler.RegisterPrivate(router.Group("/api/v1"))
+	group := router.Group("/api/v1", middleware.RequireAuthWithRevocation(nil, handler.tokenService))
+	handler.RegisterPrivate(group)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
 	req.Header.Set("Authorization", "Bearer not-a-valid-jwt")
@@ -460,7 +493,8 @@ func TestLogoutReturnsUnauthorizedWhenRevocationTTLCannotBeComputed(t *testing.T
 		c.Next()
 	})
 	handler := &Handler{store: testutil.NewStore(t), tokenService: testTokenService(t)}
-	handler.RegisterPrivate(router.Group("/api/v1"))
+	group := router.Group("/api/v1", middleware.RequireAuthWithRevocation(nil, handler.tokenService))
+	handler.RegisterPrivate(group)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
 	req.Header.Set("Authorization", "Bearer not-a-valid-jwt")
@@ -471,6 +505,36 @@ func TestLogoutReturnsUnauthorizedWhenRevocationTTLCannotBeComputed(t *testing.T
 		t.Fatalf("status = %d, want 401, body = %s", resp.Code, resp.Body.String())
 	}
 	assertInvalidTokenChallenge(t, resp)
+}
+
+func TestLogoutClearsBrowserSiteDataOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("token_revoker", &TokenRevoker{cache: &recordingRevocationStore{enabled: true}})
+		c.Next()
+	})
+	tokenService := testTokenService(t)
+	handler := &Handler{store: testutil.NewStore(t), tokenService: tokenService}
+	group := router.Group("/api/v1", middleware.RequireAuthWithRevocation(nil, tokenService))
+	handler.RegisterPrivate(group)
+
+	token, err := tokenService.BuildToken(1)
+	if err != nil {
+		t.Fatalf("build token: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Clear-Site-Data"); got != `"cache", "cookies", "storage"` {
+		t.Fatalf("Clear-Site-Data = %q", got)
+	}
 }
 
 func TestTokenRevokerStoresRevocationWithProvidedTTL(t *testing.T) {
@@ -486,6 +550,33 @@ func TestTokenRevokerStoresRevocationWithProvidedTTL(t *testing.T) {
 	}
 	if store.ttl != 30*time.Minute {
 		t.Fatalf("ttl = %s", store.ttl)
+	}
+}
+
+func TestTokenRevokerStoresOnlyTokenDigest(t *testing.T) {
+	store := &recordingRevocationStore{enabled: true}
+	revoker := &TokenRevoker{cache: store}
+	token := "header.payload.signature"
+
+	if err := revoker.RevokeToken(context.Background(), token, 30*time.Minute); err != nil {
+		t.Fatalf("revoke token: %v", err)
+	}
+
+	const prefix = "auth:revoked:"
+	if !strings.HasPrefix(store.key, prefix) {
+		t.Fatalf("key = %q, want %s prefix", store.key, prefix)
+	}
+	digest := strings.TrimPrefix(store.key, prefix)
+	if len(digest) != 64 {
+		t.Fatalf("digest length = %d, want 64", len(digest))
+	}
+	for _, r := range digest {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			t.Fatalf("digest %q is not lowercase hex", digest)
+		}
+	}
+	if strings.Contains(store.key, token) {
+		t.Fatalf("revocation key leaked raw token: %q", store.key)
 	}
 }
 

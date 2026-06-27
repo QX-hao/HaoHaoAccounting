@@ -4,17 +4,20 @@ import { test } from 'node:test';
 
 const generator = readFileSync(new URL('../generate-api-types.mjs', import.meta.url), 'utf8');
 const openapi = readFileSync(new URL('../../backend/api/openapi.yaml', import.meta.url), 'utf8');
+const healthOpenapi = readFileSync(new URL('../../backend/api/health-openapi.yaml', import.meta.url), 'utf8');
 const generatedClient = readFileSync(new URL('../../web/shared/api/generated-client.ts', import.meta.url), 'utf8');
 const generatedTypes = readFileSync(new URL('../../web/shared/types/api.ts', import.meta.url), 'utf8');
 const webApiClient = readFileSync(new URL('../../web/shared/api/client.ts', import.meta.url), 'utf8');
 const webApiReadme = readFileSync(new URL('../../web/shared/api/README.md', import.meta.url), 'utf8');
 const webConfig = readFileSync(new URL('../../web/lib/config.ts', import.meta.url), 'utf8');
 const webDataioApi = readFileSync(new URL('../../web/features/dataio/api.ts', import.meta.url), 'utf8');
+const webAppShell = readFileSync(new URL('../../web/components/AppShell.tsx', import.meta.url), 'utf8');
 const webEnvExample = readFileSync(new URL('../../web/.env.example', import.meta.url), 'utf8');
 const mobileApiClient = readFileSync(new URL('../../mobile/src/shared/api/client.ts', import.meta.url), 'utf8');
 const mobileApiReadme = readFileSync(new URL('../../mobile/src/shared/api/README.md', import.meta.url), 'utf8');
 const mobileConfig = readFileSync(new URL('../../mobile/src/shared/config.ts', import.meta.url), 'utf8');
 const mobileDataioApi = readFileSync(new URL('../../mobile/src/features/dataio/api.ts', import.meta.url), 'utf8');
+const mobileUseSession = readFileSync(new URL('../../mobile/src/features/auth/useSession.ts', import.meta.url), 'utf8');
 const mobileEnvExample = readFileSync(new URL('../../mobile/.env.example', import.meta.url), 'utf8');
 const goHTTPUtilResponses = readFileSync(new URL('../../backend/internal/httputil/response.go', import.meta.url), 'utf8');
 const goRequestDTOs = new Map([
@@ -56,6 +59,16 @@ function openapiPathBlock(apiPath) {
 	return marker + rest.slice(0, next === -1 ? rest.length : next);
 }
 
+function openAPIOperationBlocks() {
+	const paths = openapi.slice(openapi.indexOf('paths:'), openapi.indexOf('components:'));
+	const matches = [...paths.matchAll(/^    (get|post|put|delete|patch|options|head|trace):$/gm)];
+	return matches.map((match, index) => {
+		const start = match.index;
+		const end = matches[index + 1]?.index ?? paths.length;
+		return paths.slice(start, end);
+	});
+}
+
 function responseBlock(source, status) {
 	const marker = `        '${status}':\n`;
 	const start = source.indexOf(marker);
@@ -77,9 +90,14 @@ function componentResponseBlock(responseName) {
 	return marker + rest.slice(0, next === -1 ? rest.length : next);
 }
 
-test('OpenAPI YAML disallows duplicate mapping keys', () => {
-	const duplicates = duplicateYamlMappingKeys(openapi);
-	assert.deepEqual(duplicates, []);
+test('OpenAPI YAML files disallow duplicate mapping keys', () => {
+	for (const [name, source] of [
+		['backend/api/openapi.yaml', openapi],
+		['backend/api/health-openapi.yaml', healthOpenapi],
+	]) {
+		const duplicates = duplicateYamlMappingKeys(source);
+		assert.deepEqual(duplicates, [], `${name} contains duplicate mapping keys`);
+	}
 });
 
 test('YAML duplicate key scanner treats sequence item maps independently', () => {
@@ -110,6 +128,12 @@ test('generated types preserve property enum values', () => {
 	assert.match(generator, /propertyEnumValues/);
 });
 
+test('generated types parse quoted empty string enum values', () => {
+	assert.match(generator, /parseInlineYAMLScalar/);
+	assert.doesNotMatch(generatedTypes, /"''"/);
+	assert.match(generatedTypes, /type: "income" \| "expense" \| "";/);
+});
+
 test('generated error codes stay available to API clients', () => {
 	assert.match(generatedTypes, /request_timeout/);
 	assert.match(generatedTypes, /client_closed_request/);
@@ -122,7 +146,7 @@ test('generated error codes stay available to API clients', () => {
 	assert.match(webApiClient, /authenticateChallenge/);
 	assert.match(webApiClient, /WWW-Authenticate/);
 	assert.match(webApiClient, /network_error/);
-	assert.match(webApiClient, /function networkError\(err: unknown\)/);
+	assert.match(webApiClient, /function networkError\(err: unknown, timedOut = false\)/);
 	assert.match(webApiClient, /super\(message, \{ cause \}\)/);
 	assert.match(webApiClient, /new ApiError\(message, 0, 'network_error', '', null, null, null, null, '', err\)/);
 	assert.match(mobileApiClient, /ErrorResponse\['code'\]/);
@@ -133,7 +157,7 @@ test('generated error codes stay available to API clients', () => {
 	assert.match(mobileApiClient, /authenticateChallenge/);
 	assert.match(mobileApiClient, /WWW-Authenticate/);
 	assert.match(mobileApiClient, /network_error/);
-	assert.match(mobileApiClient, /function networkError\(err: unknown\)/);
+	assert.match(mobileApiClient, /function networkError\(err: unknown, timedOut = false\)/);
 	assert.match(mobileApiClient, /super\(message, \{ cause \}\)/);
 	assert.match(mobileApiClient, /new ApiError\(message, 0, 'network_error', '', null, null, null, null, '', err\)/);
 });
@@ -144,6 +168,50 @@ test('OpenAPI documents CORS allowlist rejection behavior', () => {
 	assert.match(info, /rejected by CORS middleware with 403/);
 	assert.match(info, /do not include Access-Control-Allow-Origin/);
 	assert.match(generator, /OpenAPI info\.description must document CORS allowlist rejection behavior/);
+});
+
+test('OpenAPI documents strict API path matching behavior', () => {
+	const info = openapiTopLevelBlock('info');
+	assert.match(info, /API paths are matched exactly as documented/);
+	assert.match(info, /trailing slash or extra slash variants are not/);
+	assert.match(info, /redirected or normalized/);
+	assert.match(info, /structured not_found response/);
+	assert.match(generator, /OpenAPI info\.description must document strict API path matching behavior/);
+});
+
+test('OpenAPI documents repeated query parameter rejection', () => {
+	const info = openapiTopLevelBlock('info');
+	assert.match(info, /Query parameters are single-value/);
+	assert.match(info, /repeated scalar query keys/);
+	assert.match(info, /structured invalid_request response/);
+	assert.match(generator, /OpenAPI info\.description must document repeated query parameter rejection/);
+});
+
+test('OpenAPI documents strict JSON body parsing behavior', () => {
+	const info = openapiTopLevelBlock('info');
+	assert.match(info, /JSON request bodies reject unknown fields/);
+	assert.match(info, /duplicate object keys/);
+	assert.match(info, /multiple top-level JSON values/);
+	assert.match(info, /before binding validation/);
+	assert.match(generator, /OpenAPI info\.description must document strict JSON body parsing behavior/);
+});
+
+test('OpenAPI info identifies the maintainer contact path', () => {
+	const info = openapiTopLevelBlock('info');
+	assert.match(info, /contact:\n\s+name: HaoHaoAccounting Maintainers/);
+	assert.match(info, /url: https:\/\/github\.com\/QX-hao\/HaoHaoAccounting\/security/);
+	assert.match(generator, /validateOpenAPIInfoContact\(source\)/);
+	assert.match(generator, /OpenAPI info\.contact must identify HaoHaoAccounting maintainers/);
+	assert.match(generator, /OpenAPI info\.contact must link to the repository security contact path/);
+});
+
+test('OpenAPI links to repository contract documentation', () => {
+	const externalDocs = openapiTopLevelBlock('externalDocs');
+	assert.match(externalDocs, /description: Repository API contract and verification workflow\./);
+	assert.match(externalDocs, /url: https:\/\/github\.com\/QX-hao\/HaoHaoAccounting\/tree\/dev-pxhao#协作与安全/);
+	assert.match(generator, /validateOpenAPIExternalDocs\(source\)/);
+	assert.match(generator, /OpenAPI externalDocs must describe the repository API contract workflow/);
+	assert.match(generator, /OpenAPI externalDocs must link to repository API contract documentation/);
 });
 
 test('OpenAPI servers describe the local API base URL', () => {
@@ -163,7 +231,16 @@ test('OpenAPI top-level tags describe operation groups', () => {
 	assert.match(generator, /validateOpenAPITags\(source\)/);
 	assert.match(generator, /OpenAPI top-level tags must declare API groups/);
 	assert.match(generator, /OpenAPI tag \$\{name\} is missing description/);
+	assert.match(generator, /OpenAPI tag \$\{name\} is declared more than once/);
 	assert.match(generator, /uses undeclared tag/);
+});
+
+test('generated clients use OpenAPI tags as module groups', () => {
+	assert.match(generator, /must declare exactly one tag for generated client grouping/);
+	assert.match(generator, /const group = endpoint\.tags\[0\]\.replace/);
+	assert.doesNotMatch(generator, /const first = endpoint\.path\.split/);
+	assert.match(generatedClient, /auth: \{[\s\S]+getMe:/);
+	assert.doesNotMatch(generatedClient, /me: \{/);
 });
 
 test('API clients send request ids for log correlation', () => {
@@ -237,12 +314,17 @@ test('API clients only default JSON Content-Type when a non-FormData body is pre
 test('mobile CSV export uses shared text download error handling', () => {
 	assert.match(mobileApiClient, /export async function download\(path: string, accept = '\*\/\*'\): Promise<DownloadResult>/);
 	assert.match(mobileApiClient, /export async function downloadText/);
-	assert.match(mobileApiClient, /filenameFromDisposition\(resp\.headers\.get\('Content-Disposition'\)\)/);
+	assert.match(mobileApiClient, /filenameFromDisposition\(resp\.headers\.get\('Content-Disposition'\)\) \|\| 'download'/);
 	assert.match(mobileApiClient, /const data = await parseErrorBody\(resp\);/);
 	assert.match(mobileDataioApi, /return downloadText\('\/io\/export\?format=csv', 'text\/csv'\)/);
 	assert.match(mobileDataioApi, /export function exportTransactionsFile\(format: ExportFormat\)/);
 	assert.match(mobileDataioApi, /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/);
 	assert.doesNotMatch(mobileDataioApi, /fetch\(`\$\{API_BASE\}\/io\/export/);
+});
+
+test('API clients fall back to a stable download filename', () => {
+	assert.match(webApiClient, /filenameFromDisposition\(resp\.headers\.get\('Content-Disposition'\)\) \|\| 'download'/);
+	assert.match(mobileApiClient, /filenameFromDisposition\(resp\.headers\.get\('Content-Disposition'\)\) \|\| 'download'/);
 });
 
 test('API clients parse non-JSON error bodies through the shared error parser', () => {
@@ -260,9 +342,27 @@ test('API clients parse structured JSON error media types', () => {
 	}
 });
 
+test('API clients ignore non-object JSON error bodies', () => {
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /function isObjectRecord\(value: unknown\): value is Record<string, unknown>/);
+		assert.match(source, /const data = await resp\.json\(\)\.catch\(\(\) => \(\{\}\)\);/);
+		assert.match(source, /return isObjectRecord\(data\) \? data as ApiErrorBody : \{\};/);
+		assert.match(source, /!Array\.isArray\(value\)/);
+	}
+});
+
 test('API clients route logout through shared network error handling', () => {
 	assert.match(webApiClient, /await fetchAPI\('\/auth\/logout', \{/);
 	assert.match(mobileApiClient, /await fetchAPI\('\/auth\/logout', \{/);
+	assert.match(webApiClient, /export async function logout\(\): Promise<void> \{[\s\S]+clearToken\(\);[\s\S]+await fetchAPI\('\/auth\/logout'/);
+	assert.match(mobileApiClient, /export async function logout\(\) \{[\s\S]+await clearToken\(\);[\s\S]+await fetchAPI\('\/auth\/logout'/);
+	assert.doesNotMatch(webAppShell, /clearToken/);
+	assert.doesNotMatch(mobileUseSession.match(/async function signOut\(\) \{[\s\S]+?\n  \}/)?.[0] || '', /clearToken/);
+	assert.match(mobileApiClient, /const sessionInvalidationListeners = new Set<\(\) => void>\(\);/);
+	assert.match(mobileApiClient, /export function onSessionInvalidated\(listener: \(\) => void\)/);
+	assert.match(mobileApiClient, /function notifySessionInvalidated\(\)/);
+	assert.match(mobileApiClient, /resp\.status === 401[\s\S]+await clearToken\(\);[\s\S]+notifySessionInvalidated\(\);/);
+	assert.match(mobileUseSession, /onSessionInvalidated\(\(\) => \{[\s\S]+setAuthed\(false\);[\s\S]+\}\)/);
 	assert.doesNotMatch(webApiClient, /fetch\(`\$\{API_BASE\}\/auth\/logout/);
 	assert.doesNotMatch(mobileApiClient, /fetch\(`\$\{API_BASE\}\/auth\/logout/);
 });
@@ -272,10 +372,22 @@ test('API clients bound fetch calls with timeout and preserve caller abort signa
 		assert.match(source, /const API_REQUEST_TIMEOUT_MS = 30_000;/);
 		assert.match(source, /function requestSignal\(callerSignal\?: AbortSignal \| null\)/);
 		assert.match(source, /const controller = new AbortController\(\);/);
-		assert.match(source, /setTimeout\(\(\) => controller\.abort\(\), API_REQUEST_TIMEOUT_MS\)/);
+		assert.match(source, /let timedOut = false;/);
+		assert.match(source, /setTimeout\(\(\) => \{\n\s+timedOut = true;\n\s+controller\.abort\(\);\n\s+\}, API_REQUEST_TIMEOUT_MS\)/);
 		assert.match(source, /callerSignal\.addEventListener\('abort', abort, \{ once: true \}\)/);
-		assert.match(source, /return await fetch\(`\$\{API_BASE\}\$\{path\}`, \{ \.\.\.init, signal \}\);/);
-		assert.match(source, /finally \{\n\s+cleanup\(\);\n\s+\}/);
+		assert.match(source, /return await fetch\(`\$\{API_BASE\}\$\{path\}`, \{ \.\.\.init, credentials: 'omit', signal: request\.signal \}\);/);
+		assert.match(source, /finally \{\n\s+request\.cleanup\(\);\n\s+\}/);
+	}
+});
+
+test('API clients expose local request timeouts as structured API errors', () => {
+	assert.match(webApiClient, /throw networkError\(err, request\.timedOut\(\)\);/);
+	assert.match(mobileApiClient, /throw networkError\(err, request\.timedOut\(\)\);/);
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /timedOut: \(\) => timedOut/);
+		assert.match(source, /function networkError\(err: unknown, timedOut = false\)/);
+		assert.match(source, /if \(timedOut\) \{[\s\S]+new ApiError\([^,]+, 0, 'request_timeout'/);
+		assert.match(source, /new ApiError\(message, 0, 'network_error'/);
 	}
 });
 
@@ -287,7 +399,9 @@ test('API client READMEs document shared runtime contracts', () => {
 			'`Content-Type: application/json` only when the body is not `FormData`',
 			'30 second `AbortController` timeout',
 			'`RequestInit.signal`',
+			'`credentials: omit`',
 			'`application/*+json`',
+			'`request_timeout`',
 			'`Retry-After`',
 			'`RateLimit-*`',
 			'`WWW-Authenticate`',
@@ -320,6 +434,13 @@ test('API clients expose rate limit response headers on errors', () => {
 	}
 });
 
+test('API clients only trust error-body status values in the error range', () => {
+	for (const source of [webApiClient, mobileApiClient]) {
+		assert.match(source, /status >= 400 && status <= 599/);
+		assert.doesNotMatch(source, /status >= 100 && status <= 599/);
+	}
+});
+
 test('API clients expose successful response headers with parsed data', () => {
 	for (const source of [webApiClient, mobileApiClient]) {
 		assert.match(source, /export type ApiResponse<T> = \{\n\s+data: T;\n\s+headers: Headers;\n\};/);
@@ -337,6 +458,26 @@ test('API clients expose successful response headers with parsed data', () => {
 test('generator rejects duplicate OpenAPI operationId values', () => {
 	assert.match(generator, /operationIds\.has\(operationId\)/);
 	assert.match(generator, /is used by both/);
+});
+
+test('generator requires operation ids to match generated client method names', () => {
+	assert.match(generator, /const expectedOperationId = endpointMethodName\(method, apiPath\);/);
+	assert.match(generator, /operationId must be \$\{expectedOperationId\}/);
+
+	for (const operation of openapiOperations(openapi)) {
+		assert.equal(
+			operation.operationId,
+			expectedOperationId(operation.method, operation.path),
+			`${operation.method.toUpperCase()} ${operation.path} operationId drifted`,
+		);
+	}
+});
+
+test('generator scans every OpenAPI path item HTTP operation instead of silently ignoring it', () => {
+	assert.match(generator, /const openAPIHTTPMethods = \['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'\];/);
+	assert.match(generator, /function openAPIMethodMatches\(pathBlock\)/);
+	assert.match(generator, /function openAPIMethodLineRegexp\(\)/);
+	assert.doesNotMatch(generator, /\(get\|post\|put\|delete\)/);
 });
 
 test('generator requires human-readable operation summaries', () => {
@@ -379,39 +520,56 @@ test('OpenAPI key auth responses include media type examples', () => {
 	assert.match(unauthorized, /application\/json:[\s\S]+example:[\s\S]+code: unauthorized/);
 });
 
+test('generator requires auth schema field direction metadata', () => {
+	assert.match(generator, /validateAuthSchemaFieldDirection/);
+	assert.match(generator, /LoginRequest\.password is missing writeOnly: true/);
+	assert.match(generator, /LoginRequest\.password is missing password format/);
+	assert.match(generator, /LoginResponse\.token is missing readOnly: true/);
+	assert.match(openapiSchema('LoginRequest'), /password:\n\s+type: string\n\s+minLength: 1\n\s+format: password\n\s+writeOnly: true/);
+	assert.match(openapiSchema('LoginResponse'), /token:\n\s+type: string\n\s+readOnly: true/);
+});
+
 test('OpenAPI shared error responses include structured examples', () => {
 	assert.match(generator, /validateErrorResponseExamples\(openapi\)/);
 	assert.match(generator, /components\.responses\.\$\{responseName\} example is missing \$\{field\}/);
-	for (const responseName of [
-		'BadRequest',
-		'Unauthorized',
-		'Forbidden',
-		'NotFound',
-		'MethodNotAllowed',
-		'RateLimited',
-		'PayloadTooLarge',
-		'UnsupportedMediaType',
-		'NotAcceptable',
-		'InternalError',
-		'GatewayTimeout',
-		'Error',
-	]) {
+	assert.match(generator, /components\.responses\.\$\{responseName\} example must use status \$\{expected\.status\} and code \$\{expected\.code\}/);
+	const contracts = {
+		BadRequest: [400, 'bad_request'],
+		InvalidRequest: [400, 'invalid_request'],
+		Unauthorized: [401, 'unauthorized'],
+		Forbidden: [403, 'forbidden'],
+		NotFound: [404, 'not_found'],
+		MethodNotAllowed: [405, 'method_not_allowed'],
+		RateLimited: [429, 'rate_limited'],
+		PayloadTooLarge: [413, 'payload_too_large'],
+		UnsupportedMediaType: [415, 'unsupported_media_type'],
+		NotAcceptable: [406, 'not_acceptable'],
+		InternalError: [500, 'internal_error'],
+		GatewayTimeout: [504, 'request_timeout'],
+		ClientClosedRequest: [499, 'client_closed_request'],
+		Error: [500, 'internal_error'],
+	};
+	for (const [responseName, [status, code]] of Object.entries(contracts)) {
 		const response = componentResponseBlock(responseName);
 		assert.match(response, /\$ref: '#\/components\/schemas\/ErrorResponse'/);
 		assert.match(response, /example:[\s\S]+error:/, `${responseName} is missing error example`);
 		assert.match(response, /example:[\s\S]+code:/, `${responseName} is missing code example`);
 		assert.match(response, /example:[\s\S]+status:/, `${responseName} is missing status example`);
 		assert.match(response, /example:[\s\S]+requestId:/, `${responseName} is missing requestId example`);
+		assert.match(response, new RegExp(`example:[\\s\\S]+status: ${status}`), `${responseName} example has wrong status`);
+		assert.match(response, new RegExp(`example:[\\s\\S]+code: ${code}`), `${responseName} example has wrong code`);
 	}
 });
 
 test('ErrorResponse keeps status and request ids as stable response fields', () => {
 	assert.match(generator, /validateErrorResponseSchema/);
 	assert.match(generator, /ErrorResponse\.\$\{propertyName\} is missing required/);
+	assert.match(generator, /ErrorResponse\.status is missing minimum: 400/);
+	assert.match(generator, /ErrorResponse\.status is missing maximum: 599/);
 	const schema = openapiSchema('ErrorResponse');
 	assert.match(schema, /required: \[[^\]]*status[^\]]*\]/);
 	assert.match(schema, /required: \[[^\]]*requestId[^\]]*\]/);
-	assert.match(schema, /status:\n\s+type: integer\n\s+minimum: 100\n\s+maximum: 599/);
+	assert.match(schema, /status:\n\s+type: integer\n\s+minimum: 400\n\s+maximum: 599/);
 	assert.match(generatedTypes, /status: number;/);
 	assert.doesNotMatch(generatedTypes, /status\?: number;/);
 	assert.match(generatedTypes, /requestId: string;/);
@@ -420,6 +578,17 @@ test('ErrorResponse keeps status and request ids as stable response fields', () 
 	assert.match(goHTTPUtilResponses, /RequestID\s+string\s+`json:"requestId"`/);
 	assert.doesNotMatch(goHTTPUtilResponses, /Status\s+int\s+`json:"status,omitempty"`/);
 	assert.doesNotMatch(goHTTPUtilResponses, /RequestID\s+string\s+`json:"requestId,omitempty"`/);
+});
+
+test('OpenAPI ErrorResponse code enum stays aligned with Go response constants', () => {
+	const schema = openapiSchema('ErrorResponse');
+	const enumValues = schema.match(/code:[\s\S]+?enum: \[([^\]]+)\]/)?.[1]
+		.split(',')
+		.map((value) => value.trim());
+	const goCodes = [...goHTTPUtilResponses.matchAll(/Code[A-Za-z]+\s+=\s+"([^"]+)"/g)].map((match) => match[1]);
+
+	assert.ok(enumValues, 'ErrorResponse.code must declare an enum');
+	assert.deepEqual(new Set(enumValues), new Set(goCodes));
 });
 
 test('generator requires a 2xx success response for every operation', () => {
@@ -434,6 +603,34 @@ test('generator requires declared path parameters for templated paths', () => {
 	assert.match(openapi, /Id:\n\s+name: id\n\s+in: path\n\s+required: true\n\s+description: Positive resource identifier\.[\s\S]+example: 1/);
 });
 
+test('generator fails fast for unresolved response and header component refs', () => {
+	assert.match(generator, /validateSchemaRefs\(source, new Set\(schemaNames\)\)/);
+	assert.match(generator, /OpenAPI references unknown schema component \$\{schemaName\}/);
+	assert.match(generator, /OpenAPI references unknown response component \$\{componentName\}/);
+	assert.match(generator, /OpenAPI references unknown header component \$\{componentName\}/);
+	assert.match(generator, /function responseComponentBlock[\s\S]+if \(start === -1\) \{[\s\S]+throw new Error\(`OpenAPI references unknown response component \$\{componentName\}`\);/);
+	assert.match(generator, /function componentHeaderBlock[\s\S]+if \(start === -1\) \{[\s\S]+throw new Error\(`OpenAPI references unknown header component \$\{componentName\}`\);/);
+});
+
+test('generator merges OpenAPI path item parameters into each operation', () => {
+	assert.match(generator, /parseEffectiveOperationParameters/);
+	assert.match(generator, /mergeOpenAPIParameters/);
+	assert.match(generator, /OpenAPI .* Path Item .* operation .*覆盖/);
+	assert.match(generator, /parameterKey\(parameter\)/);
+	assert.match(generator, /validateOperationQueryContract\(method, apiPath, methodBlock, responseStatuses, parameters, `\$\{sharedPathBlock\}\\n\$\{methodBlock\}`\)/);
+	assert.match(generator, /has duplicate parameter \$\{parameter\.name\} in \$\{parameter\.in\}/);
+});
+
+test('generator requires explicit OpenAPI parameter names and locations', () => {
+	assert.match(generator, /has a parameter missing name/);
+	assert.match(generator, /parameter \$\{name\} is missing in/);
+	assert.match(generator, /parameter \$\{name\} has unsupported in \$\{parameterIn\}/);
+	assert.match(generator, /parseParameterRequired\(paramBlock, context, name\)/);
+	assert.match(generator, /parameter \$\{name\} required must be true or false/);
+	assert.doesNotMatch(generator, /in:\s+paramBlock\.match\([^;]+ \|\| 'query'/);
+	assert.doesNotMatch(generator, /required:\s+paramBlock\.includes\('required: true'\)/);
+});
+
 test('generator requires X-Request-ID on success responses', () => {
 	assert.match(generator, /validateSuccessResponseHeaders/);
 	assert.match(generator, /missing X-Request-ID header/);
@@ -444,13 +641,22 @@ test('generator requires bounded visible ASCII request ids', () => {
 	assert.match(generator, /components\.parameters\.RequestID.*visible ASCII pattern/s);
 	assert.match(generator, /components\.headers\.RequestID.*maxLength: 128/s);
 	assert.match(generator, /is missing request id example/);
+	assert.match(generator, /must document generated id fallback uniqueness/);
 	assert.match(openapi, /parameters:[\s\S]+RequestID:[\s\S]+example: client-request-123/);
 	assert.match(openapi, /headers:[\s\S]+RequestID:[\s\S]+example: client-request-123/);
+	assert.match(openapi, /parameters:[\s\S]+RequestID:[\s\S]+system entropy source is unavailable/);
+	assert.match(openapi, /headers:[\s\S]+RequestID:[\s\S]+system entropy source is unavailable/);
 });
 
 test('generator requires closed request schemas', () => {
 	assert.match(generator, /validateRequestSchemasAreClosed/);
 	assert.match(generator, /is missing additionalProperties: false/);
+});
+
+test('generator requires schema required fields to exist in properties', () => {
+	assert.match(generator, /validateSchemaRequiredProperties/);
+	assert.match(generator, /\.required references missing property \$\{propertyName\}/);
+	assert.match(generator, /parseProperties\(nestedBlock\(schema, 'properties:'\)\)/);
 });
 
 test('generator requires closed shared response schemas', () => {
@@ -468,11 +674,24 @@ test('generator requires closed core response schemas', () => {
 
 test('generator requires stable current user response fields to be required', () => {
 	assert.match(generator, /validateCurrentUserResponseSchema/);
+	assert.match(generator, /CurrentUser\.id is missing readOnly: true/);
 	const authDTO = goRequestDTOs.get('auth');
+	assert.match(openapiSchemaPropertyBlock(openapiSchema('CurrentUser'), 'id'), /readOnly: true/);
 	for (const fieldName of ['username', 'phone', 'email', 'wechatId']) {
 		assert.doesNotMatch(generatedTypes, new RegExp(`${fieldName}\\?:`));
 		assert.match(authDTO, new RegExp(`json:"${fieldName}"`));
 		assert.doesNotMatch(authDTO, new RegExp(`json:"${fieldName},omitempty"`));
+	}
+});
+
+test('generator requires server-owned core resource fields to be read-only', () => {
+	assert.match(generator, /validateCoreResourceReadOnlyFields/);
+	assert.match(generator, /\$\{schemaName\}\.\$\{propertyName\} is missing readOnly: true/);
+	for (const schemaName of ['Account', 'Budget', 'Category', 'Transaction']) {
+		const schema = openapiSchema(schemaName);
+		for (const propertyName of ['id', 'userId', 'createdAt', 'updatedAt']) {
+			assert.match(openapiSchemaPropertyBlock(schema, propertyName), /readOnly: true/, `${schemaName}.${propertyName} is missing readOnly`);
+		}
 	}
 });
 
@@ -513,6 +732,66 @@ test('generator requires closed report response schemas', () => {
 	}
 });
 
+test('generator requires bounded report response schemas', () => {
+	assert.match(generator, /validateReportResponseBounds/);
+	assert.match(generator, /Summary\.trendGranularity is missing day\/week\/month enum/);
+	for (const [schemaName, fields] of [
+		['CategoryStat', [['categoryId', 1], ['amount', 0]]],
+		['AccountStat', [['accountId', 1], ['amount', 0]]],
+		['MonthTrend', [['income', 0], ['expense', 0]]],
+		['TrendPoint', [['income', 0], ['expense', 0]]],
+		['CategoryTrendPoint', [['categoryId', 1], ['amount', 0]]],
+		['AccountBalancePoint', [['accountId', 1]]],
+		['BudgetExecution', [['budgetId', 1], ['categoryId', 0], ['budget', 0], ['expense', 0], ['usageRate', 0]]],
+		['SummaryTableRow', [['income', 0], ['expense', 0], ['txCount', 0]]],
+		['PeriodTotals', [['income', 0], ['expense', 0]]],
+		['Summary', [['income', 0], ['expense', 0]]],
+	]) {
+		const schema = openapiSchema(schemaName);
+		for (const [propertyName, minimum] of fields) {
+			assert.match(openapiSchemaPropertyBlock(schema, propertyName), new RegExp(`minimum: ${minimum}`), `${schemaName}.${propertyName} is missing minimum`);
+		}
+	}
+	for (const [schemaName, fields] of [
+		['AccountBalancePoint', ['net', 'balance']],
+		['BudgetExecution', ['remaining']],
+		['SummaryTableRow', ['balance']],
+		['Summary', ['balance']],
+	]) {
+		const schema = openapiSchema(schemaName);
+		for (const propertyName of fields) {
+			const property = openapiSchemaPropertyBlock(schema, propertyName);
+			assert.match(property, /multipleOf: 0\.01/, `${schemaName}.${propertyName} is missing cent precision`);
+			assert.doesNotMatch(property, /minimum: 0/, `${schemaName}.${propertyName} must allow negative values`);
+		}
+	}
+	assert.match(openapiSchemaPropertyBlock(openapiSchema('Summary'), 'trendGranularity'), /enum: \[day, week, month\]/);
+});
+
+test('generator requires realistic report response examples', () => {
+	assert.match(generator, /validateReportResponseExamples/);
+	for (const schemaName of [
+		'CategoryStat',
+		'AccountStat',
+		'MonthTrend',
+		'TrendPoint',
+		'CategoryTrendPoint',
+		'AccountBalancePoint',
+		'BudgetExecution',
+		'SummaryTableRow',
+		'PeriodTotals',
+		'PeriodCompare',
+		'Summary',
+	]) {
+		assert.match(openapiSchema(schemaName), /example:/, `${schemaName} is missing example`);
+	}
+	const summary = openapiSchema('Summary');
+	assert.match(summary, /trendGranularity: day/);
+	assert.match(summary, /dailySummaries:/);
+	assert.match(summary, /balance: -150/);
+	assert.match(summary, /usageRate: 0\.5/);
+});
+
 test('generator requires summary response date range fields', () => {
 	assert.match(generator, /validateSummaryResponseSchema/);
 	assert.match(openapi, /start:\n\s+type: string\n\s+format: date-time/);
@@ -523,6 +802,8 @@ test('generator requires summary response date range fields', () => {
 
 test('generator requires stable summary response fields to be required', () => {
 	for (const fieldName of [
+		'categoryId',
+		'accountId',
 		'monthlyTrend',
 		'trendGranularity',
 		'trend',
@@ -541,6 +822,62 @@ test('generator requires closed import response schemas', () => {
 	assert.match(generator, /validateImportResponseSchemasAreClosed/);
 	for (const schemaName of ['ImportPreviewRow', 'ImportPreview', 'ImportResult', 'ImportJob']) {
 		assert.match(openapi, new RegExp(`${schemaName}:\\n\\s+type: object\\n\\s+additionalProperties: false`));
+	}
+});
+
+test('generator requires bounded import response schemas', () => {
+	assert.match(generator, /validateImportResponseBounds/);
+	assert.match(generator, /ImportPreviewRow: \{ line: 1 \}/);
+	assert.match(generator, /ImportJob: \{ id: 1, total: 0, success: 0, failed: 0, skipped: 0 \}/);
+	for (const [schemaName, fields] of [
+		['ImportPreviewRow', [['line', 1]]],
+		['ImportPreview', [['size', 0], ['totalRows', 0], ['validRows', 0], ['failedRows', 0], ['duplicateRows', 0], ['maxRows', 0], ['maxFileBytes', 0]]],
+		['ImportResult', [['total', 0], ['success', 0], ['failed', 0], ['skipped', 0]]],
+		['ImportJob', [['id', 1], ['total', 0], ['success', 0], ['failed', 0], ['skipped', 0]]],
+	]) {
+		const schema = openapiSchema(schemaName);
+		for (const [propertyName, minimum] of fields) {
+			assert.match(openapiSchemaPropertyBlock(schema, propertyName), new RegExp(`minimum: ${minimum}`), `${schemaName}.${propertyName} is missing minimum`);
+		}
+	}
+	const previewAmount = openapiSchemaPropertyBlock(openapiSchema('ImportPreviewRow'), 'amount');
+	assert.match(previewAmount, /minimum: 0/);
+	assert.match(previewAmount, /multipleOf: 0\.01/);
+	const previewType = openapiSchemaPropertyBlock(openapiSchema('ImportPreviewRow'), 'type');
+	assert.match(previewType, /enum: \[income, expense, ''\]/);
+	assert.match(generator, /ImportPreviewRow\.type must allow an empty string for failed preview rows/);
+	const importPreviewRows = Number(goRequestDTOs.get('dataio').match(/ImportPreviewRows\s+=\s+(\d+)/)?.[1]);
+	assert.ok(importPreviewRows > 0, 'ImportPreviewRows must be a positive Go constant');
+	assert.match(openapiSchemaPropertyBlock(openapiSchema('ImportPreview'), 'rows'), new RegExp(`maxItems: ${importPreviewRows}`));
+});
+
+test('generator requires realistic import response examples', () => {
+	assert.match(generator, /validateImportResponseExamples/);
+	assert.match(generator, /ImportPreview: \['filename: preview\.csv', 'maxRows: 5000', 'maxFileBytes: 5242880', 'valid: false', "type: ''", 'error: invalid occurred_at'\]/);
+	const maxRows = Number(goRequestDTOs.get('dataio').match(/MaxImportRows\s+=\s+(\d+)/)?.[1]);
+	const maxFileBytesExpression = goRequestDTOs.get('dataio').match(/MaxImportFileBytes\s+=\s+([^\n]+)/)?.[1];
+	assert.equal(maxRows, 5000);
+	assert.equal(maxFileBytesExpression, '5 * 1024 * 1024');
+
+	const preview = openapiSchema('ImportPreview');
+	assert.match(preview, /example:\n[\s\S]+filename: preview\.csv/);
+	assert.match(preview, new RegExp(`maxRows: ${maxRows}`));
+	assert.match(preview, /maxFileBytes: 5242880/);
+	assert.match(preview, /valid: false/);
+	assert.match(preview, /type: ''/);
+	assert.match(preview, /error: invalid occurred_at/);
+
+	for (const schemaName of ['ImportPreviewRow', 'ImportResult', 'ImportJob']) {
+		assert.match(openapiSchema(schemaName), /example:/, `${schemaName} is missing example`);
+	}
+});
+
+test('generator requires import job server-owned fields to be read-only', () => {
+	assert.match(generator, /validateImportJobReadOnlyFields/);
+	assert.match(generator, /ImportJob\.\$\{propertyName\} is missing readOnly: true/);
+	const schema = openapiSchema('ImportJob');
+	for (const propertyName of ['id', 'createdAt', 'updatedAt']) {
+		assert.match(openapiSchemaPropertyBlock(schema, propertyName), /readOnly: true/, `ImportJob.${propertyName} is missing readOnly`);
 	}
 });
 
@@ -574,6 +911,14 @@ test('generator requires method-not-allowed responses for operations', () => {
 
 test('generator requires timeout responses when internal errors are declared', () => {
 	assert.match(generator, /declares 500 response but is missing 504 timeout response/);
+	assert.match(generator, /declares 500 response but is missing 499 client closed response/);
+	for (const operation of openAPIOperationBlocks()) {
+		if (!operation.includes("'500':")) {
+			continue;
+		}
+		assert.match(operation, /'504':[\s\S]+\$ref: '#\/components\/responses\/GatewayTimeout'/);
+		assert.match(operation, /'499':[\s\S]+\$ref: '#\/components\/responses\/ClientClosedRequest'/);
+	}
 });
 
 test('generator requires body error responses for every request body operation', () => {
@@ -581,6 +926,7 @@ test('generator requires body error responses for every request body operation',
 		generator,
 		/if \(operationHasRequestBody\(methodBlock\)\) \{[\s\S]+is missing 400 response[\s\S]+is missing 413 response[\s\S]+is missing 415 response/,
 	);
+	assert.doesNotMatch(generator, /operationResponseBlock\(methodBlock/);
 });
 
 test('OpenAPI request bodies match generated client assumptions', () => {
@@ -589,7 +935,15 @@ test('OpenAPI request bodies match generated client assumptions', () => {
 	assert.match(generator, /requestBody must be required/);
 	assert.match(generator, /requestBody must use application\/json or multipart\/form-data/);
 	assert.match(generator, /requestBody must not mix JSON and multipart content/);
+	assert.match(generator, /JSON requestBody must document Content-Type parameter handling/);
+	assert.match(generator, /JSON requestBody must document structured JSON media type handling/);
+	assert.match(generator, /multipart requestBody must document boundary parameter handling/);
+	assert.match(generator, /multipart requestBody must document non-empty boundary requirement/);
+	assert.match(generator, /multipart requestBody must document required file field/);
 	assert.match(generator, /requestBody is missing a component schema reference/);
+	assert.match(generator, /requestBody 400 response must use InvalidRequest/);
+	assert.match(openapi, /application\/json:[\s\S]+description: 'Accepts `Content-Type: application\/json`, optional media type parameters such as `charset=utf-8`, and `application\/\*\+json` structured JSON media types\.'/);
+	assert.match(openapi, /multipart\/form-data:[\s\S]+description: 'Accepts `Content-Type: multipart\/form-data; boundary=<non-empty-boundary>` with a required `file` field\.'/);
 
 	const requestBodies = [...openapi.matchAll(/\n      requestBody:\n([\s\S]*?)(?=\n      responses:)/g)];
 	assert.ok(requestBodies.length > 0, 'OpenAPI should contain request bodies');
@@ -598,6 +952,12 @@ test('OpenAPI request bodies match generated client assumptions', () => {
 		assert.match(requestBody, /required: true/);
 		assert.match(requestBody, /(application\/json|multipart\/form-data):/);
 		assert.match(requestBody, /\$ref: '#\/components\/schemas\/[A-Za-z][A-Za-z0-9]*'/);
+	}
+	for (const operation of openAPIOperationBlocks()) {
+		if (!operation.includes('requestBody:')) {
+			continue;
+		}
+		assert.match(operation, /'400':\n\s+\$ref: '#\/components\/responses\/InvalidRequest'/);
 	}
 });
 
@@ -655,8 +1015,9 @@ test('generator requires Retry-After header on rate-limited response', () => {
 	assert.match(openapi, /RateLimited:[\s\S]+RateLimit-Limit:[\s\S]+RateLimit-Remaining:[\s\S]+RateLimit-Reset:/);
 });
 
-test('generator requires Location header on accepted import jobs', () => {
-	assert.match(generator, /POST \/io\/import\/jobs 202 response is missing Location header/);
+test('generator requires Location header on accepted async resources', () => {
+	assert.match(generator, /validateAcceptedResponseHeaders/);
+	assert.match(generator, /\$\{method\.toUpperCase\(\)\} \$\{apiPath\} 202 response is missing Location header/);
 	assert.match(generator, /components\.headers\.Location must document queued resource URLs with an example/);
 	assert.match(openapi, /Location:[\s\S]+Relative URL of the created or queued API resource/);
 	assert.match(openapi, /postIoImportJobs[\s\S]+'202':[\s\S]+Location:[\s\S]+\$ref: '#\/components\/headers\/Location'/);
@@ -694,31 +1055,41 @@ test('generator requires documented accepted datetime query formats', () => {
 	assert.match(openapi, /name: start[\s\S]+example: '2026-06-01T00:00:00\+08:00'/);
 	assert.match(openapi, /name: end[\s\S]+Date-only values cover the entire day/);
 	assert.match(openapi, /name: end[\s\S]+example: '2026-06-30'/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'trend', 'default: month'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'trend', 'example: month'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'Category id filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'Account id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'trend', 'default: month'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'trend', 'example: month'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'categoryId', 'Category id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'accountId', 'Account id filter'\)/);
+	assert.match(generator, /query 400 response must use InvalidRequest/);
 	assert.match(openapi, /name: categoryId\n\s+in: query\n\s+description: Category id filter\.[\s\S]+example: 1/);
 	assert.match(openapi, /name: accountId\n\s+in: query\n\s+description: Account id filter\.[\s\S]+example: 1/);
 	assert.match(openapi, /name: trend\n\s+in: query\n\s+description: Trend aggregation granularity\. Defaults to month when omitted\.[\s\S]+default: month/);
 	assert.match(openapi, /name: trend[\s\S]+example: month/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'month', 'Budget month in YYYY-MM format'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'month', "example: '2026-06'"\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'month', 'Budget month in YYYY-MM format'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'month', "example: '2026-06'"\)/);
 	assert.match(openapi, /name: month\n\s+in: query\n\s+description: Budget month in YYYY-MM format\.[\s\S]+pattern: '\^\\d\{4\}-\\d\{2\}\$'/);
 	assert.match(openapi, /name: month[\s\S]+example: '2026-06'/);
+	for (const operation of openAPIOperationBlocks()) {
+		if (!operation.includes('in: query')) {
+			continue;
+		}
+		assert.match(operation, /'400':\n\s+\$ref: '#\/components\/responses\/InvalidRequest'/);
+	}
 });
 
 test('generator requires documented download filename headers', () => {
 	assert.match(generator, /GET \/io\/export is missing Content-Disposition response header/);
 	assert.match(generator, /operationHasJSONSuccessContent\(methodBlock, source\)/);
 	assert.match(generator, /result\.filter\(\(endpoint\) => endpoint\.jsonClientEndpoint\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'format', 'default: csv'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'format', 'Defaults to csv when omitted'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'format', 'example: csv'\)/);
-	assert.match(openapi, /name: format[\s\S]+description: Export file format\. Defaults to csv when omitted\.[\s\S]+default: csv/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'default: csv'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'Values are trimmed and case-insensitive'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'defaults to csv when omitted'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'format', 'example: csv'\)/);
+	assert.match(openapi, /name: format[\s\S]+description: Export file format\. Values are trimmed and case-insensitive; defaults to csv when omitted\.[\s\S]+default: csv/);
 	assert.match(openapi, /name: format[\s\S]+example: csv/);
 	assert.match(generator, /components\.headers\.ContentDisposition is missing filename\* guidance/);
-	assert.match(openapi, /ContentDisposition:[\s\S]+example: attachment; filename="transactions\.csv"; filename\*=UTF-8''transactions\.csv/);
+	assert.match(generator, /components\.headers\.ContentDisposition must document ASCII fallback and filename\* precedence/);
+	assert.match(openapi, /ContentDisposition:[\s\S]+ASCII-safe filename fallback[\s\S]+prefer filename\*/);
+	assert.match(openapi, /ContentDisposition:[\s\S]+example: attachment; filename="download\.csv"; filename\*=UTF-8''%E4%BA%A4%E6%98%93%E8%AE%B0%E5%BD%95\.csv/);
 	assert.doesNotMatch(generatedClient, /getIoExport/);
 	assert.match(webDataioApi, /download\(`\/io\/export\?format=\$\{format\}`, exportAccept\(format\)\)/);
 	assert.match(mobileDataioApi, /download\(`\/io\/export\?format=\$\{format\}`, exportAccept\(format\)\)/);
@@ -736,34 +1107,47 @@ test('generator requires documented download filename headers', () => {
 	}
 });
 
+test('generator requires browser data clearing headers on logout success', () => {
+	assert.match(generator, /POST \/auth\/logout 200 response is missing Clear-Site-Data header/);
+	assert.match(generator, /components\.headers\.ClearSiteData must document logout browser data clearing directives/);
+	assert.match(openapi, /postAuthLogout[\s\S]+'200':[\s\S]+Clear-Site-Data:[\s\S]+\$ref: '#\/components\/headers\/ClearSiteData'/);
+	assert.match(openapi, /ClearSiteData:[\s\S]+Browser-side data cleared after logout/);
+	assert.match(openapi, /ClearSiteData:[\s\S]+example: '"cache", "cookies", "storage"'/);
+});
+
 test('generator requires documented import headers', () => {
 	assert.match(generator, /ImportTextRequest', 'occurred_at,type,amount,category,account,note,tags'/);
 	assert.match(generator, /ImportFileRequest', 'occurred_at,type,amount,category,account,note,tags'/);
 	assert.match(generator, /ImportTextRequest', 'UTF-8 BOM'/);
+	assert.match(generator, /ImportTextRequest', 'skipDuplicates defaults to true'/);
 	assert.match(generator, /ImportFileRequest', 'UTF-8 BOM'/);
+	assert.match(generator, /ImportFileRequest', 'skipDuplicates defaults to true'/);
+	assert.match(generator, /ImportFileRequest', 'invalid values return invalid_request'/);
 	assert.match(openapi, /ImportTextRequest:[\s\S]+UTF-8 BOM on the first header is accepted/);
+	assert.match(openapi, /ImportTextRequest:[\s\S]+skipDuplicates:[\s\S]+description: skipDuplicates defaults to true when omitted\.[\s\S]+default: true/);
 	assert.match(openapi, /ImportFileRequest:[\s\S]+UTF-8 BOM on the first header is accepted/);
+	assert.match(openapi, /ImportFileRequest:[\s\S]+skipDuplicates:[\s\S]+description: skipDuplicates defaults to true when omitted; invalid values return invalid_request\.[\s\S]+default: true/);
 });
 
 test('generator requires bounded pagination response schema', () => {
 	assert.match(generator, /validatePaginationSchema/);
 	assert.match(generator, /Pagination\.pageSize is missing maximum: 200/);
 	assert.match(generator, /Pagination\.total is missing minimum: 0/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'page', 'default: 1'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'page', 'example: 1'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'pageSize', 'default: 20'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'pageSize', 'example: 20'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'type', 'Transaction type filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'type', 'example: expense'\)/);
-	assert.match(generator, /apiPath === '\/categories'[\s\S]+requireParameterText\(method, apiPath, methodBlock, 'type', 'Transaction type filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'Category id filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'categoryId', 'example: 1'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'Account id filter'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'accountId', 'example: 1'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'matched against transaction notes and tags'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'Maximum 100 characters'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'maxLength: 100'\)/);
-	assert.match(generator, /requireParameterText\(method, apiPath, methodBlock, 'q', 'example: lunch'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'page', 'default: 1'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'page', 'example: 1'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'pageSize', 'default: 20'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'pageSize', 'example: 20'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'type', 'Transaction type filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'type', 'example: expense'\)/);
+	assert.match(generator, /apiPath === '\/categories'[\s\S]+requireParameterText\(method, apiPath, parameterSourceBlock, 'type', 'Transaction type filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'categoryId', 'Category id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'categoryId', 'example: 1'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'accountId', 'Account id filter'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'accountId', 'example: 1'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'q', 'matched against transaction notes and tags'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'q', 'Maximum 100 characters'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'q', 'maxLength: 100'\)/);
+	assert.match(generator, /requireParameterText\(method, apiPath, parameterSourceBlock, 'q', 'example: lunch'\)/);
 	assert.match(openapi, /name: page\n\s+in: query\n\s+description: Page number\. Defaults to 1 when omitted\.[\s\S]+default: 1/);
 	assert.match(openapi, /name: page[\s\S]+example: 1/);
 	assert.match(openapi, /name: pageSize\n\s+in: query\n\s+description: Number of items per page\. Defaults to 20 when omitted\.[\s\S]+default: 20/);
@@ -775,6 +1159,7 @@ test('generator requires bounded pagination response schema', () => {
 	assert.match(openapi, /name: q\n\s+in: query\n\s+description: Keyword filter matched against transaction notes and tags\. Maximum 100 characters\.[\s\S]+maxLength: 100/);
 	assert.match(openapi, /name: q[\s\S]+example: lunch/);
 	assert.match(openapi, /Link:[\s\S]+example: <\/api\/v1\/transactions\?page=2&pageSize=20>; rel="next"/);
+	assert.match(openapi, /Link:[\s\S]+sensitive query parameters are omitted from generated links/);
 	assert.match(openapi, /TotalCount:[\s\S]+example: 95/);
 });
 
@@ -791,7 +1176,9 @@ test('generator requires explicit auth security contract', () => {
 	assert.match(generator, /validateSecuritySchemes\(source\)/);
 	assert.match(generator, /components\.securitySchemes\.bearerAuth must document HTTP bearer JWT auth/);
 	assert.match(generator, /components\.securitySchemes\.bearerAuth is missing Authorization header guidance/);
-	assert.match(openapi, /bearerAuth:[\s\S]+scheme: bearer[\s\S]+bearerFormat: JWT[\s\S]+Authorization: Bearer <JWT>/);
+	assert.match(generator, /components\.securitySchemes\.bearerAuth is missing repeated Authorization header guidance/);
+	assert.match(generator, /components\.securitySchemes\.bearerAuth is missing JWT not-before claim guidance/);
+	assert.match(openapi, /bearerAuth:[\s\S]+scheme: bearer[\s\S]+bearerFormat: JWT[\s\S]+Authorization: Bearer <JWT>[\s\S]+repeated `Authorization` headers are rejected[\s\S]+`nbf` not-before claim/);
 });
 
 function duplicateYamlMappingKeys(source) {
@@ -828,4 +1215,48 @@ function duplicateYamlMappingKeys(source) {
 
 function escapeRegExp(value) {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function openapiSchemaPropertyBlock(schema, propertyName) {
+	const propertiesStart = schema.indexOf('      properties:\n');
+	assert.notEqual(propertiesStart, -1, 'schema is missing properties block');
+	const properties = schema.slice(propertiesStart);
+	const match = properties.match(new RegExp(`^        ${escapeRegExp(propertyName)}:\\n`, 'm'));
+	assert.ok(match && match.index !== undefined, `schema is missing property ${propertyName}`);
+	const rest = properties.slice(match.index);
+	const nextProperty = rest.search(/\n        [A-Za-z][A-Za-z0-9]*:/);
+	return nextProperty === -1 ? rest : rest.slice(0, nextProperty);
+}
+
+function expectedOperationId(method, apiPath) {
+	const cleanPath = apiPath.replace(/^\//, '').replace(/\{id\}/g, 'by-id');
+	const words = cleanPath.split(/[/-]/).filter(Boolean);
+	const base = words.map((word, index) => (index === 0 ? word : upperFirst(word))).join('');
+	return `${method}${upperFirst(base)}`;
+}
+
+function openapiOperations(source) {
+	const pathsBlock = source.slice(source.indexOf('paths:'), source.indexOf('components:'));
+	const pathMatches = [...pathsBlock.matchAll(/^  (\/[^:]+):$/gm)];
+	const operations = [];
+	for (const [pathIndex, pathMatch] of pathMatches.entries()) {
+		const path = pathMatch[1];
+		const pathStart = pathMatch.index;
+		const pathEnd = pathMatches[pathIndex + 1]?.index ?? pathsBlock.length;
+		const pathBlock = pathsBlock.slice(pathStart, pathEnd);
+		const methodMatches = [...pathBlock.matchAll(/^    (get|put|post|delete|options|head|patch|trace):$/gm)];
+		for (const [methodIndex, methodMatch] of methodMatches.entries()) {
+			const method = methodMatch[1];
+			const methodStart = methodMatch.index;
+			const methodEnd = methodMatches[methodIndex + 1]?.index ?? pathBlock.length;
+			const methodBlock = pathBlock.slice(methodStart, methodEnd);
+			const operationId = methodBlock.match(/operationId:\s+([A-Za-z][A-Za-z0-9]*)/)?.[1] || '';
+			operations.push({ method, operationId, path });
+		}
+	}
+	return operations;
+}
+
+function upperFirst(value) {
+	return value.charAt(0).toUpperCase() + value.slice(1);
 }

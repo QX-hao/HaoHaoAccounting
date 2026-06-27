@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
 	"log"
@@ -17,6 +18,7 @@ import (
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/config"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/httputil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/middleware"
+	"github.com/QX-hao/HaoHaoAccounting/backend/internal/shared/stringutil"
 	"github.com/QX-hao/HaoHaoAccounting/backend/internal/store"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -105,17 +107,17 @@ func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
 }
 
 func applyGlobalMiddleware(router *gin.Engine, cfg config.Config, metrics *middleware.HTTPMetrics) {
-	// 中间件顺序会影响错误响应能否带上 request id、安全头、CORS 和 no-store。
-	// 先放 RequestID 和指标采集，后面的早期拒绝也能被追踪和统计。
+	// 中间件顺序会影响早期拒绝能否带上 request id、指标、安全头、CORS 和 no-store。
+	// NoStoreAPI 放在 CORS 前面，保证不可信 Origin 被 CORS 直接拒绝时也不会缓存 API 响应。
 	router.Use(middleware.RequestID())
 	if metrics != nil {
 		router.Use(metrics.Middleware())
 	}
 	router.Use(middleware.RequestTimeout(cfg.HTTP.RequestTimeout))
-	router.Use(gin.LoggerWithConfig(newLoggerConfig()), middleware.Recovery())
+	router.Use(gin.LoggerWithConfig(newLoggerConfig()), captureLogRoute(), middleware.Recovery())
 	router.Use(middleware.SecurityHeaders(securityHeadersConfig(cfg)))
-	router.Use(cors.New(newCORSConfig(cfg)))
 	router.Use(middleware.NoStoreAPI("/api/v1"))
+	router.Use(cors.New(newCORSConfig(cfg)))
 	router.Use(middleware.BodyLimit(cfg.HTTP.MaxBodyBytes))
 	router.Use(middleware.ContentType(middleware.APIMediaTypeRules()))
 	router.Use(middleware.Accept(middleware.APIAcceptRules()))
@@ -127,18 +129,28 @@ func installMetrics(router *gin.Engine, cfg config.Config) *middleware.HTTPMetri
 	}
 	metricsRegistry := newMetricsRegistry()
 	// /metrics 在全局中间件挂载前注册，避免应用 API 的 Accept/Content-Type 规则影响 Prometheus 抓取。
-	registerMetricsRoute(router, metricsRegistry, cfg.HTTP.MetricsToken)
+	registerMetricsRoute(router, metricsRegistry, cfg)
 	return middleware.NewHTTPMetrics(metricsRegistry)
 }
 
-func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry, token string) {
-	// InstrumentMetricHandler 会给抓取动作本身补 promhttp_* 指标，方便发现采集失败。
-	handler := gin.WrapH(promhttp.InstrumentMetricHandler(registry, promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
-	if token == "" {
-		router.GET("/metrics", handler)
-		return
+func registerMetricsRoute(router *gin.Engine, registry *prometheus.Registry, cfg config.Config) {
+	// HandlerOpts.Registry 会把 promhttp_metric_handler_errors_total 注册进同一个 registry，方便告警发现采集/编码失败。
+	handler := gin.WrapH(promhttp.InstrumentMetricHandler(registry, promhttp.HandlerFor(registry, promhttp.HandlerOpts{
+		Registry:            registry,
+		MaxRequestsInFlight: cfg.HTTP.MetricsMaxRequestsInFlight,
+		Timeout:             cfg.HTTP.MetricsTimeout,
+	})))
+	handlers := []gin.HandlerFunc{
+		middleware.RequestID(),
+		middleware.Recovery(),
+		middleware.SecurityHeaders(securityHeadersConfig(cfg)),
+		middleware.NoCache(),
 	}
-	router.GET("/metrics", requireMetricsToken(token), handler)
+	if cfg.HTTP.MetricsToken != "" {
+		handlers = append(handlers, requireMetricsToken(cfg.HTTP.MetricsToken))
+	}
+	handlers = append(handlers, handler)
+	router.GET("/metrics", handlers...)
 }
 
 func newMetricsRegistry() *prometheus.Registry {
@@ -150,15 +162,26 @@ func newMetricsRegistry() *prometheus.Registry {
 
 func requireMetricsToken(want string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token, ok := middleware.BearerToken(c.GetHeader("Authorization"))
-		// 指标 token 属于长期运维凭据，用常量时间比较避免长度相同情况下的时序侧信道。
-		if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(want)) != 1 {
+		values := c.Request.Header.Values("Authorization")
+		token := ""
+		ok := false
+		if len(values) == 1 {
+			token, ok = middleware.BearerToken(values[0])
+		}
+		if !ok || !constantTimeTokenEqual(token, want) {
 			httputil.Unauthorized(c, "invalid metrics token")
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
+}
+
+func constantTimeTokenEqual(got, want string) bool {
+	// 先哈希成固定长度摘要再比较，避免长度不同导致 ConstantTimeCompare 提前返回。
+	gotHash := sha256.Sum256([]byte(got))
+	wantHash := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) == 1
 }
 
 func validateStartupConfig(cfg config.Config) error {
@@ -188,9 +211,10 @@ func storeConfig(cfg config.DatabaseConfig) store.Config {
 
 func newCORSConfig(cfg config.Config) cors.Config {
 	return cors.Config{
-		AllowOrigins: cfg.HTTP.CORSAllowOrigins,
+		AllowOrigins: normalizedCORSOrigins(cfg.HTTP.CORSAllowOrigins),
 		AllowMethods: []string{
 			http.MethodGet,
+			http.MethodHead,
 			http.MethodPost,
 			http.MethodPut,
 			http.MethodDelete,
@@ -205,6 +229,7 @@ func newCORSConfig(cfg config.Config) cors.Config {
 		},
 		ExposeHeaders: []string{
 			"Allow",
+			"Clear-Site-Data",
 			"Content-Disposition",
 			"Link",
 			"Location",
@@ -222,36 +247,79 @@ func newCORSConfig(cfg config.Config) cors.Config {
 }
 
 func validateCORSConfig(cfg config.Config) error {
-	for _, origin := range cfg.HTTP.CORSAllowOrigins {
+	origins := normalizedCORSOrigins(cfg.HTTP.CORSAllowOrigins)
+	for _, origin := range origins {
 		if err := validateExplicitCORSOrigin(origin); err != nil {
 			return err
 		}
 	}
 
-	corsConfig := newCORSConfig(cfg)
+	corsConfig := newCORSConfig(config.Config{HTTP: config.HTTPConfig{CORSAllowOrigins: origins}})
 	if err := corsConfig.Validate(); err != nil {
 		return fmt.Errorf("CORS config: %w", err)
 	}
 	return nil
 }
 
+func normalizedCORSOrigins(origins []string) []string {
+	result := make([]string, 0, len(origins))
+	seen := make(map[string]struct{}, len(origins))
+	for _, origin := range origins {
+		clean := strings.TrimSpace(origin)
+		if clean == "" {
+			continue
+		}
+		normalized, err := canonicalCORSOrigin(clean)
+		if err != nil {
+			normalized = clean
+		}
+		if normalized != "" {
+			if _, exists := seen[normalized]; exists {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			result = append(result, normalized)
+		}
+	}
+	return result
+}
+
 func validateExplicitCORSOrigin(origin string) error {
+	_, err := canonicalCORSOrigin(origin)
+	return err
+}
+
+// canonicalCORSOrigin 转成浏览器 Origin 头常见的序列化形式，避免大小写或默认端口导致精确匹配失败。
+func canonicalCORSOrigin(origin string) (string, error) {
 	origin = strings.TrimSpace(origin)
 	if strings.Contains(origin, "*") {
-		return fmt.Errorf("CORS_ALLOW_ORIGINS must use explicit origins; %q contains a wildcard", origin)
+		return "", fmt.Errorf("CORS_ALLOW_ORIGINS must use explicit origins; %q contains a wildcard", origin)
 	}
 
 	parsed, err := url.ParseRequestURI(origin)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("CORS_ALLOW_ORIGINS contains invalid origin %q", origin)
+		return "", fmt.Errorf("CORS_ALLOW_ORIGINS contains invalid origin %q", origin)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must use http or https", origin)
+		return "", fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must use http or https", origin)
 	}
 	if parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must not include user info, path, query, or fragment", origin)
+		return "", fmt.Errorf("CORS_ALLOW_ORIGINS origin %q must not include user info, path, query, or fragment", origin)
 	}
-	return nil
+
+	scheme := strings.ToLower(parsed.Scheme)
+	host := strings.ToLower(parsed.Hostname())
+	port := parsed.Port()
+	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
+		port = ""
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port != "" {
+		host += ":" + port
+	}
+	return scheme + "://" + host, nil
 }
 
 func securityHeadersConfig(cfg config.Config) middleware.SecurityHeadersConfig {
@@ -271,6 +339,20 @@ func newLoggerConfig() gin.LoggerConfig {
 			"/readyz",
 			"/health",
 		},
+	}
+}
+
+const requestLogRouteContextKey = "request_log_route"
+
+// captureLogRoute 在 handler 执行后记录 Gin 的路由模板，日志里用它做低基数字段，避免真实 id 进入 route。
+func captureLogRoute() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+		route := c.FullPath()
+		if route == "" {
+			route = "unmatched"
+		}
+		c.Set(requestLogRouteContextKey, route)
 	}
 }
 
@@ -306,34 +388,45 @@ func requestLogFormatter(param gin.LogFormatterParams) string {
 	if param.Latency > time.Minute {
 		param.Latency = param.Latency.Truncate(time.Second)
 	}
-	requestID := "-"
-	if value, ok := param.Keys[middleware.RequestIDContextKey]; ok {
-		if id, ok := value.(string); ok && id != "" {
-			requestID = id
-		}
-	}
 
 	return fmt.Sprintf(
-		"time=%q status=%d latency=%q client_ip=%q method=%q path=%q proto=%q user_agent=%q request_id=%q bytes=%d error=%q\n",
+		"time=%q status=%d latency=%q client_ip=%q method=%q path=%q route=%q proto=%q user_agent=%q request_id=%q bytes=%d error=%q\n",
 		param.TimeStamp.Format(time.RFC3339),
 		param.StatusCode,
 		param.Latency.String(),
 		param.ClientIP,
-		param.Method,
+		logMethod(param.Method),
 		logPath(param.Path),
+		logRoute(param.Keys),
 		logProto(param.Request),
 		logUserAgent(param.Request),
-		requestID,
+		logRequestID(param.Keys),
 		param.BodySize,
-		param.ErrorMessage,
+		logErrorMessage(param.ErrorMessage),
 	)
 }
+
+const (
+	maxLoggedMethodLength    = 32
+	maxLoggedPathLength      = 512
+	maxLoggedRouteLength     = 256
+	maxLoggedUserAgentLength = 256
+	maxLoggedErrorLength     = 512
+)
 
 func logProto(request *http.Request) string {
 	if request == nil || request.Proto == "" {
 		return "-"
 	}
 	return request.Proto
+}
+
+func logMethod(method string) string {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		return "-"
+	}
+	return stringutil.TruncateRunes(method, maxLoggedMethodLength)
 }
 
 func logUserAgent(request *http.Request) string {
@@ -344,12 +437,45 @@ func logUserAgent(request *http.Request) string {
 	if userAgent == "" {
 		return "-"
 	}
-	return userAgent
+	return stringutil.TruncateRunes(userAgent, maxLoggedUserAgentLength)
 }
 
 func logPath(path string) string {
 	if beforeQuery, _, ok := strings.Cut(path, "?"); ok {
-		return beforeQuery
+		path = beforeQuery
 	}
-	return path
+	if path == "" {
+		return "/"
+	}
+	// path 来自客户端请求行，截断后再写日志，避免异常长 URL 放大单条日志。
+	return stringutil.TruncateRunes(path, maxLoggedPathLength)
+}
+
+func logRoute(keys map[string]any) string {
+	if value, ok := keys[requestLogRouteContextKey]; ok {
+		if route, ok := value.(string); ok {
+			route = strings.TrimSpace(route)
+			if route != "" {
+				return stringutil.TruncateRunes(route, maxLoggedRouteLength)
+			}
+		}
+	}
+	return "unmatched"
+}
+
+func logRequestID(keys map[string]any) string {
+	if value, ok := keys[middleware.RequestIDContextKey]; ok {
+		if id, ok := value.(string); ok && middleware.ValidRequestID(id) {
+			return id
+		}
+	}
+	return "-"
+}
+
+func logErrorMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return ""
+	}
+	return stringutil.TruncateRunes(message, maxLoggedErrorLength)
 }

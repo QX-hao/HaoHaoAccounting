@@ -1,6 +1,7 @@
 package httputil
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,9 +50,15 @@ type ErrorResponse struct {
 	RequestID string `json:"requestId"`
 }
 
+// Error 写入统一错误 envelope，并把不含用户输入的 status/code 摘要挂到 Gin 私有错误日志。
 func Error(c *gin.Context, status int, code string, message string) {
 	if c.Writer.Written() {
 		return
+	}
+	if status < http.StatusBadRequest || status > 599 {
+		status = http.StatusInternalServerError
+		code = CodeInternal
+		message = "internal server error"
 	}
 	if code == "" {
 		code = codeForStatus(status)
@@ -65,36 +72,44 @@ func Error(c *gin.Context, status int, code string, message string) {
 	})
 }
 
+// BadRequest 返回通用 400 错误，适合参数或业务校验失败。
 func BadRequest(c *gin.Context, message string) {
 	Error(c, http.StatusBadRequest, CodeBadRequest, message)
 }
 
+// InvalidRequest 返回 400 invalid_request，适合请求体格式或绑定失败。
 func InvalidRequest(c *gin.Context, message string) {
 	Error(c, http.StatusBadRequest, CodeInvalidRequest, message)
 }
 
+// Unauthorized 返回 401 并写入基础 Bearer challenge。
 func Unauthorized(c *gin.Context, message string) {
 	c.Header("WWW-Authenticate", bearerChallenge)
 	Error(c, http.StatusUnauthorized, CodeUnauthorized, message)
 }
 
+// InvalidToken 返回 401 并写入 RFC 6750 invalid_token challenge。
 func InvalidToken(c *gin.Context, message string) {
 	c.Header("WWW-Authenticate", invalidBearerTokenChallenge)
 	Error(c, http.StatusUnauthorized, CodeUnauthorized, message)
 }
 
+// Forbidden 返回已认证但无权限的 403 错误。
 func Forbidden(c *gin.Context, message string) {
 	Error(c, http.StatusForbidden, CodeForbidden, message)
 }
 
+// NotFound 返回资源或路由不存在的 404 错误。
 func NotFound(c *gin.Context, message string) {
 	Error(c, http.StatusNotFound, CodeNotFound, message)
 }
 
+// MethodNotAllowed 返回 405 错误，调用方应同时补充 Allow 响应头。
 func MethodNotAllowed(c *gin.Context, message string) {
 	Error(c, http.StatusMethodNotAllowed, CodeMethodNotAllowed, message)
 }
 
+// RateLimited 返回 429，并在有等待时间时写入 Retry-After 秒数。
 func RateLimited(c *gin.Context, message string, retryAfter time.Duration) {
 	if retryAfter > 0 {
 		c.Header("Retry-After", strconv.FormatInt(int64(math.Ceil(retryAfter.Seconds())), 10))
@@ -102,6 +117,7 @@ func RateLimited(c *gin.Context, message string, retryAfter time.Duration) {
 	Error(c, http.StatusTooManyRequests, CodeRateLimited, message)
 }
 
+// RateLimitedWithPolicy 返回 429，并写入登录限流策略相关的 RateLimit-* 响应头。
 func RateLimitedWithPolicy(c *gin.Context, message string, retryAfter time.Duration, limit int, remaining int) {
 	if limit > 0 {
 		c.Header("RateLimit-Limit", strconv.Itoa(limit))
@@ -115,26 +131,32 @@ func RateLimitedWithPolicy(c *gin.Context, message string, retryAfter time.Durat
 	RateLimited(c, message, retryAfter)
 }
 
+// PayloadTooLarge 返回请求体超过上限的 413 错误。
 func PayloadTooLarge(c *gin.Context, message string) {
 	Error(c, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, message)
 }
 
+// UnsupportedMediaType 返回请求 Content-Type 不被当前接口支持的 415 错误。
 func UnsupportedMediaType(c *gin.Context, message string) {
 	Error(c, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, message)
 }
 
+// NotAcceptable 返回请求 Accept 无法和接口响应类型协商的 406 错误。
 func NotAcceptable(c *gin.Context, message string) {
 	Error(c, http.StatusNotAcceptable, CodeNotAcceptable, message)
 }
 
+// GatewayTimeout 返回服务端请求预算耗尽的 504 错误。
 func GatewayTimeout(c *gin.Context, message string) {
 	Error(c, http.StatusGatewayTimeout, CodeRequestTimeout, message)
 }
 
+// ClientClosedRequest 返回非标准 499，用于标记客户端取消请求。
 func ClientClosedRequest(c *gin.Context, message string) {
 	Error(c, StatusClientClosedRequest, CodeClientClosedRequest, message)
 }
 
+// InternalError 把常见 context 错误映射成稳定状态码，发布模式下隐藏内部错误细节。
 func InternalError(c *gin.Context, err error) {
 	if errors.Is(err, context.DeadlineExceeded) {
 		GatewayTimeout(c, "request timed out")
@@ -152,8 +174,17 @@ func InternalError(c *gin.Context, err error) {
 	Error(c, http.StatusInternalServerError, CodeInternal, message)
 }
 
+// BindJSONBody 使用严格 JSON 解码：禁止未知字段、重复字段和多个 JSON 值，并执行 Gin binding 校验。
 func BindJSONBody(c *gin.Context, dst any) error {
-	decoder := json.NewDecoder(c.Request.Body)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	if err := rejectDuplicateJSONFields(body); err != nil {
+		return err
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
 		return err
@@ -169,6 +200,87 @@ func BindJSONBody(c *gin.Context, dst any) error {
 	return nil
 }
 
+// rejectDuplicateJSONFields 先按 token 扫描 JSON，对每个对象单独记录字段名，避免重复 key 被标准库静默覆盖。
+func rejectDuplicateJSONFields(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := rejectDuplicateJSONFieldsInValue(decoder); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("request body must contain a single JSON value")
+	}
+	return nil
+}
+
+func rejectDuplicateJSONFieldsInValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+
+	switch delim {
+	case '{':
+		seen := map[string]struct{}{}
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("invalid JSON object key")
+			}
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("duplicate JSON field %q", key)
+			}
+			seen[key] = struct{}{}
+			if err := rejectDuplicateJSONFieldsInValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim('}') {
+			return errors.New("invalid JSON object")
+		}
+	case '[':
+		for decoder.More() {
+			if err := rejectDuplicateJSONFieldsInValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim(']') {
+			return errors.New("invalid JSON array")
+		}
+	default:
+		return errors.New("invalid JSON value")
+	}
+
+	return nil
+}
+
+// BindQuery 统一入口绑定 query 参数；单值参数重复出现时先拒绝，避免 Gin 只取首值造成歧义。
+func BindQuery(c *gin.Context, dst any) error {
+	for key, values := range c.Request.URL.Query() {
+		if len(values) > 1 {
+			return fmt.Errorf("query parameter %q must not be repeated", key)
+		}
+	}
+	return c.ShouldBindQuery(dst)
+}
+
+// SetPaginationHeaders 写入总数和 RFC 8288 Link 分页头；非法分页参数会被忽略。
 func SetPaginationHeaders(c *gin.Context, total int64, page, pageSize int) {
 	if total < 0 || page < 1 || pageSize < 1 {
 		return
@@ -179,11 +291,17 @@ func SetPaginationHeaders(c *gin.Context, total int64, page, pageSize int) {
 	}
 }
 
-func SetCreatedLocation(c *gin.Context, id uint) {
+// SetResourceLocation 为创建成功或已排队的资源写入相对 Location 头。
+func SetResourceLocation(c *gin.Context, id uint) {
 	if id == 0 {
 		return
 	}
 	c.Header("Location", strings.TrimRight(c.Request.URL.Path, "/")+"/"+strconv.FormatUint(uint64(id), 10))
+}
+
+// SetCreatedLocation 为创建成功的资源写入相对 Location 头。
+func SetCreatedLocation(c *gin.Context, id uint) {
+	SetResourceLocation(c, id)
 }
 
 func paginationLinkHeader(requestURL *url.URL, total int64, page, pageSize int) string {
@@ -199,6 +317,7 @@ func paginationLinkHeader(requestURL *url.URL, total int64, page, pageSize int) 
 		}
 		u := *requestURL
 		query := u.Query()
+		removeSensitiveQueryParams(query)
 		query.Set("page", strconv.FormatInt(targetPage, 10))
 		query.Set("pageSize", strconv.Itoa(pageSize))
 		u.RawQuery = query.Encode()
@@ -216,6 +335,23 @@ func paginationLinkHeader(requestURL *url.URL, total int64, page, pageSize int) 
 	}
 
 	return strings.Join(links, ", ")
+}
+
+func removeSensitiveQueryParams(query url.Values) {
+	for key := range query {
+		if sensitiveQueryParam(key) {
+			delete(query, key)
+		}
+	}
+}
+
+func sensitiveQueryParam(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "access_token", "auth_token", "authorization", "jwt", "password", "secret", "token":
+		return true
+	default:
+		return false
+	}
 }
 
 func codeForStatus(status int) string {
@@ -252,8 +388,23 @@ func requestIDFromContext(c *gin.Context) string {
 	if !ok {
 		return ""
 	}
-	requestID, _ := value.(string)
+	requestID, ok := value.(string)
+	if !ok || !validRequestID(requestID) {
+		return ""
+	}
 	return requestID
+}
+
+func validRequestID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, r := range value {
+		if r < 33 || r > 126 {
+			return false
+		}
+	}
+	return true
 }
 
 type responseLogError struct {

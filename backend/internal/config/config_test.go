@@ -104,6 +104,59 @@ func TestLoadDotEnvParsesCommonDotEnvSyntax(t *testing.T) {
 	}
 }
 
+func TestLoadDotEnvIgnoresInvalidKeys(t *testing.T) {
+	keys := []string{
+		"LOAD_DOTENV_VALID",
+		"LOAD_DOTENV_VALID_2",
+		"LOAD DOTTENV BAD",
+		"1LOAD_DOTENV_BAD",
+		"LOAD-DOTENV-BAD",
+	}
+	for _, key := range keys {
+		restoreEnv(t, key)
+	}
+
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(`
+LOAD_DOTENV_VALID=ok
+LOAD_DOTENV_VALID_2=ok2
+LOAD DOTTENV BAD=space
+1LOAD_DOTENV_BAD=leading-number
+LOAD-DOTENV-BAD=dash
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadDotEnv(path); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+
+	if got := os.Getenv("LOAD_DOTENV_VALID"); got != "ok" {
+		t.Fatalf("LOAD_DOTENV_VALID = %q", got)
+	}
+	if got := os.Getenv("LOAD_DOTENV_VALID_2"); got != "ok2" {
+		t.Fatalf("LOAD_DOTENV_VALID_2 = %q", got)
+	}
+	for _, key := range []string{"LOAD DOTTENV BAD", "1LOAD_DOTENV_BAD", "LOAD-DOTENV-BAD"} {
+		if got := os.Getenv(key); got != "" {
+			t.Fatalf("%s = %q, want unset", key, got)
+		}
+	}
+}
+
+func TestValidDotEnvKeyUsesShellCompatibleNames(t *testing.T) {
+	for _, key := range []string{"A", "_", "APP_ENV", "_APP_ENV", "APP_ENV_2", "app_env"} {
+		if !validDotEnvKey(key) {
+			t.Fatalf("validDotEnvKey(%q) = false, want true", key)
+		}
+	}
+	for _, key := range []string{"", "1APP_ENV", "APP-ENV", "APP ENV", "APP.ENV", "APP/ENV", "应用"} {
+		if validDotEnvKey(key) {
+			t.Fatalf("validDotEnvKey(%q) = true, want false", key)
+		}
+	}
+}
+
 func TestLoadDotEnvIgnoresMissingFile(t *testing.T) {
 	if err := LoadDotEnv(filepath.Join(t.TempDir(), "missing.env")); err != nil {
 		t.Fatalf("LoadDotEnv missing file: %v", err)
@@ -153,6 +206,8 @@ func TestLoadDefaultsForLocalDevelopment(t *testing.T) {
 		cfg.HTTP.MaxBodyBytes != 6*1024*1024 ||
 		cfg.HTTP.MetricsEnabled ||
 		cfg.HTTP.MetricsToken != "" ||
+		cfg.HTTP.MetricsMaxRequestsInFlight != 1 ||
+		cfg.HTTP.MetricsTimeout != 10*time.Second ||
 		cfg.HTTP.HSTSMaxAgeSeconds != 0 ||
 		cfg.HTTP.HSTSIncludeSubDomains ||
 		cfg.HTTP.HSTSPreload ||
@@ -200,6 +255,8 @@ func TestLoadParsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("HTTP_MAX_BODY_BYTES", "123456")
 	t.Setenv("HTTP_METRICS_ENABLED", "true")
 	t.Setenv("HTTP_METRICS_TOKEN", " scrape-secret ")
+	t.Setenv("HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT", "3")
+	t.Setenv("HTTP_METRICS_TIMEOUT", "2s")
 	t.Setenv("HTTP_HSTS_MAX_AGE_SECONDS", "31536000")
 	t.Setenv("HTTP_HSTS_INCLUDE_SUBDOMAINS", "true")
 	t.Setenv("HTTP_HSTS_PRELOAD", "true")
@@ -254,6 +311,8 @@ func TestLoadParsesEnvironmentOverrides(t *testing.T) {
 		cfg.HTTP.MaxBodyBytes != 123456 ||
 		!cfg.HTTP.MetricsEnabled ||
 		cfg.HTTP.MetricsToken != "scrape-secret" ||
+		cfg.HTTP.MetricsMaxRequestsInFlight != 3 ||
+		cfg.HTTP.MetricsTimeout != 2*time.Second ||
 		cfg.HTTP.HSTSMaxAgeSeconds != 31536000 ||
 		!cfg.HTTP.HSTSIncludeSubDomains ||
 		!cfg.HTTP.HSTSPreload ||
@@ -290,6 +349,9 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 	t.Setenv("HTTP_READ_TIMEOUT", "not-a-duration")
 	t.Setenv("HTTP_REQUEST_TIMEOUT", "-1s")
 	t.Setenv("HTTP_METRICS_ENABLED", "not-a-bool")
+	t.Setenv("HTTP_METRICS_TOKEN", "contains space")
+	t.Setenv("HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT", "-1")
+	t.Setenv("HTTP_METRICS_TIMEOUT", "-1s")
 	t.Setenv("HTTP_HSTS_INCLUDE_SUBDOMAINS", "not-a-bool")
 	t.Setenv("HTTP_CROSS_ORIGIN_EMBEDDER_POLICY", "same-origin")
 	t.Setenv("JWT_TTL", "0s")
@@ -305,6 +367,9 @@ func TestLoadStrictRejectsInvalidEnvironmentValues(t *testing.T) {
 		"HTTP_READ_TIMEOUT",
 		"HTTP_REQUEST_TIMEOUT",
 		"HTTP_METRICS_ENABLED",
+		"HTTP_METRICS_TOKEN",
+		"HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT",
+		"HTTP_METRICS_TIMEOUT",
 		"HTTP_HSTS_INCLUDE_SUBDOMAINS",
 		"HTTP_CROSS_ORIGIN_EMBEDDER_POLICY",
 		"JWT_TTL",
@@ -328,6 +393,23 @@ func TestLoadStrictValidatesLoadedConfig(t *testing.T) {
 	}
 	if cfg.Admin.Username != "admin" || cfg.JWT.TTL != time.Hour {
 		t.Fatalf("Config = %#v", cfg)
+	}
+}
+
+func TestLoadStrictAllowsDisabledLoginRateLimiter(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ADMIN_USERNAME", "admin")
+	t.Setenv("ADMIN_PASSWORD", "password")
+	t.Setenv("JWT_SECRET", "jwt-secret-with-at-least-32-characters")
+	t.Setenv("LOGIN_RATE_LIMIT_MAX_FAILURES", "0")
+	t.Setenv("LOGIN_RATE_LIMIT_WINDOW", "0s")
+
+	cfg, err := LoadStrict()
+	if err != nil {
+		t.Fatalf("LoadStrict disabled login limiter: %v", err)
+	}
+	if cfg.LoginRateLimit.MaxFailures != 0 || cfg.LoginRateLimit.Window != 0 {
+		t.Fatalf("LoginRateLimit = %#v", cfg.LoginRateLimit)
 	}
 }
 
@@ -430,6 +512,11 @@ func TestHTTPConfigValidate(t *testing.T) {
 	if err := paddingOnlyMetricsToken.Validate(); err == nil {
 		t.Fatal("expected padding-only metrics token error")
 	}
+	tooLongMetricsToken := valid
+	tooLongMetricsToken.MetricsToken = strings.Repeat("a", 4097)
+	if err := tooLongMetricsToken.Validate(); err == nil {
+		t.Fatal("expected overlong metrics token error")
+	}
 	for _, policy := range []string{"require-corp", "credentialless", "unsafe-none", " REQUIRE-CORP "} {
 		t.Run("valid COEP "+policy, func(t *testing.T) {
 			cfg := valid
@@ -478,14 +565,16 @@ func TestHTTPConfigValidate(t *testing.T) {
 
 func TestHTTPConfigValidateTrustedProxies(t *testing.T) {
 	valid := HTTPConfig{
-		GinMode:           "release",
-		ReadTimeout:       time.Second,
-		ReadHeaderTimeout: time.Second,
-		WriteTimeout:      time.Second,
-		IdleTimeout:       time.Second,
-		ShutdownTimeout:   time.Second,
-		MaxHeaderBytes:    1,
-		MaxBodyBytes:      1,
+		GinMode:                    "release",
+		ReadTimeout:                time.Second,
+		ReadHeaderTimeout:          time.Second,
+		WriteTimeout:               time.Second,
+		IdleTimeout:                time.Second,
+		ShutdownTimeout:            time.Second,
+		MaxHeaderBytes:             1,
+		MaxBodyBytes:               1,
+		MetricsMaxRequestsInFlight: 1,
+		MetricsTimeout:             10 * time.Second,
 		TrustedProxies: []string{
 			"127.0.0.1",
 			"10.0.0.0/8",
@@ -576,10 +665,16 @@ func TestLoginRateLimitConfigValidate(t *testing.T) {
 	if err := (LoginRateLimitConfig{MaxFailures: 1, Window: time.Minute}).Validate(); err != nil {
 		t.Fatalf("valid login rate limit error: %v", err)
 	}
-	if err := (LoginRateLimitConfig{MaxFailures: 0, Window: time.Minute}).Validate(); err == nil {
+	if err := (LoginRateLimitConfig{MaxFailures: 0, Window: time.Minute}).Validate(); err != nil {
+		t.Fatalf("zero max failures should disable limiter: %v", err)
+	}
+	if err := (LoginRateLimitConfig{MaxFailures: 1, Window: 0}).Validate(); err != nil {
+		t.Fatalf("zero window should disable limiter: %v", err)
+	}
+	if err := (LoginRateLimitConfig{MaxFailures: -1, Window: time.Minute}).Validate(); err == nil {
 		t.Fatal("expected invalid max failures error")
 	}
-	if err := (LoginRateLimitConfig{MaxFailures: 1, Window: 0}).Validate(); err == nil {
+	if err := (LoginRateLimitConfig{MaxFailures: 1, Window: -time.Second}).Validate(); err == nil {
 		t.Fatal("expected invalid window error")
 	}
 }
@@ -631,7 +726,7 @@ func TestConfigValidate(t *testing.T) {
 	multipleInvalid := valid
 	multipleInvalid.Database.MaxOpenConns = 0
 	multipleInvalid.HTTP.MaxBodyBytes = 0
-	multipleInvalid.LoginRateLimit.Window = 0
+	multipleInvalid.LoginRateLimit.Window = -time.Second
 	if err := multipleInvalid.Validate(); err == nil {
 		t.Fatal("expected multiple validation errors")
 	} else {
@@ -641,6 +736,54 @@ func TestConfigValidate(t *testing.T) {
 				t.Fatalf("validation error %q does not mention %s", message, want)
 			}
 		}
+	}
+}
+
+func TestConfigValidateRejectsDevelopmentSecretsForPublicOrigins(t *testing.T) {
+	valid := Config{
+		Port:           "8080",
+		Database:       validDatabaseConfig(),
+		Redis:          RedisConfig{Addr: "redis:6379", Password: "redis-secret", DB: 0},
+		HTTP:           validHTTPConfig(),
+		LoginRateLimit: LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		Admin:          AdminConfig{Username: "admin", Password: "admin-secret"},
+		JWT:            JWTConfig{Secret: "jwt-secret-with-at-least-32-characters", TTL: time.Hour, Issuer: "issuer", Audience: "api"},
+	}
+	valid.HTTP.CORSAllowOrigins = []string{"https://app.example.com"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid public config error: %v", err)
+	}
+
+	insecure := valid
+	insecure.Redis.Password = developmentRedisPassword
+	insecure.Admin.Password = developmentAdminPassword
+	insecure.JWT.Secret = developmentJWTSecret
+	if err := insecure.Validate(); err == nil {
+		t.Fatal("expected development secret error for public origin")
+	} else {
+		message := err.Error()
+		for _, want := range []string{"JWT_SECRET", "ADMIN_PASSWORD", "REDIS_PASSWORD"} {
+			if !strings.Contains(message, want) {
+				t.Fatalf("validation error %q does not mention %s", message, want)
+			}
+		}
+	}
+}
+
+func TestConfigValidateAllowsDevelopmentSecretsForLocalOrigins(t *testing.T) {
+	cfg := Config{
+		Port:           "8080",
+		Database:       validDatabaseConfig(),
+		Redis:          RedisConfig{Addr: "127.0.0.1:6379", Password: developmentRedisPassword, DB: 0},
+		HTTP:           validHTTPConfig(),
+		LoginRateLimit: LoginRateLimitConfig{MaxFailures: 5, Window: time.Minute},
+		Admin:          AdminConfig{Username: "admin", Password: developmentAdminPassword},
+		JWT:            JWTConfig{Secret: developmentJWTSecret, TTL: time.Hour, Issuer: "issuer", Audience: "api"},
+	}
+	cfg.HTTP.CORSAllowOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("local development config error: %v", err)
 	}
 }
 
@@ -705,6 +848,8 @@ func TestEnvExampleDocumentsMetricsExposure(t *testing.T) {
 		"Keep disabled unless the port is protected",
 		"HTTP_METRICS_ENABLED=false",
 		"HTTP_METRICS_TOKEN=",
+		"HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT=1",
+		"HTTP_METRICS_TIMEOUT=10s",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("backend/.env.example is missing metrics guidance %q", want)
@@ -726,6 +871,26 @@ func TestEnvExampleDocumentsCrossOriginEmbedderPolicy(t *testing.T) {
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("backend/.env.example is missing COEP guidance %q", want)
+		}
+	}
+}
+
+func TestEnvExampleDocumentsLoginRateLimitDisableValues(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".env.example"))
+	if err != nil {
+		t.Fatalf("read backend/.env.example: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"Login rate limiting is enabled when both values are positive",
+		"Set either value",
+		"0s only for trusted local debugging",
+		"LOGIN_RATE_LIMIT_MAX_FAILURES=5",
+		"LOGIN_RATE_LIMIT_WINDOW=10m",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("backend/.env.example is missing login rate limit guidance %q", want)
 		}
 	}
 }
@@ -804,6 +969,8 @@ func TestProductionComposeDisablesMetricsByDefault(t *testing.T) {
 	for _, want := range []string{
 		"HTTP_METRICS_ENABLED: ${HTTP_METRICS_ENABLED:-false}",
 		"HTTP_METRICS_TOKEN: ${HTTP_METRICS_TOKEN:-}",
+		"HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT: ${HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT:-1}",
+		"HTTP_METRICS_TIMEOUT: ${HTTP_METRICS_TIMEOUT:-10s}",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("docker-compose.yaml must include metrics default %q", want)
@@ -833,9 +1000,30 @@ func TestProductionComposeDocumentsMetricsToken(t *testing.T) {
 	for _, want := range []string{
 		"HTTP_METRICS_TOKEN",
 		"Authorization: Bearer",
+		"RFC 6750 token68",
+		"最长 4096 字节",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("readme.md is missing metrics token guidance %q", want)
+		}
+	}
+}
+
+func TestProductionComposeDocumentsLogRotation(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "readme.md"))
+	if err != nil {
+		t.Fatalf("read readme.md: %v", err)
+	}
+	source := string(data)
+
+	for _, want := range []string{
+		"Docker `json-file` 日志轮转",
+		"单文件上限 `10m`",
+		"最多保留 `5` 个文件",
+		"避免没有 daemon 级日志策略时容器日志持续占满磁盘",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("readme.md is missing log rotation guidance %q", want)
 		}
 	}
 }
@@ -920,6 +1108,8 @@ func TestLoadFallsBackWhenNumericValuesAreInvalid(t *testing.T) {
 	t.Setenv("HTTP_REQUEST_TIMEOUT", "-1s")
 	t.Setenv("HTTP_MAX_HEADER_BYTES", "-1")
 	t.Setenv("HTTP_MAX_BODY_BYTES", "-1")
+	t.Setenv("HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT", "-1")
+	t.Setenv("HTTP_METRICS_TIMEOUT", "-1s")
 	t.Setenv("LOGIN_RATE_LIMIT_MAX_FAILURES", "not-a-number")
 	t.Setenv("LOGIN_RATE_LIMIT_WINDOW", "not-a-duration")
 	t.Setenv("JWT_TTL", "not-a-duration")
@@ -946,6 +1136,12 @@ func TestLoadFallsBackWhenNumericValuesAreInvalid(t *testing.T) {
 	}
 	if cfg.HTTP.MaxBodyBytes != 6*1024*1024 {
 		t.Fatalf("HTTP.MaxBodyBytes = %d", cfg.HTTP.MaxBodyBytes)
+	}
+	if cfg.HTTP.MetricsMaxRequestsInFlight != 1 {
+		t.Fatalf("HTTP.MetricsMaxRequestsInFlight = %d", cfg.HTTP.MetricsMaxRequestsInFlight)
+	}
+	if cfg.HTTP.MetricsTimeout != 10*time.Second {
+		t.Fatalf("HTTP.MetricsTimeout = %s", cfg.HTTP.MetricsTimeout)
 	}
 	if cfg.LoginRateLimit.MaxFailures != 5 || cfg.LoginRateLimit.Window != 10*time.Minute {
 		t.Fatalf("LoginRateLimit = %#v", cfg.LoginRateLimit)
@@ -981,15 +1177,17 @@ func validDatabaseConfig() DatabaseConfig {
 
 func validHTTPConfig() HTTPConfig {
 	return HTTPConfig{
-		GinMode:           "release",
-		ReadTimeout:       15 * time.Second,
-		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		ShutdownTimeout:   10 * time.Second,
-		RequestTimeout:    defaultHTTPRequestTimeout,
-		MaxHeaderBytes:    1 << 20,
-		MaxBodyBytes:      6 * 1024 * 1024,
+		GinMode:                    "release",
+		ReadTimeout:                15 * time.Second,
+		ReadHeaderTimeout:          5 * time.Second,
+		WriteTimeout:               30 * time.Second,
+		IdleTimeout:                60 * time.Second,
+		ShutdownTimeout:            10 * time.Second,
+		RequestTimeout:             defaultHTTPRequestTimeout,
+		MaxHeaderBytes:             1 << 20,
+		MaxBodyBytes:               6 * 1024 * 1024,
+		MetricsMaxRequestsInFlight: 1,
+		MetricsTimeout:             10 * time.Second,
 	}
 }
 
@@ -1284,6 +1482,8 @@ func configEnvKeys() []string {
 		"HTTP_MAX_BODY_BYTES",
 		"HTTP_METRICS_ENABLED",
 		"HTTP_METRICS_TOKEN",
+		"HTTP_METRICS_MAX_REQUESTS_IN_FLIGHT",
+		"HTTP_METRICS_TIMEOUT",
 		"HTTP_HSTS_MAX_AGE_SECONDS",
 		"HTTP_HSTS_INCLUDE_SUBDOMAINS",
 		"HTTP_HSTS_PRELOAD",

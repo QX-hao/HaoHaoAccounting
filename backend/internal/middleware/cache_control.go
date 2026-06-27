@@ -15,10 +15,22 @@ func NoStore() gin.HandlerFunc {
 	}
 }
 
+// NoCache 为运维探针类响应设置重新校验头，避免代理复用过期状态。
+func NoCache() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		SetNoCache(c.Writer.Header())
+		c.Next()
+	}
+}
+
 // NoStoreAPI 只匹配指定 API 前缀，防止误伤健康检查、静态资源等非业务接口。
 func NoStoreAPI(prefix string) gin.HandlerFunc {
 	prefix = strings.TrimRight(prefix, "/")
 	return func(c *gin.Context) {
+		if prefix == "" {
+			c.Next()
+			return
+		}
 		path := c.Request.URL.Path
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			SetNoStore(c.Writer.Header())

@@ -11,6 +11,9 @@ const clientOutputPaths = [
   path.join(root, 'web/shared/api/generated-client.ts'),
   path.join(root, 'mobile/src/shared/api/generated-client.ts'),
 ];
+// OpenAPI 3.x Path Item 的标准操作方法都要扫描，避免新增接口时被生成器静默跳过。
+const openAPIHTTPMethods = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
+const openAPIHTTPMethodPattern = openAPIHTTPMethods.join('|');
 
 const source = fs.readFileSync(openapiPath, 'utf8');
 const schemasSource = source.slice(source.indexOf('  schemas:'));
@@ -19,6 +22,8 @@ const duplicateSchemaNames = schemaNames.filter((name, index) => schemaNames.ind
 if (duplicateSchemaNames.length > 0) {
   throw new Error(`Duplicate schemas: ${[...new Set(duplicateSchemaNames)].join(', ')}`);
 }
+
+// 生成前先把 OpenAPI 当作接口契约做静态校验，避免错误规范继续生成到前端客户端。
 const schemas = Object.fromEntries(schemaNames.map((name, index) => {
   const marker = `    ${name}:`;
   const start = schemasSource.indexOf(marker);
@@ -28,13 +33,17 @@ const schemas = Object.fromEntries(schemaNames.map((name, index) => {
 }));
 
 validateOpenAPIDescription(source);
+validateOpenAPIInfoContact(source);
 validateOpenAPIServers(source);
+validateOpenAPIExternalDocs(source);
 validateOpenAPITags(source);
+validateSchemaRefs(source, new Set(schemaNames));
 validateSchemaConstraints(schemas);
 validateParameterConstraints(source);
 validateResponseComponents(source);
 validateSecuritySchemes(source);
 
+// 类型文件只从 components.schemas 生成，保证 Web 和 Mobile 使用同一份 API 数据结构。
 const generated = [
   '// Generated from backend/api/openapi.yaml. Do not edit by hand.',
   '',
@@ -47,6 +56,7 @@ for (const outputPath of typeOutputPaths) {
   fs.writeFileSync(outputPath, generated);
 }
 
+// 客户端方法从 paths 解析，并在解析阶段继续校验 operationId、认证、响应头和请求体契约。
 const endpoints = parseEndpoints(source);
 const client = emitClient(endpoints);
 for (const outputPath of clientOutputPaths) {
@@ -58,6 +68,32 @@ function validateOpenAPIDescription(openapi) {
   const info = topLevelBlock(openapi, 'info');
   if (!info.includes('CORS_ALLOW_ORIGINS') || !info.includes('Access-Control-Allow-Origin')) {
     throw new Error('OpenAPI info.description must document CORS allowlist rejection behavior');
+  }
+  if (!info.includes('API paths are matched exactly as documented') ||
+    !info.includes('trailing slash or extra slash variants are not') ||
+    !info.includes('structured not_found response')) {
+    throw new Error('OpenAPI info.description must document strict API path matching behavior');
+  }
+  if (!info.includes('Query parameters are single-value') ||
+    !info.includes('repeated scalar query keys') ||
+    !info.includes('invalid_request')) {
+    throw new Error('OpenAPI info.description must document repeated query parameter rejection');
+  }
+  if (!info.includes('JSON request bodies reject unknown fields') ||
+    !info.includes('duplicate object keys') ||
+    !info.includes('multiple top-level JSON values')) {
+    throw new Error('OpenAPI info.description must document strict JSON body parsing behavior');
+  }
+}
+
+function validateOpenAPIInfoContact(openapi) {
+  const info = topLevelBlock(openapi, 'info');
+  const contact = nestedBlock(info, 'contact:');
+  if (!contact.includes('name: HaoHaoAccounting Maintainers')) {
+    throw new Error('OpenAPI info.contact must identify HaoHaoAccounting maintainers');
+  }
+  if (!contact.includes('url: https://github.com/QX-hao/HaoHaoAccounting/security')) {
+    throw new Error('OpenAPI info.contact must link to the repository security contact path');
   }
 }
 
@@ -71,10 +107,30 @@ function validateOpenAPIServers(openapi) {
   }
 }
 
+function validateOpenAPIExternalDocs(openapi) {
+  const externalDocs = topLevelBlock(openapi, 'externalDocs');
+  if (!externalDocs.includes('description: Repository API contract and verification workflow.')) {
+    throw new Error('OpenAPI externalDocs must describe the repository API contract workflow');
+  }
+  if (!externalDocs.includes('url: https://github.com/QX-hao/HaoHaoAccounting/tree/dev-pxhao#协作与安全')) {
+    throw new Error('OpenAPI externalDocs must link to repository API contract documentation');
+  }
+}
+
 function validateOpenAPITags(openapi) {
   const tags = declaredOpenAPITags(openapi);
   if (tags.size === 0) {
     throw new Error('OpenAPI top-level tags must declare API groups');
+  }
+}
+
+// 防止 OpenAPI 引用不存在的 schema，避免前端生成出无法落地的类型。
+function validateSchemaRefs(openapi, knownSchemas) {
+  for (const match of openapi.matchAll(/\$ref:\s+'#\/components\/schemas\/([^']+)'/g)) {
+    const schemaName = match[1];
+    if (!knownSchemas.has(schemaName)) {
+      throw new Error(`OpenAPI references unknown schema component ${schemaName}`);
+    }
   }
 }
 
@@ -98,8 +154,11 @@ function validateSchemaConstraints(allSchemas) {
     ['ImportTextRequest', 'maxLength: 5242880'],
     ['ImportTextRequest', 'occurred_at,type,amount,category,account,note,tags'],
     ['ImportTextRequest', 'UTF-8 BOM'],
+    ['ImportTextRequest', 'skipDuplicates defaults to true'],
     ['ImportFileRequest', 'occurred_at,type,amount,category,account,note,tags'],
     ['ImportFileRequest', 'UTF-8 BOM'],
+    ['ImportFileRequest', 'skipDuplicates defaults to true'],
+    ['ImportFileRequest', 'invalid values return invalid_request'],
   ];
   for (const [schemaName, requiredText] of checks) {
     if (!allSchemas[schemaName]?.includes(requiredText)) {
@@ -107,19 +166,42 @@ function validateSchemaConstraints(allSchemas) {
     }
   }
 
+  validateSchemaRequiredProperties(allSchemas);
   validateRequestSchemasAreClosed(allSchemas);
   validateSharedResponseSchemasAreClosed(allSchemas);
   validateErrorResponseSchema(allSchemas.ErrorResponse || '');
   validateCoreResponseSchemasAreClosed(allSchemas);
+  validateAuthSchemaFieldDirection(allSchemas);
   validateCurrentUserResponseSchema(allSchemas.CurrentUser || '');
+  validateCoreResourceReadOnlyFields(allSchemas);
   validateCoreResourceTimestampSchemas(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
   validateReportResponseSchemasAreClosed(allSchemas);
+  validateReportResponseBounds(allSchemas);
+  validateReportResponseExamples(allSchemas);
   validateSummaryResponseSchema(allSchemas.Summary || '');
   validateImportResponseSchemasAreClosed(allSchemas);
+  validateImportResponseBounds(allSchemas);
+  validateImportResponseExamples(allSchemas);
+  validateImportJobReadOnlyFields(allSchemas.ImportJob || '');
   validateAIResponseSchemasAreClosed(allSchemas);
   validateAIResponseSchema(allSchemas.AIParseResult || '');
   validatePaginationSchema(allSchemas.Pagination || '');
+}
+
+// required 只能声明 properties 中真实存在的字段，否则客户端会相信一个不存在的必填字段。
+function validateSchemaRequiredProperties(allSchemas) {
+  for (const [schemaName, schema] of Object.entries(allSchemas)) {
+    const required = parseRequired(schema);
+    if (required.length === 0) continue;
+
+    const declaredProperties = new Set(parseProperties(nestedBlock(schema, 'properties:')).map((property) => property.key));
+    for (const propertyName of required) {
+      if (!declaredProperties.has(propertyName)) {
+        throw new Error(`${schemaName}.required references missing property ${propertyName}`);
+      }
+    }
+  }
 }
 
 function validateRequestSchemasAreClosed(allSchemas) {
@@ -149,11 +231,36 @@ function validateCoreResponseSchemasAreClosed(allSchemas) {
   }
 }
 
+function validateAuthSchemaFieldDirection(allSchemas) {
+  const password = schemaPropertyBlock(allSchemas.LoginRequest || '', 'password');
+  if (!password.includes('writeOnly: true')) {
+    throw new Error('LoginRequest.password is missing writeOnly: true');
+  }
+  if (!password.includes('format: password')) {
+    throw new Error('LoginRequest.password is missing password format');
+  }
+
+  const token = schemaPropertyBlock(allSchemas.LoginResponse || '', 'token');
+  if (!token.includes('readOnly: true')) {
+    throw new Error('LoginResponse.token is missing readOnly: true');
+  }
+}
+
 function validateErrorResponseSchema(schema) {
   for (const propertyName of ['error', 'code', 'status', 'requestId']) {
     if (!schemaRequiredProperties(schema).has(propertyName)) {
       throw new Error(`ErrorResponse.${propertyName} is missing required`);
     }
+  }
+  const status = schemaPropertyBlock(schema, 'status');
+  if (!status.includes('type: integer')) {
+    throw new Error('ErrorResponse.status is missing integer schema');
+  }
+  if (!status.includes('minimum: 400')) {
+    throw new Error('ErrorResponse.status is missing minimum: 400');
+  }
+  if (!status.includes('maximum: 599')) {
+    throw new Error('ErrorResponse.status is missing maximum: 599');
   }
 }
 
@@ -161,6 +268,29 @@ function validateCurrentUserResponseSchema(schema) {
   for (const propertyName of ['id', 'name', 'username', 'phone', 'email', 'wechatId']) {
     if (!schemaRequiredProperties(schema).has(propertyName)) {
       throw new Error(`CurrentUser.${propertyName} is missing required`);
+    }
+  }
+  const id = schemaPropertyBlock(schema, 'id');
+  if (!id.includes('readOnly: true')) {
+    throw new Error('CurrentUser.id is missing readOnly: true');
+  }
+}
+
+function validateCoreResourceReadOnlyFields(allSchemas) {
+  const fieldsBySchema = {
+    Account: ['id', 'userId', 'createdAt', 'updatedAt'],
+    Budget: ['id', 'userId', 'createdAt', 'updatedAt'],
+    Category: ['id', 'userId', 'createdAt', 'updatedAt'],
+    Transaction: ['id', 'userId', 'createdAt', 'updatedAt'],
+  };
+
+  for (const [schemaName, propertyNames] of Object.entries(fieldsBySchema)) {
+    const schema = allSchemas[schemaName] || '';
+    for (const propertyName of propertyNames) {
+      const property = schemaPropertyBlock(schema, propertyName);
+      if (!property.includes('readOnly: true')) {
+        throw new Error(`${schemaName}.${propertyName} is missing readOnly: true`);
+      }
     }
   }
 }
@@ -212,6 +342,85 @@ function validateReportResponseSchemasAreClosed(allSchemas) {
   }
 }
 
+function validateReportResponseBounds(allSchemas) {
+  const minimumsBySchema = {
+    CategoryStat: { categoryId: 1, amount: 0 },
+    AccountStat: { accountId: 1, amount: 0 },
+    MonthTrend: { income: 0, expense: 0 },
+    TrendPoint: { income: 0, expense: 0 },
+    CategoryTrendPoint: { categoryId: 1, amount: 0 },
+    AccountBalancePoint: { accountId: 1 },
+    BudgetExecution: { budgetId: 1, categoryId: 0, budget: 0, expense: 0, usageRate: 0 },
+    SummaryTableRow: { income: 0, expense: 0, txCount: 0 },
+    PeriodTotals: { income: 0, expense: 0 },
+    Summary: { income: 0, expense: 0 },
+  };
+  for (const [schemaName, propertyMinimums] of Object.entries(minimumsBySchema)) {
+    const schema = allSchemas[schemaName] || '';
+    for (const [propertyName, minimum] of Object.entries(propertyMinimums)) {
+      const property = schemaPropertyBlock(schema, propertyName);
+      if (!property.includes(`minimum: ${minimum}`)) {
+        throw new Error(`${schemaName}.${propertyName} is missing minimum: ${minimum}`);
+      }
+    }
+  }
+
+  const moneyFieldsBySchema = {
+    CategoryStat: ['amount'],
+    AccountStat: ['amount'],
+    MonthTrend: ['income', 'expense'],
+    TrendPoint: ['income', 'expense'],
+    CategoryTrendPoint: ['amount'],
+    AccountBalancePoint: ['net', 'balance'],
+    BudgetExecution: ['budget', 'expense', 'remaining'],
+    SummaryTableRow: ['income', 'expense', 'balance'],
+    PeriodTotals: ['income', 'expense'],
+    Summary: ['income', 'expense', 'balance'],
+  };
+  for (const [schemaName, propertyNames] of Object.entries(moneyFieldsBySchema)) {
+    const schema = allSchemas[schemaName] || '';
+    for (const propertyName of propertyNames) {
+      const property = schemaPropertyBlock(schema, propertyName);
+      if (!property.includes('multipleOf: 0.01')) {
+        throw new Error(`${schemaName}.${propertyName} is missing multipleOf: 0.01`);
+      }
+    }
+  }
+
+  const trendGranularity = schemaPropertyBlock(allSchemas.Summary || '', 'trendGranularity');
+  if (!trendGranularity.includes('enum: [day, week, month]')) {
+    throw new Error('Summary.trendGranularity is missing day/week/month enum');
+  }
+}
+
+function validateReportResponseExamples(allSchemas) {
+  const requiredExamples = {
+    CategoryStat: ['categoryId: 1', 'category: 餐饮', 'amount: 250'],
+    AccountStat: ['accountId: 1', 'account: 现金', 'amount: 250'],
+    MonthTrend: ["month: '2026-06'", 'income: 3000', 'expense: 250'],
+    TrendPoint: ["period: '2026-06-01'", 'income: 3000', 'expense: 100'],
+    CategoryTrendPoint: ['categoryId: 1', 'category: 餐饮', 'amount: 100'],
+    AccountBalancePoint: ['net: -150', 'balance: 2750'],
+    BudgetExecution: ['budget: 500', 'expense: 250', 'remaining: 250', 'usageRate: 0.5'],
+    SummaryTableRow: ['balance: -150', 'txCount: 1'],
+    PeriodTotals: ['income: 3000', 'expense: 250'],
+    PeriodCompare: ['current:', 'previous:'],
+    Summary: ['trendGranularity: day', 'dailySummaries:', 'monthlySummaries:', 'periodCompare:'],
+  };
+
+  for (const [schemaName, expectedTexts] of Object.entries(requiredExamples)) {
+    const example = nestedBlock(allSchemas[schemaName] || '', 'example:');
+    if (!example) {
+      throw new Error(`${schemaName} is missing example`);
+    }
+    for (const expectedText of expectedTexts) {
+      if (!example.includes(expectedText)) {
+        throw new Error(`${schemaName} example is missing ${expectedText}`);
+      }
+    }
+  }
+}
+
 function schemaRequiredProperties(schema) {
   return new Set(parseRequired(schema));
 }
@@ -258,6 +467,73 @@ function validateImportResponseSchemasAreClosed(allSchemas) {
   }
 }
 
+function validateImportResponseBounds(allSchemas) {
+  const fieldsBySchema = {
+    ImportPreviewRow: { line: 1 },
+    ImportPreview: { size: 0, totalRows: 0, validRows: 0, failedRows: 0, duplicateRows: 0, maxRows: 0, maxFileBytes: 0 },
+    ImportResult: { total: 0, success: 0, failed: 0, skipped: 0 },
+    ImportJob: { id: 1, total: 0, success: 0, failed: 0, skipped: 0 },
+  };
+
+  for (const [schemaName, propertyBounds] of Object.entries(fieldsBySchema)) {
+    const schema = allSchemas[schemaName] || '';
+    for (const [propertyName, minimum] of Object.entries(propertyBounds)) {
+      const property = schemaPropertyBlock(schema, propertyName);
+      if (!property.includes(`minimum: ${minimum}`)) {
+        throw new Error(`${schemaName}.${propertyName} is missing minimum: ${minimum}`);
+      }
+    }
+  }
+
+  const amount = schemaPropertyBlock(allSchemas.ImportPreviewRow || '', 'amount');
+  if (!amount.includes('minimum: 0')) {
+    throw new Error('ImportPreviewRow.amount is missing minimum: 0');
+  }
+  if (!amount.includes('multipleOf: 0.01')) {
+    throw new Error('ImportPreviewRow.amount is missing multipleOf: 0.01');
+  }
+
+  const rows = schemaPropertyBlock(allSchemas.ImportPreview || '', 'rows');
+  if (!rows.includes('maxItems: 20')) {
+    throw new Error('ImportPreview.rows is missing maxItems: 20');
+  }
+
+  const type = schemaPropertyBlock(allSchemas.ImportPreviewRow || '', 'type');
+  if (!type.includes('enum: [income, expense, \'\']')) {
+    throw new Error('ImportPreviewRow.type must allow an empty string for failed preview rows');
+  }
+}
+
+function validateImportResponseExamples(allSchemas) {
+  const requiredExamples = {
+    ImportPreviewRow: ['line: 2', 'occurredAt:', 'type: expense', 'amount: 35.5', 'valid: true', 'duplicate: false'],
+    ImportPreview: ['filename: preview.csv', 'maxRows: 5000', 'maxFileBytes: 5242880', 'valid: false', "type: ''", 'error: invalid occurred_at'],
+    ImportResult: ['total: 2', 'success: 1', 'failed: 1', 'skipped: 0', 'line 3: invalid occurred_at'],
+    ImportJob: ['id: 1', 'status: completed', 'createdAt:', 'updatedAt:', 'line 3: invalid occurred_at'],
+  };
+
+  for (const [schemaName, expectedTexts] of Object.entries(requiredExamples)) {
+    const example = nestedBlock(allSchemas[schemaName] || '', 'example:');
+    if (!example) {
+      throw new Error(`${schemaName} is missing example`);
+    }
+    for (const expectedText of expectedTexts) {
+      if (!example.includes(expectedText)) {
+        throw new Error(`${schemaName} example is missing ${expectedText}`);
+      }
+    }
+  }
+}
+
+function validateImportJobReadOnlyFields(schema) {
+  for (const propertyName of ['id', 'createdAt', 'updatedAt']) {
+    const property = schemaPropertyBlock(schema, propertyName);
+    if (!property.includes('readOnly: true')) {
+      throw new Error(`ImportJob.${propertyName} is missing readOnly: true`);
+    }
+  }
+}
+
 function validateAIResponseSchemasAreClosed(allSchemas) {
   for (const schemaName of ['AIParseResult', 'AIParseResponse']) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
@@ -300,8 +576,9 @@ function validatePaginationSchema(schema) {
 }
 
 function schemaPropertyBlock(schema, propertyName) {
-  const pattern = new RegExp(`^        ${propertyName}:\\n(?:          .+\\n)+`, 'm');
-  return schema.match(pattern)?.[0] || '';
+  const properties = nestedBlock(schema, 'properties:') || schema;
+  const pattern = new RegExp(`^        ${escapeRegExp(propertyName)}:\\n(?:          .+\\n)+`, 'm');
+  return properties.match(pattern)?.[0] || '';
 }
 
 function validateParameterConstraints(openapi) {
@@ -362,10 +639,6 @@ function validateResponseComponents(openapi) {
   validateRateLimitHeader(openapi, 'RateLimitRemaining', 'Remaining failed login attempts');
   validateRateLimitHeader(openapi, 'RateLimitReset', 'Delay in seconds');
 
-  const importJobAccepted = operationResponseBlockById(openapi, 'postIoImportJobs', '202');
-  if (!importJobAccepted.includes('Location:')) {
-    throw new Error('POST /io/import/jobs 202 response is missing Location header');
-  }
   const location = componentHeaderBlock(openapi, 'Location');
   if (!location.includes('Relative URL') || !location.includes('/api/v1/io/import/jobs/1')) {
     throw new Error('components.headers.Location must document queued resource URLs with an example');
@@ -400,6 +673,18 @@ function validateResponseComponents(openapi) {
   if (!contentDisposition.includes('filename*')) {
     throw new Error('components.headers.ContentDisposition is missing filename* guidance');
   }
+  if (!contentDisposition.includes('ASCII-safe filename fallback') || !contentDisposition.includes('prefer filename*')) {
+    throw new Error('components.headers.ContentDisposition must document ASCII fallback and filename* precedence');
+  }
+
+  const logoutSuccess = operationResponseBlockById(openapi, 'postAuthLogout', '200');
+  if (!logoutSuccess.includes('Clear-Site-Data:')) {
+    throw new Error('POST /auth/logout 200 response is missing Clear-Site-Data header');
+  }
+  const clearSiteData = componentHeaderBlock(openapi, 'ClearSiteData');
+  if (!clearSiteData.includes('Browser-side data cleared after logout') || !clearSiteData.includes('"cache", "cookies", "storage"')) {
+    throw new Error('components.headers.ClearSiteData must document logout browser data clearing directives');
+  }
 
   const requestID = componentHeaderBlock(openapi, 'RequestID');
   validateRequestIDSchema(requestID, 'components.headers.RequestID');
@@ -413,6 +698,13 @@ function validateSecuritySchemes(openapi) {
   }
   if (!bearerAuth.includes('Authorization: Bearer <JWT>')) {
     throw new Error('components.securitySchemes.bearerAuth is missing Authorization header guidance');
+  }
+  // 认证文档要覆盖运行时安全边界，避免客户端只按 OpenAPI 调用时踩到隐藏规则。
+  if (!bearerAuth.includes('repeated `Authorization` headers are rejected')) {
+    throw new Error('components.securitySchemes.bearerAuth is missing repeated Authorization header guidance');
+  }
+  if (!bearerAuth.includes('`nbf` not-before claim')) {
+    throw new Error('components.securitySchemes.bearerAuth is missing JWT not-before claim guidance');
   }
 }
 
@@ -455,12 +747,36 @@ function validateErrorResponseExamples(openapi) {
         throw new Error(`components.responses.${responseName} example is missing ${field}`);
       }
     }
+    const expected = errorResponseExampleContract()[responseName];
+    if (expected && (!example.includes(`status: ${expected.status}`) || !example.includes(`code: ${expected.code}`))) {
+      throw new Error(`components.responses.${responseName} example must use status ${expected.status} and code ${expected.code}`);
+    }
   }
+}
+
+function errorResponseExampleContract() {
+  return {
+    BadRequest: { status: 400, code: 'bad_request' },
+    InvalidRequest: { status: 400, code: 'invalid_request' },
+    Unauthorized: { status: 401, code: 'unauthorized' },
+    Forbidden: { status: 403, code: 'forbidden' },
+    NotFound: { status: 404, code: 'not_found' },
+    MethodNotAllowed: { status: 405, code: 'method_not_allowed' },
+    RateLimited: { status: 429, code: 'rate_limited' },
+    PayloadTooLarge: { status: 413, code: 'payload_too_large' },
+    UnsupportedMediaType: { status: 415, code: 'unsupported_media_type' },
+    NotAcceptable: { status: 406, code: 'not_acceptable' },
+    InternalError: { status: 500, code: 'internal_error' },
+    GatewayTimeout: { status: 504, code: 'request_timeout' },
+    ClientClosedRequest: { status: 499, code: 'client_closed_request' },
+    Error: { status: 500, code: 'internal_error' },
+  };
 }
 
 function errorResponseNames() {
   return [
     'BadRequest',
+    'InvalidRequest',
     'Unauthorized',
     'Forbidden',
     'NotFound',
@@ -471,6 +787,7 @@ function errorResponseNames() {
     'NotAcceptable',
     'InternalError',
     'GatewayTimeout',
+    'ClientClosedRequest',
     'Error',
   ];
 }
@@ -478,6 +795,7 @@ function errorResponseNames() {
 function noStoreResponseNames() {
   return [
     'BadRequest',
+    'InvalidRequest',
     'Unauthorized',
     'Forbidden',
     'NotFound',
@@ -488,6 +806,7 @@ function noStoreResponseNames() {
     'NotAcceptable',
     'InternalError',
     'GatewayTimeout',
+    'ClientClosedRequest',
     'Error',
     'Ok',
   ];
@@ -505,6 +824,9 @@ function validateRequestIDSchema(block, name) {
   }
   if (!block.includes('example: client-request-123')) {
     throw new Error(`${name} is missing request id example`);
+  }
+  if (!block.includes('system entropy source is unavailable')) {
+    throw new Error(`${name} must document generated id fallback uniqueness`);
   }
 }
 
@@ -627,19 +949,21 @@ function methodArgs(args, optionalParams) {
   return [`${paramsArg} = {}`, ...rest].join(', ');
 }
 
+// parseEndpoints 同时承担解析和契约验证：任何 OpenAPI 漂移都应在生成客户端前失败。
 function parseEndpoints(openapi) {
   const pathsBlock = openapi.slice(openapi.indexOf('paths:'), openapi.indexOf('components:'));
   const pathMatches = [...pathsBlock.matchAll(/^  (\/[^:]+):$/gm)];
   const operationIds = new Map();
   const declaredTags = declaredOpenAPITags(openapi);
+  const componentParameters = parseComponentParameters(openapi);
   const result = [];
   for (const [index, match] of pathMatches.entries()) {
     const apiPath = match[1];
     const start = match.index;
     const end = pathMatches[index + 1]?.index ?? pathsBlock.length;
     const pathBlock = pathsBlock.slice(start, end);
-    const pathParameters = parseOperationParameters(pathLevelBlock(pathBlock));
-    const methodMatches = [...pathBlock.matchAll(/^    (get|post|put|delete):$/gm)];
+    const sharedPathBlock = pathLevelBlock(pathBlock);
+    const methodMatches = openAPIMethodMatches(pathBlock);
     for (const [methodIndex, methodMatch] of methodMatches.entries()) {
       const method = methodMatch[1];
       const methodStart = methodMatch.index;
@@ -650,9 +974,13 @@ function parseEndpoints(openapi) {
       const description = operationDescription(methodBlock);
       const tags = operationTags(methodBlock);
       const responseStatuses = operationResponseStatuses(methodBlock);
-      const parameters = [...pathParameters, ...parseOperationParameters(methodBlock)];
+      const parameters = parseEffectiveOperationParameters(sharedPathBlock, methodBlock, componentParameters, method, apiPath);
       if (!operationId) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing operationId`);
+      }
+      const expectedOperationId = endpointMethodName(method, apiPath);
+      if (operationId !== expectedOperationId) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} operationId must be ${expectedOperationId}`);
       }
       if (!summary) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing summary`);
@@ -666,6 +994,9 @@ function parseEndpoints(openapi) {
       operationIds.set(operationId, `${method.toUpperCase()} ${apiPath}`);
       if (tags.length === 0) {
         throw new Error(`${method.toUpperCase()} ${apiPath} is missing tags`);
+      }
+      if (tags.length !== 1) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} must declare exactly one tag for generated client grouping`);
       }
       for (const tag of tags) {
         if (!declaredTags.has(tag)) {
@@ -684,6 +1015,9 @@ function parseEndpoints(openapi) {
       if (responseStatuses.has('500') && !responseStatuses.has('504')) {
         throw new Error(`${method.toUpperCase()} ${apiPath} declares 500 response but is missing 504 timeout response`);
       }
+      if (responseStatuses.has('500') && !responseStatuses.has('499')) {
+        throw new Error(`${method.toUpperCase()} ${apiPath} declares 500 response but is missing 499 client closed response`);
+      }
       if (operationHasSuccessContent(methodBlock, source) && !responseStatuses.has('406')) {
         throw new Error(`${method.toUpperCase()} ${apiPath} returns a response body but is missing 406 response`);
       }
@@ -693,8 +1027,9 @@ function parseEndpoints(openapi) {
       validatePathParameters(method, apiPath, parameters);
       validateSuccessResponseHeaders(method, apiPath, methodBlock);
       validateCreatedResponseHeaders(method, apiPath, methodBlock);
+      validateAcceptedResponseHeaders(method, apiPath, methodBlock);
       validateSuccessResponseCacheHeaders(method, apiPath, methodBlock, source);
-      validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses);
+      validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses, parameters, `${sharedPathBlock}\n${methodBlock}`);
       if (operationHasRequestBody(methodBlock)) {
         validateRequestBodyContract(method, apiPath, methodBlock);
         if (!responseStatuses.has('400')) {
@@ -723,6 +1058,7 @@ function parseEndpoints(openapi) {
   return result.filter((endpoint) => endpoint.jsonClientEndpoint);
 }
 
+// 请求体契约必须显式描述、必填，并且只使用 JSON 或 multipart 其中一种格式。
 function validateRequestBodyContract(method, apiPath, methodBlock) {
   const requestBlock = nestedBlock(methodBlock, 'requestBody:');
   if (!requestBlock.match(/^\s+description:\s+\S.+$/m)) {
@@ -740,8 +1076,35 @@ function validateRequestBodyContract(method, apiPath, methodBlock) {
   if (hasJSON && hasMultipart) {
     throw new Error(`${method.toUpperCase()} ${apiPath} requestBody must not mix JSON and multipart content`);
   }
+  if (hasJSON) {
+    const jsonBlock = nestedBlock(requestBlock, 'application/json:');
+    // 中间件允许 JSON Content-Type 参数和 application/*+json，这些运行时兼容性也要写进 OpenAPI。
+    if (!jsonBlock.includes('Content-Type: application/json') || !jsonBlock.includes('charset=utf-8')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} JSON requestBody must document Content-Type parameter handling`);
+    }
+    if (!jsonBlock.includes('application/*+json')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} JSON requestBody must document structured JSON media type handling`);
+    }
+  }
+  if (hasMultipart) {
+    const multipartBlock = nestedBlock(requestBlock, 'multipart/form-data:');
+    // multipart 请求依赖非空 boundary 和 file 表单字段，OpenAPI 必须把客户端要构造的格式写清楚。
+    if (!multipartBlock.includes('Content-Type: multipart/form-data; boundary=<')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} multipart requestBody must document boundary parameter handling`);
+    }
+    if (!multipartBlock.includes('non-empty-boundary')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} multipart requestBody must document non-empty boundary requirement`);
+    }
+    if (!multipartBlock.includes('required `file` field')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} multipart requestBody must document required file field`);
+    }
+  }
   if (!requestSchema(methodBlock)) {
     throw new Error(`${method.toUpperCase()} ${apiPath} requestBody is missing a component schema reference`);
+  }
+  const badRequest = operationResponseBlocks(methodBlock).find((response) => response.status === '400')?.block || '';
+  if (!badRequest.includes("$ref: '#/components/responses/InvalidRequest'")) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} requestBody 400 response must use InvalidRequest`);
   }
 }
 
@@ -809,6 +1172,14 @@ function validateCreatedResponseHeaders(method, apiPath, methodBlock) {
   }
 }
 
+function validateAcceptedResponseHeaders(method, apiPath, methodBlock) {
+  const acceptedResponses = operationResponseBlocks(methodBlock).filter((response) => response.status === '202');
+  for (const response of acceptedResponses) {
+    if (response.block.includes('Location:')) continue;
+    throw new Error(`${method.toUpperCase()} ${apiPath} 202 response is missing Location header`);
+  }
+}
+
 function validateSuccessResponseCacheHeaders(method, apiPath, methodBlock, openapi) {
   const successResponses = operationResponseBlocks(methodBlock).filter((response) => /^2\d\d$/.test(response.status));
   for (const response of successResponses) {
@@ -835,80 +1206,85 @@ function responseIncludesHeader(responseBlock, openapi, headerText) {
   return componentName ? responseComponentBlock(openapi, componentName).includes(headerText) : false;
 }
 
-function validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses) {
-  const parameters = parseOperationParameters(methodBlock).filter((param) => param.in === 'query');
+function validateOperationQueryContract(method, apiPath, methodBlock, responseStatuses, operationParameters, parameterSourceBlock) {
+  const parameters = operationParameters.filter((param) => param.in === 'query');
   if (parameters.length === 0) return;
 
   if (apiPath === '/transactions' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
-    requireParameterText(method, apiPath, methodBlock, 'page', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'page', 'default: 1');
-    requireParameterText(method, apiPath, methodBlock, 'page', 'Defaults to 1 when omitted');
-    requireParameterText(method, apiPath, methodBlock, 'page', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'maximum: 200');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'default: 20');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'Defaults to 20 when omitted');
-    requireParameterText(method, apiPath, methodBlock, 'pageSize', 'example: 20');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
-    requireParameterText(method, apiPath, methodBlock, 'type', 'Transaction type filter');
-    requireParameterText(method, apiPath, methodBlock, 'type', 'example: expense');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'Category id filter');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'Account id filter');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'q', 'matched against transaction notes and tags');
-    requireParameterText(method, apiPath, methodBlock, 'q', 'Maximum 100 characters');
-    requireParameterText(method, apiPath, methodBlock, 'q', 'maxLength: 100');
-    requireParameterText(method, apiPath, methodBlock, 'q', 'example: lunch');
+    require400Response(method, apiPath, responseStatuses, methodBlock);
+    requireParameterText(method, apiPath, parameterSourceBlock, 'page', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'page', 'default: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'page', 'Defaults to 1 when omitted');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'page', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'maximum: 200');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'default: 20');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'Defaults to 20 when omitted');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'pageSize', 'example: 20');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'start');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'end');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', 'Transaction type filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', 'example: expense');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'Category id filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'Account id filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'q', 'matched against transaction notes and tags');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'q', 'Maximum 100 characters');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'q', 'maxLength: 100');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'q', 'example: lunch');
   }
   if (apiPath === '/budgets' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
-    requireParameterText(method, apiPath, methodBlock, 'month', "pattern: '^\\d{4}-\\d{2}$'");
-    requireParameterText(method, apiPath, methodBlock, 'month', 'Budget month in YYYY-MM format');
-    requireParameterText(method, apiPath, methodBlock, 'month', "example: '2026-06'");
+    require400Response(method, apiPath, responseStatuses, methodBlock);
+    requireParameterText(method, apiPath, parameterSourceBlock, 'month', "pattern: '^\\d{4}-\\d{2}$'");
+    requireParameterText(method, apiPath, parameterSourceBlock, 'month', 'Budget month in YYYY-MM format');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'month', "example: '2026-06'");
   }
   if (apiPath === '/categories' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
-    requireParameterText(method, apiPath, methodBlock, 'type', "$ref: '#/components/schemas/TransactionType'");
-    requireParameterText(method, apiPath, methodBlock, 'type', 'Transaction type filter');
-    requireParameterText(method, apiPath, methodBlock, 'type', 'example: expense');
+    require400Response(method, apiPath, responseStatuses, methodBlock);
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', "$ref: '#/components/schemas/TransactionType'");
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', 'Transaction type filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'type', 'example: expense');
   }
   if (apiPath === '/reports/summary' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'Category id filter');
-    requireParameterText(method, apiPath, methodBlock, 'categoryId', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'minimum: 1');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'Account id filter');
-    requireParameterText(method, apiPath, methodBlock, 'accountId', 'example: 1');
-    requireParameterText(method, apiPath, methodBlock, 'trend', 'enum: [day, week, month]');
-    requireParameterText(method, apiPath, methodBlock, 'trend', 'default: month');
-    requireParameterText(method, apiPath, methodBlock, 'trend', 'Defaults to month when omitted');
-    requireParameterText(method, apiPath, methodBlock, 'trend', 'example: month');
+    require400Response(method, apiPath, responseStatuses, methodBlock);
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'start');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'end');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'Category id filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'categoryId', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'minimum: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'Account id filter');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'accountId', 'example: 1');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'trend', 'enum: [day, week, month]');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'trend', 'default: month');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'trend', 'Defaults to month when omitted');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'trend', 'example: month');
   }
   if (apiPath === '/io/export' && method === 'get') {
-    require400Response(method, apiPath, responseStatuses);
-    requireParameterText(method, apiPath, methodBlock, 'format', 'enum: [csv, xlsx]');
-    requireParameterText(method, apiPath, methodBlock, 'format', 'default: csv');
-    requireParameterText(method, apiPath, methodBlock, 'format', 'Defaults to csv when omitted');
-    requireParameterText(method, apiPath, methodBlock, 'format', 'example: csv');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'start');
-    requireDateTimeQueryParameter(method, apiPath, methodBlock, 'end');
+    require400Response(method, apiPath, responseStatuses, methodBlock);
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'enum: [csv, xlsx]');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'default: csv');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'Values are trimmed and case-insensitive');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'defaults to csv when omitted');
+    requireParameterText(method, apiPath, parameterSourceBlock, 'format', 'example: csv');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'start');
+    requireDateTimeQueryParameter(method, apiPath, parameterSourceBlock, 'end');
     if (!methodBlock.includes('Content-Disposition:')) {
       throw new Error('GET /io/export is missing Content-Disposition response header');
     }
   }
 }
 
-function require400Response(method, apiPath, responseStatuses) {
+function require400Response(method, apiPath, responseStatuses, methodBlock) {
   if (!responseStatuses.has('400')) {
     throw new Error(`${method.toUpperCase()} ${apiPath} has validated query parameters but is missing 400 response`);
+  }
+  const badRequest = operationResponseBlocks(methodBlock).find((response) => response.status === '400')?.block || '';
+  if (!badRequest.includes("$ref: '#/components/responses/InvalidRequest'")) {
+    throw new Error(`${method.toUpperCase()} ${apiPath} query 400 response must use InvalidRequest`);
   }
 }
 
@@ -931,9 +1307,13 @@ function requireDateTimeQueryParameter(method, apiPath, block, name) {
 }
 
 function parameterBlockByName(block, name) {
-  const parametersBlock = nestedBlock(block, 'parameters:');
-  const paramBlocks = parametersBlock.split(/\n(?=\s+- name:|\s+- \$ref:)/).map((item) => item.trim()).filter(Boolean);
-  return paramBlocks.find((paramBlock) => paramBlock.includes(`name: ${name}`)) || '';
+  for (const match of block.matchAll(/^\s+parameters:$/gm)) {
+    const parametersBlock = nestedBlock(block.slice(match.index), 'parameters:');
+    const paramBlocks = parametersBlock.split(/\n(?=\s+- name:|\s+- \$ref:)/).map((item) => item.trim()).filter(Boolean);
+    const parameterBlock = paramBlocks.find((paramBlock) => paramBlock.includes(`name: ${name}`));
+    if (parameterBlock) return parameterBlock;
+  }
+  return '';
 }
 
 function operationResponseStatuses(block) {
@@ -966,7 +1346,9 @@ function responseComponentBlock(openapi, componentName) {
   const responsesBlock = nestedBlock(openAPIComponentsBlock(openapi), 'responses:');
   const marker = `    ${componentName}:`;
   const start = responsesBlock.indexOf(marker);
-  if (start === -1) return '';
+  if (start === -1) {
+    throw new Error(`OpenAPI references unknown response component ${componentName}`);
+  }
   const next = responsesBlock.slice(start + marker.length).search(/^    [A-Za-z][A-Za-z0-9]*:/m);
   return responsesBlock.slice(start, next === -1 ? undefined : start + marker.length + next);
 }
@@ -975,7 +1357,9 @@ function componentHeaderBlock(openapi, componentName) {
   const headersBlock = nestedBlock(openAPIComponentsBlock(openapi), 'headers:');
   const marker = `    ${componentName}:`;
   const start = headersBlock.indexOf(marker);
-  if (start === -1) return '';
+  if (start === -1) {
+    throw new Error(`OpenAPI references unknown header component ${componentName}`);
+  }
   const next = headersBlock.slice(start + marker.length).search(/^    [A-Za-z][A-Za-z0-9]*:/m);
   return headersBlock.slice(start, next === -1 ? undefined : start + marker.length + next);
 }
@@ -1001,6 +1385,9 @@ function declaredOpenAPITags(openapi) {
   for (const tagBlock of tagBlocks) {
     const name = tagBlock.match(/^\s+- name:\s+([A-Za-z][A-Za-z0-9_-]*)/m)?.[1] || '';
     if (!name) continue;
+    if (tags.has(name)) {
+      throw new Error(`OpenAPI tag ${name} is declared more than once`);
+    }
     if (!tagBlock.match(/^\s+description:\s+\S.+$/m)) {
       throw new Error(`OpenAPI tag ${name} is missing description`);
     }
@@ -1033,7 +1420,7 @@ function operationBlockById(openapi, operationId) {
     const pathStart = pathMatch.index;
     const pathEnd = pathMatches[pathIndex + 1]?.index ?? pathsBlock.length;
     const pathBlock = pathsBlock.slice(pathStart, pathEnd);
-    const methodMatches = [...pathBlock.matchAll(/^    (get|post|put|delete):$/gm)];
+    const methodMatches = openAPIMethodMatches(pathBlock);
     for (const [methodIndex, methodMatch] of methodMatches.entries()) {
       const methodStart = methodMatch.index;
       const methodEnd = methodMatches[methodIndex + 1]?.index ?? pathBlock.length;
@@ -1066,28 +1453,117 @@ function operationTags(block) {
 }
 
 function pathLevelBlock(pathBlock) {
-  const firstMethodIndex = pathBlock.search(/^    (get|post|put|delete):/m);
+  const firstMethodIndex = pathBlock.search(openAPIMethodLineRegexp());
   return firstMethodIndex === -1 ? pathBlock : pathBlock.slice(0, firstMethodIndex);
 }
 
-function parseOperationParameters(block) {
+function openAPIMethodMatches(pathBlock) {
+  return [...pathBlock.matchAll(new RegExp(`^    (${openAPIHTTPMethodPattern}):$`, 'gm'))];
+}
+
+function openAPIMethodLineRegexp() {
+  return new RegExp(`^    (${openAPIHTTPMethodPattern}):`, 'm');
+}
+
+// 汇总 Path Item 和 operation 两层参数，让生成器遵守 OpenAPI 的参数继承规则。
+function parseEffectiveOperationParameters(pathLevelBlockSource, methodBlock, componentParameters, method, apiPath) {
+  const pathParameters = parseOperationParameters(pathLevelBlockSource, componentParameters, `${apiPath} path parameters`);
+  const operationParameters = parseOperationParameters(methodBlock, componentParameters, `${method.toUpperCase()} ${apiPath} parameters`);
+  return mergeOpenAPIParameters(pathParameters, operationParameters);
+}
+
+// OpenAPI 规定 Path Item 参数会被 operation 继承；同名同位置参数由 operation 级定义覆盖。
+function mergeOpenAPIParameters(pathParameters, operationParameters) {
+  const result = [];
+  const indexes = new Map();
+  for (const parameter of [...pathParameters, ...operationParameters]) {
+    const key = parameterKey(parameter);
+    if (indexes.has(key)) {
+      result[indexes.get(key)] = parameter;
+      continue;
+    }
+    indexes.set(key, result.length);
+    result.push(parameter);
+  }
+  return result;
+}
+
+// 先解析 components.parameters，后续路径或接口里的 $ref 都必须能解析到这里。
+function parseComponentParameters(openapi) {
+  const parametersBlock = nestedBlock(openAPIComponentsBlock(openapi), 'parameters:');
+  if (!parametersBlock) return new Map();
+
+  const names = [...parametersBlock.matchAll(/^    ([A-Za-z][A-Za-z0-9]*):$/gm)];
+  return new Map(names.map((match, index) => {
+    const name = match[1];
+    const start = match.index;
+    const end = names[index + 1]?.index ?? parametersBlock.length;
+    return [name, parseParameterBlock(parametersBlock.slice(start, end), new Map(), `component parameter ${name}`)];
+  }));
+}
+
+function parseOperationParameters(block, componentParameters = new Map(), context = 'parameters') {
   const parametersBlock = nestedBlock(block, 'parameters:');
   if (!parametersBlock) return [];
 
   const paramBlocks = parametersBlock.split(/\n(?=\s+- name:|\s+- \$ref:)/).map((item) => item.trim()).filter(Boolean);
-  return paramBlocks.map((paramBlock) => {
-    if (paramBlock.includes("$ref: '#/components/parameters/Id'")) {
-      return { name: 'id', in: 'path', type: 'integer', required: true };
+  const parameters = paramBlocks.map((paramBlock) => parseParameterBlock(paramBlock, componentParameters, context)).filter((param) => param.name);
+  validateUniqueParameters(parameters, context);
+  return parameters;
+}
+
+// 参数对象必须显式写清 name 和 in，避免少写字段时被生成器误判成 query 参数。
+function parseParameterBlock(paramBlock, componentParameters, context) {
+  const componentName = paramBlock.match(/\$ref:\s+'#\/components\/parameters\/([^']+)'/)?.[1] || '';
+  if (componentName) {
+    const parameter = componentParameters.get(componentName);
+    if (!parameter) {
+      throw new Error(`${context} references unknown component parameter ${componentName}`);
     }
-    return {
-      name: paramBlock.match(/name:\s+([A-Za-z][A-Za-z0-9]*)/)?.[1] || '',
-      in: paramBlock.match(/in:\s+([A-Za-z]+)/)?.[1] || 'query',
-      type: paramBlock.match(/type:\s+([A-Za-z]+)/)?.[1] || 'string',
-      enumValues: enumValues(paramBlock),
-      ref: paramBlock.match(/\$ref:\s+'#\/components\/schemas\/([^']+)'/)?.[1] || '',
-      required: paramBlock.includes('required: true'),
-    };
-  }).filter((param) => param.name);
+    return { ...parameter };
+  }
+  const name = paramBlock.match(/name:\s+([A-Za-z][A-Za-z0-9_-]*)/)?.[1] || '';
+  if (!name) {
+    throw new Error(`${context} has a parameter missing name`);
+  }
+  const parameterIn = paramBlock.match(/in:\s+([A-Za-z]+)/)?.[1] || '';
+  if (!parameterIn) {
+    throw new Error(`${context} parameter ${name} is missing in`);
+  }
+  if (!['query', 'header', 'path', 'cookie'].includes(parameterIn)) {
+    throw new Error(`${context} parameter ${name} has unsupported in ${parameterIn}`);
+  }
+  return {
+    name,
+    in: parameterIn,
+    type: paramBlock.match(/type:\s+([A-Za-z]+)/)?.[1] || 'string',
+    enumValues: enumValues(paramBlock),
+    ref: paramBlock.match(/\$ref:\s+'#\/components\/schemas\/([^']+)'/)?.[1] || '',
+    required: parseParameterRequired(paramBlock, context, name),
+  };
+}
+
+function parseParameterRequired(paramBlock, context, name) {
+  const match = paramBlock.match(/^\s+required:\s+(\S+)\s*$/m);
+  if (!match) return false;
+  if (match[1] === 'true') return true;
+  if (match[1] === 'false') return false;
+  throw new Error(`${context} parameter ${name} required must be true or false`);
+}
+
+function validateUniqueParameters(parameters, context) {
+  const seen = new Set();
+  for (const parameter of parameters) {
+    const key = parameterKey(parameter);
+    if (seen.has(key)) {
+      throw new Error(`${context} has duplicate parameter ${parameter.name} in ${parameter.in}`);
+    }
+    seen.add(key);
+  }
+}
+
+function parameterKey(parameter) {
+  return `${parameter.in}:${parameter.name}`;
 }
 
 function requestSchema(block) {
@@ -1115,15 +1591,14 @@ function endpointMethodName(method, apiPath) {
   const cleanPath = apiPath.replace(/^\//, '').replace(/\{id\}/g, 'by-id');
   const words = cleanPath.split(/[\/-]/).filter(Boolean);
   const base = words.map((word, index) => index === 0 ? word : upperFirst(word)).join('');
-  const prefix = method === 'get' ? 'get' : method === 'post' ? 'post' : method === 'put' ? 'put' : 'delete';
-  return `${prefix}${upperFirst(base)}`;
+  return `${method}${upperFirst(base)}`;
 }
 
 function groupEndpoints(endpoints) {
   const groups = new Map();
   for (const endpoint of endpoints) {
-    const first = endpoint.path.split('/').filter(Boolean)[0] || 'root';
-    const group = first === 'io' ? 'dataio' : first.replace(/[^A-Za-z0-9]/g, '');
+    // 客户端模块分组以 OpenAPI tag 为准，避免路径前缀调整时生成 API 结构漂移。
+    const group = endpoint.tags[0].replace(/[^A-Za-z0-9]/g, '');
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(endpoint);
   }
@@ -1139,7 +1614,7 @@ function parameterType(param) {
 function enumValues(block) {
   const match = block.match(/enum:\s+\[([^\]]+)\]/);
   if (!match) return [];
-  return match[1].split(',').map((value) => value.trim()).filter(Boolean);
+  return match[1].split(',').map(parseInlineYAMLScalar);
 }
 
 function upperFirst(value) {
@@ -1149,7 +1624,15 @@ function upperFirst(value) {
 function parseEnum(block) {
   const match = block.match(/^      enum:\s+\[([^\]]+)\]/m);
   if (!match) return [];
-  return match[1].split(',').map((value) => value.trim()).filter(Boolean);
+  return match[1].split(',').map(parseInlineYAMLScalar);
+}
+
+function parseInlineYAMLScalar(value) {
+  const clean = value.trim();
+  if ((clean.startsWith("'") && clean.endsWith("'")) || (clean.startsWith('"') && clean.endsWith('"'))) {
+    return clean.slice(1, -1);
+  }
+  return clean;
 }
 
 function parseRequired(block) {
