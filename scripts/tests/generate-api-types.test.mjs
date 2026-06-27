@@ -734,11 +734,12 @@ test('OpenAPI request bodies match generated client assumptions', () => {
 	assert.match(generator, /JSON requestBody must document Content-Type parameter handling/);
 	assert.match(generator, /JSON requestBody must document structured JSON media type handling/);
 	assert.match(generator, /multipart requestBody must document boundary parameter handling/);
+	assert.match(generator, /multipart requestBody must document non-empty boundary requirement/);
 	assert.match(generator, /multipart requestBody must document required file field/);
 	assert.match(generator, /requestBody is missing a component schema reference/);
 	assert.match(generator, /requestBody 400 response must use InvalidRequest/);
 	assert.match(openapi, /application\/json:[\s\S]+description: 'Accepts `Content-Type: application\/json`, optional media type parameters such as `charset=utf-8`, and `application\/\*\+json` structured JSON media types\.'/);
-	assert.match(openapi, /multipart\/form-data:[\s\S]+description: 'Accepts `Content-Type: multipart\/form-data; boundary=<boundary>` with a required `file` field\.'/);
+	assert.match(openapi, /multipart\/form-data:[\s\S]+description: 'Accepts `Content-Type: multipart\/form-data; boundary=<non-empty-boundary>` with a required `file` field\.'/);
 
 	const requestBodies = [...openapi.matchAll(/\n      requestBody:\n([\s\S]*?)(?=\n      responses:)/g)];
 	assert.ok(requestBodies.length > 0, 'OpenAPI should contain request bodies');

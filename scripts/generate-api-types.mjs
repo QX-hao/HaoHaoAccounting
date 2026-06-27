@@ -852,9 +852,12 @@ function validateRequestBodyContract(method, apiPath, methodBlock) {
   }
   if (hasMultipart) {
     const multipartBlock = nestedBlock(requestBlock, 'multipart/form-data:');
-    // multipart 请求依赖 boundary 和 file 表单字段，OpenAPI 必须把客户端要构造的格式写清楚。
-    if (!multipartBlock.includes('Content-Type: multipart/form-data; boundary=<boundary>')) {
+    // multipart 请求依赖非空 boundary 和 file 表单字段，OpenAPI 必须把客户端要构造的格式写清楚。
+    if (!multipartBlock.includes('Content-Type: multipart/form-data; boundary=<')) {
       throw new Error(`${method.toUpperCase()} ${apiPath} multipart requestBody must document boundary parameter handling`);
+    }
+    if (!multipartBlock.includes('non-empty-boundary')) {
+      throw new Error(`${method.toUpperCase()} ${apiPath} multipart requestBody must document non-empty boundary requirement`);
     }
     if (!multipartBlock.includes('required `file` field')) {
       throw new Error(`${method.toUpperCase()} ${apiPath} multipart requestBody must document required file field`);

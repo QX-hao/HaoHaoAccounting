@@ -1125,7 +1125,7 @@ paths:
         required: true
         content:
           multipart/form-data:
-            description: 'Accepts `Content-Type: multipart/form-data; boundary=<boundary>` with a required `file` field.'
+            description: 'Accepts `Content-Type: multipart/form-data; boundary=<non-empty-boundary>` with a required `file` field.'
             schema:
               $ref: '#/components/schemas/ImportFileRequest'
       responses:
@@ -1171,7 +1171,7 @@ paths:
         required: true
         content:
           multipart/form-data:
-            description: 'Accepts `Content-Type: multipart/form-data; boundary=<boundary>` with a required `file` field.'
+            description: 'Accepts `Content-Type: multipart/form-data; boundary=<non-empty-boundary>` with a required `file` field.'
             schema:
               $ref: '#/components/schemas/ImportFileRequest'
       responses:
@@ -1254,7 +1254,7 @@ paths:
         required: true
         content:
           multipart/form-data:
-            description: 'Accepts `Content-Type: multipart/form-data; boundary=<boundary>` with a required `file` field.'
+            description: 'Accepts `Content-Type: multipart/form-data; boundary=<non-empty-boundary>` with a required `file` field.'
             schema:
               $ref: '#/components/schemas/ImportFileRequest'
       responses:
