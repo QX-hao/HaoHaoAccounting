@@ -137,6 +137,8 @@ export async function download(path: string, accept = '*/*'): Promise<DownloadRe
 export async function logout(): Promise<void> {
   const token = getToken();
   if (!token) return;
+  // 先清本地 token，再尽力通知服务端撤销；即使网络失败，前端也不会继续带旧凭据。
+  clearToken();
 
   await fetchAPI('/auth/logout', {
     method: 'POST',

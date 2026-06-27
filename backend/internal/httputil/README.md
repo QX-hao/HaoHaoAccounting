@@ -18,4 +18,4 @@ Shared response helpers for Gin handlers.
 
 `SetPaginationHeaders` emits `X-Total-Count` and RFC 8288 `Link` headers for paginated list responses when additional pages exist.
 
-`SetCreatedLocation` emits a relative `Location` header for newly created or queued resources so browser and mobile clients can follow the resource URL without learning deployment hosts.
+`SetCreatedLocation` emits a relative `Location` header for newly created resources, and `SetResourceLocation` does the same for accepted asynchronous jobs. Any `201 Created` or `202 Accepted` response in OpenAPI must declare this header for created or queued resources so browser and mobile clients can follow the resource URL without learning deployment hosts.

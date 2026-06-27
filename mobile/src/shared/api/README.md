@@ -8,6 +8,8 @@ React Native API helper layer.
 - Attach bearer tokens to authenticated requests.
 - Route JSON requests, uploads, downloads, and logout through the shared `fetchAPI` helper.
 - Expose `requestWithResponse` and `uploadWithResponse` for screens that need successful response headers such as `Location` and `Link`.
+- Clear the local token before the best-effort logout revocation request so failed network calls cannot leave the app using a stale token.
+- Broadcast session invalidation after `401` responses and logout so `useSession` can immediately return the app to the logged-out state.
 - Send `Accept: application/json`, attach a bounded `X-Request-ID`, and add `Content-Type: application/json` only when the body is not `FormData`.
 - Use `credentials: omit` so API calls rely only on explicit bearer headers instead of ambient cookies.
 - Bound requests with a 30 second `AbortController` timeout while still honoring a caller-provided `RequestInit.signal`; local timeouts surface with `ApiError.code` set to `request_timeout`.

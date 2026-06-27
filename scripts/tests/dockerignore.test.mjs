@@ -310,6 +310,51 @@ test('stateful compose services keep privilege escalation disabled without read-
 	}
 });
 
+test('production compose network boundaries keep stateful services internal-only', () => {
+	assert.match(compose, /^  internal:\n\s+internal: true$/m);
+
+	const web = composeServiceBlock('web');
+	assert.match(web, /ports:\n\s+- "3000:3000"/);
+	assert.match(web, /networks:\n\s+- public/);
+	assert.doesNotMatch(web, /\n\s+- internal/);
+
+	const backend = composeServiceBlock('backend');
+	assert.match(backend, /ports:\n\s+- "8080:8080"/);
+	assert.match(backend, /networks:\n\s+- public\n\s+- internal/);
+
+	const dbmigrate = composeServiceBlock('dbmigrate');
+	assert.match(dbmigrate, /networks:\n\s+- internal/);
+	assert.doesNotMatch(dbmigrate, /\n\s+- public/);
+	assert.doesNotMatch(dbmigrate, /ports:/);
+	assert.doesNotMatch(dbmigrate, /expose:/);
+
+	for (const [service, port] of [
+		['postgres', '5432'],
+		['redis', '6379'],
+		['mysql', '3306'],
+	]) {
+		const block = composeServiceBlock(service);
+		// 状态服务只暴露给 Compose 内部网络，避免数据库端口意外发布到宿主机。
+		assert.match(block, /networks:\n\s+- internal/);
+		assert.doesNotMatch(block, /\n\s+- public/);
+		assert.doesNotMatch(block, /ports:/);
+		assert.match(block, new RegExp(`expose:\\n\\s+- "${port}"`));
+	}
+});
+
+test('backend compose stop grace period exceeds application shutdown timeout', () => {
+	const backend = composeServiceBlock('backend');
+	const backendEnv = composeAnchorBlock('x-backend-env');
+
+	assert.match(backend, /stop_grace_period: \$\{BACKEND_STOP_GRACE_PERIOD:-30s\}/);
+	assert.match(backendEnv, /HTTP_SHUTDOWN_TIMEOUT: \$\{HTTP_SHUTDOWN_TIMEOUT:-10s\}/);
+	const stopGrace = defaultDurationSeconds(backend, 'BACKEND_STOP_GRACE_PERIOD');
+	const shutdownTimeout = defaultDurationSeconds(backendEnv, 'HTTP_SHUTDOWN_TIMEOUT');
+
+	// 容器停机宽限必须大于应用优雅停机预算，给 HTTP server shutdown 和日志 flush 留出余量。
+	assert.ok(stopGrace > shutdownTimeout, `backend stop_grace_period ${stopGrace}s must exceed HTTP_SHUTDOWN_TIMEOUT ${shutdownTimeout}s`);
+});
+
 test('production compose services rotate json-file logs', () => {
 	assert.match(compose, /x-default-logging: &default-logging[\s\S]+driver: json-file[\s\S]+max-size: "10m"[\s\S]+max-file: "5"/);
 	for (const service of ['web', 'backend', 'dbmigrate', 'postgres', 'redis', 'mysql']) {
@@ -429,6 +474,18 @@ function composeServiceBlock(service, source = compose) {
 	const match = source.match(new RegExp(`^  ${service}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|^volumes:)`, 'm'));
 	assert.ok(match, `missing compose service ${service}`);
 	return match[0];
+}
+
+function composeAnchorBlock(anchor) {
+	const match = compose.match(new RegExp(`^${escapeRegExp(anchor)}:.*\\n([\\s\\S]*?)(?=^services:)`, 'm'));
+	assert.ok(match, `missing compose anchor ${anchor}`);
+	return match[0];
+}
+
+function defaultDurationSeconds(source, variable) {
+	const match = source.match(new RegExp(`\\$\\{${escapeRegExp(variable)}:-([0-9]+)s\\}`));
+	assert.ok(match, `${variable} must have a seconds default`);
+	return Number(match[1]);
 }
 
 function redisComposeCommandBlock(redis) {

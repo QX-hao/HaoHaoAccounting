@@ -193,6 +193,9 @@ test('contributing guide documents branch flow, issue triage, verification, cont
 		'documentation form',
 		'reproducible defects',
 		'README, OpenAPI, middleware, deployment, or repository configuration guidance',
+		'Dependabot runs weekly grouped maintenance updates against `dev-pxhao`',
+		'automatic rebase is disabled',
+		'bot-only refresh commits',
 	]) {
 		assert.match(contributingGuide, new RegExp(escapeRegExp(requiredText)));
 	}

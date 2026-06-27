@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { clearToken, getToken, logout, setToken } from '../../shared/api/client';
+import { clearToken, getToken, logout, onSessionInvalidated, setToken } from '../../shared/api/client';
 import { login, verifyCurrentUser } from './api';
 
 export function useSession() {
@@ -10,6 +10,11 @@ export function useSession() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    // API client 在 401 或 logout 时统一广播会话失效，避免页面继续停留在已登录态。
+    const unsubscribe = onSessionInvalidated(() => {
+      setAuthed(false);
+    });
+
     async function boot() {
       const token = await getToken();
       if (token) {
@@ -24,6 +29,8 @@ export function useSession() {
       setReady(true);
     }
     boot();
+
+    return unsubscribe;
   }, []);
 
   async function signIn() {
@@ -52,7 +59,6 @@ export function useSession() {
 
   async function signOut() {
     await logout();
-    await clearToken();
     setAuthed(false);
   }
 

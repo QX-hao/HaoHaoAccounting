@@ -8,6 +8,7 @@ const TOKEN_KEY = 'haohao_token';
 type ApiErrorCode = ErrorResponse['code'] | 'network_error' | '';
 type ApiErrorBody = Partial<ErrorResponse>;
 const API_REQUEST_TIMEOUT_MS = 30_000;
+const sessionInvalidationListeners = new Set<() => void>();
 
 export type ApiResponse<T> = {
   data: T;
@@ -67,6 +68,13 @@ export async function clearToken() {
   await AsyncStorage.removeItem(TOKEN_KEY);
 }
 
+export function onSessionInvalidated(listener: () => void) {
+  sessionInvalidationListeners.add(listener);
+  return () => {
+    sessionInvalidationListeners.delete(listener);
+  };
+}
+
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await requestWithResponse<T>(path, init);
   return response.data;
@@ -95,6 +103,7 @@ export async function requestWithResponse<T>(path: string, init: RequestInit = {
     if (resp.status === 401) {
       // 移动端没有统一路由守卫，收到 401 时先清 token，让页面回到未登录态。
       await clearToken();
+      notifySessionInvalidated();
     }
     const data = await parseErrorBody(resp);
     throw apiError(resp, data);
@@ -147,6 +156,7 @@ async function downloadResponse(path: string, accept: string) {
   if (!resp.ok) {
     if (resp.status === 401) {
       await clearToken();
+      notifySessionInvalidated();
     }
     const data = await parseErrorBody(resp);
     throw apiError(resp, data);
@@ -157,11 +167,20 @@ async function downloadResponse(path: string, accept: string) {
 export async function logout() {
   const token = await getToken();
   if (!token) return;
+  // 本地先退出，再尽力撤销服务端 token；离线或网络失败时也不会继续复用旧凭据。
+  await clearToken();
+  notifySessionInvalidated();
 
   await fetchAPI('/auth/logout', {
     method: 'POST',
     headers: withRequestId({ Accept: 'application/json', Authorization: `Bearer ${token}` }),
   }).catch(() => undefined);
+}
+
+function notifySessionInvalidated() {
+  for (const listener of sessionInvalidationListeners) {
+    listener();
+  }
 }
 
 function ensureRequestId(headers: Headers) {

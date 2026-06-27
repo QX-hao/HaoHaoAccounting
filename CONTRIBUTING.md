@@ -6,6 +6,7 @@
 - Keep changes focused by area: backend, web, mobile, Docker/deployment config, OpenAPI/generated client, or repository configuration.
 - Fill out the pull request template with summary, related issue, review focus, tests, risk, and rollback notes.
 - Do not include secrets, local `.env` files, generated build output, dependency caches, or unrelated formatting-only changes.
+- Dependabot runs weekly grouped maintenance updates against `dev-pxhao`; automatic rebase is disabled so bot-only refresh commits do not drown out human review.
 
 ## Issue Triage
 

@@ -11,11 +11,13 @@ const webApiClient = readFileSync(new URL('../../web/shared/api/client.ts', impo
 const webApiReadme = readFileSync(new URL('../../web/shared/api/README.md', import.meta.url), 'utf8');
 const webConfig = readFileSync(new URL('../../web/lib/config.ts', import.meta.url), 'utf8');
 const webDataioApi = readFileSync(new URL('../../web/features/dataio/api.ts', import.meta.url), 'utf8');
+const webAppShell = readFileSync(new URL('../../web/components/AppShell.tsx', import.meta.url), 'utf8');
 const webEnvExample = readFileSync(new URL('../../web/.env.example', import.meta.url), 'utf8');
 const mobileApiClient = readFileSync(new URL('../../mobile/src/shared/api/client.ts', import.meta.url), 'utf8');
 const mobileApiReadme = readFileSync(new URL('../../mobile/src/shared/api/README.md', import.meta.url), 'utf8');
 const mobileConfig = readFileSync(new URL('../../mobile/src/shared/config.ts', import.meta.url), 'utf8');
 const mobileDataioApi = readFileSync(new URL('../../mobile/src/features/dataio/api.ts', import.meta.url), 'utf8');
+const mobileUseSession = readFileSync(new URL('../../mobile/src/features/auth/useSession.ts', import.meta.url), 'utf8');
 const mobileEnvExample = readFileSync(new URL('../../mobile/.env.example', import.meta.url), 'utf8');
 const goHTTPUtilResponses = readFileSync(new URL('../../backend/internal/httputil/response.go', import.meta.url), 'utf8');
 const goRequestDTOs = new Map([
@@ -308,6 +310,15 @@ test('API clients ignore non-object JSON error bodies', () => {
 test('API clients route logout through shared network error handling', () => {
 	assert.match(webApiClient, /await fetchAPI\('\/auth\/logout', \{/);
 	assert.match(mobileApiClient, /await fetchAPI\('\/auth\/logout', \{/);
+	assert.match(webApiClient, /export async function logout\(\): Promise<void> \{[\s\S]+clearToken\(\);[\s\S]+await fetchAPI\('\/auth\/logout'/);
+	assert.match(mobileApiClient, /export async function logout\(\) \{[\s\S]+await clearToken\(\);[\s\S]+await fetchAPI\('\/auth\/logout'/);
+	assert.doesNotMatch(webAppShell, /clearToken/);
+	assert.doesNotMatch(mobileUseSession.match(/async function signOut\(\) \{[\s\S]+?\n  \}/)?.[0] || '', /clearToken/);
+	assert.match(mobileApiClient, /const sessionInvalidationListeners = new Set<\(\) => void>\(\);/);
+	assert.match(mobileApiClient, /export function onSessionInvalidated\(listener: \(\) => void\)/);
+	assert.match(mobileApiClient, /function notifySessionInvalidated\(\)/);
+	assert.match(mobileApiClient, /resp\.status === 401[\s\S]+await clearToken\(\);[\s\S]+notifySessionInvalidated\(\);/);
+	assert.match(mobileUseSession, /onSessionInvalidated\(\(\) => \{[\s\S]+setAuthed\(false\);[\s\S]+\}\)/);
 	assert.doesNotMatch(webApiClient, /fetch\(`\$\{API_BASE\}\/auth\/logout/);
 	assert.doesNotMatch(mobileApiClient, /fetch\(`\$\{API_BASE\}\/auth\/logout/);
 });
