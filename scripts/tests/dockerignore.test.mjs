@@ -11,7 +11,6 @@ const dockerignores = [
 const compose = readFileSync(new URL('../../docker-compose.yaml', import.meta.url), 'utf8');
 const localCompose = readFileSync(new URL('../../docker-compose.local.yaml', import.meta.url), 'utf8');
 const mobileNginx = readFileSync(new URL('../../mobile/nginx.conf', import.meta.url), 'utf8');
-const dependabot = readFileSync(new URL('../../.github/dependabot.yml', import.meta.url), 'utf8');
 const ciWorkflow = readFileSync(new URL('../../.github/workflows/ci.yaml', import.meta.url), 'utf8');
 const rootReadme = readFileSync(new URL('../../readme.md', import.meta.url), 'utf8');
 const nvmrc = readFileSync(new URL('../../.nvmrc', import.meta.url), 'utf8').trim();
@@ -110,29 +109,6 @@ test('backend Docker builds are reproducible without VCS stamping', () => {
 	}
 });
 
-test('dependabot watches every Dockerfile directory', () => {
-	assert.deepEqual([...dependabotDirectories('docker')].sort(), ['/', '/backend', '/mobile', '/web']);
-});
-
-test('dependabot only watches npm packages with lockfiles', () => {
-	const npmDependabotDirs = dependabotDirectories('npm');
-	assert.deepEqual([...npmDependabotDirs].sort(), ciNpmPackageDirs.map((directory) => `/${directory}`));
-	for (const directory of ciNpmPackageDirs) {
-		assert.ok(packageLockByName.has(directory), `${directory} npm package must have a tracked package-lock.json`);
-	}
-});
-
-test('dependabot update blocks are rate-limited and scheduled in one maintenance window', () => {
-	const blocks = dependabotUpdateBlocks();
-	assert.equal(blocks.length, 5);
-	for (const block of blocks) {
-		assert.match(block, /schedule:\n\s+interval: weekly\n\s+day: monday\n\s+time: "\d{2}:\d{2}"\n\s+timezone: Asia\/Shanghai/);
-		assert.match(block, /open-pull-requests-limit: 1/);
-		assert.match(block, /commit-message:\n\s+prefix: deps\([a-z][a-z0-9-]*\)/);
-		assert.match(block, /cooldown:\n\s+default-days: 7/);
-	}
-});
-
 test('CI workflow runs the same verification commands documented for local checks', () => {
 	for (const [job, command] of [
 		['deployment-config', 'npm run verify:compose'],
@@ -208,13 +184,11 @@ test('CI checkout steps avoid persisting write-capable credentials', () => {
 	}
 });
 
-test('CI npm installs use lockfiles tracked by Dependabot', () => {
-	const npmDependabotDirs = dependabotDirectories('npm');
+test('CI npm installs use tracked npm lockfiles', () => {
 	assert.ok(ciNpmPackageDirs.length > 0, 'CI must install at least one npm package with npm ci');
 	for (const directory of ciNpmPackageDirs) {
 		assert.ok(packageJSONByName.has(directory), `${directory} npm ci must have package.json metadata`);
 		assert.ok(existsSync(new URL(`../../${directory}/package-lock.json`, import.meta.url)), `${directory} npm ci must have package-lock.json`);
-		assert.ok(npmDependabotDirs.has(`/${directory}`), `${directory} npm package must be watched by Dependabot`);
 		assert.match(ciWorkflow, new RegExp(`cache-dependency-path: ${escapeRegExp(directory)}\\/package-lock\\.json`));
 	}
 });
@@ -540,30 +514,6 @@ function ciJobBlocks() {
 		jobs.set(match[1], jobsSource.slice(match.index, end));
 	}
 	return jobs;
-}
-
-function dependabotDirectories(ecosystem) {
-	const directories = new Set();
-	for (const block of dependabotUpdateBlocks()) {
-		if (!new RegExp(`package-ecosystem: ${escapeRegExp(ecosystem)}\\n`).test(block)) {
-			continue;
-		}
-		const singleDirectory = block.match(/^\s+directory:\s+([^\n]+)$/m);
-		if (singleDirectory) {
-			directories.add(singleDirectory[1].trim());
-			continue;
-		}
-		for (const match of block.matchAll(/^\s+-\s+(\/[^\n]*)$/gm)) {
-			directories.add(match[1].trim());
-		}
-	}
-	return directories;
-}
-
-function dependabotUpdateBlocks() {
-	return dependabot
-		.split(/\n(?=\s+- package-ecosystem: )/)
-		.filter((block) => block.includes('package-ecosystem:'));
 }
 
 function escapeRegExp(value) {

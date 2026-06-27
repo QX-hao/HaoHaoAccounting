@@ -47,7 +47,7 @@ test('pull request template asks reviewers for scope, tests, review focus, risk,
 		'Related issue:',
 		'Review focus:',
 		'Screenshots or recording:',
-		'Security, dependency, or Dependabot notes:',
+		'Security or dependency notes:',
 		'Risk level: Low / Medium / High',
 		'User-facing or API compatibility impact:',
 		'Config, migration, or deployment notes:',
@@ -160,7 +160,7 @@ test('security policy documents private vulnerability reporting and supported br
 		'Impact and affected data or capability.',
 		'Confirmed vulnerabilities should stay private',
 		'Authentication, authorization, token handling',
-		'Docker, CI, Dependabot, and deployment configuration',
+		'Docker, CI, dependency maintenance, and deployment configuration',
 	]) {
 		assert.match(securityPolicy, new RegExp(escapeRegExp(requiredText)));
 	}
@@ -193,15 +193,9 @@ test('contributing guide documents branch flow, issue triage, verification, cont
 		'documentation form',
 		'reproducible defects',
 		'README, OpenAPI, middleware, deployment, or repository configuration guidance',
-		'Dependabot runs weekly grouped maintenance updates against `dev-pxhao`',
-		'automatic rebase is disabled',
-		'bot-only refresh commits',
-		'`dependencies` plus ecosystem labels',
-		'single-level branch names',
-		'grouped minor/patch maintenance updates',
-		'leave major upgrades for focused review',
-		'npm `increase-if-necessary` versioning',
-		'unnecessary `package.json` churn',
+		'Dependency updates are maintainer-initiated only',
+		'Do not enable repository automation that creates bot branches or default dependency pull requests',
+		'prepare dependency changes on `dev-pxhao`',
 	]) {
 		assert.match(contributingGuide, new RegExp(escapeRegExp(requiredText)));
 	}

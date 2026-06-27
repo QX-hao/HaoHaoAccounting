@@ -11,7 +11,7 @@
 
 - Review focus:
 - Screenshots or recording:
-- Security, dependency, or Dependabot notes:
+- Security or dependency notes:
 
 ## Tests
 

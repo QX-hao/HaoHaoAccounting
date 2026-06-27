@@ -31,7 +31,7 @@ In scope:
 
 - Authentication, authorization, token handling, session refresh, and logout behavior.
 - API request validation, import/export handling, and generated client contracts.
-- Docker, CI, Dependabot, and deployment configuration that could expose secrets or weaken isolation.
+- Docker, CI, dependency maintenance, and deployment configuration that could expose secrets or weaken isolation.
 - Dependency vulnerabilities that affect reachable runtime code.
 
 Out of scope:
