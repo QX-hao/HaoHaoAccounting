@@ -566,12 +566,6 @@ function dependabotUpdateBlocks() {
 		.filter((block) => block.includes('package-ecosystem:'));
 }
 
-function dependabotUpdateBlocks() {
-	return dependabot
-		.split(/\n(?=\s+- package-ecosystem: )/)
-		.filter((block) => block.includes('package-ecosystem:'));
-}
-
 function escapeRegExp(value) {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
