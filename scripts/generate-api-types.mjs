@@ -133,6 +133,7 @@ function validateSchemaConstraints(allSchemas) {
   validateSharedResponseSchemasAreClosed(allSchemas);
   validateErrorResponseSchema(allSchemas.ErrorResponse || '');
   validateCoreResponseSchemasAreClosed(allSchemas);
+  validateAuthSchemaFieldDirection(allSchemas);
   validateCurrentUserResponseSchema(allSchemas.CurrentUser || '');
   validateCoreResourceTimestampSchemas(allSchemas);
   validatePaginatedResponseSchemasAreClosed(allSchemas);
@@ -183,6 +184,21 @@ function validateCoreResponseSchemasAreClosed(allSchemas) {
     if (!allSchemas[schemaName]?.includes('additionalProperties: false')) {
       throw new Error(`${schemaName} is missing additionalProperties: false`);
     }
+  }
+}
+
+function validateAuthSchemaFieldDirection(allSchemas) {
+  const password = schemaPropertyBlock(allSchemas.LoginRequest || '', 'password');
+  if (!password.includes('writeOnly: true')) {
+    throw new Error('LoginRequest.password is missing writeOnly: true');
+  }
+  if (!password.includes('format: password')) {
+    throw new Error('LoginRequest.password is missing password format');
+  }
+
+  const token = schemaPropertyBlock(allSchemas.LoginResponse || '', 'token');
+  if (!token.includes('readOnly: true')) {
+    throw new Error('LoginResponse.token is missing readOnly: true');
   }
 }
 

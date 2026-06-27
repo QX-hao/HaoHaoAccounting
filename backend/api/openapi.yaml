@@ -1954,6 +1954,8 @@ components:
         password:
           type: string
           minLength: 1
+          format: password
+          writeOnly: true
     LoginResponse:
       type: object
       additionalProperties: false
@@ -1970,6 +1972,7 @@ components:
       properties:
         token:
           type: string
+          readOnly: true
         user:
           $ref: '#/components/schemas/CurrentUser'
     Account:

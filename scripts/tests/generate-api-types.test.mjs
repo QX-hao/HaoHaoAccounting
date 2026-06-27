@@ -459,6 +459,15 @@ test('OpenAPI key auth responses include media type examples', () => {
 	assert.match(unauthorized, /application\/json:[\s\S]+example:[\s\S]+code: unauthorized/);
 });
 
+test('generator requires auth schema field direction metadata', () => {
+	assert.match(generator, /validateAuthSchemaFieldDirection/);
+	assert.match(generator, /LoginRequest\.password is missing writeOnly: true/);
+	assert.match(generator, /LoginRequest\.password is missing password format/);
+	assert.match(generator, /LoginResponse\.token is missing readOnly: true/);
+	assert.match(openapiSchema('LoginRequest'), /password:\n\s+type: string\n\s+minLength: 1\n\s+format: password\n\s+writeOnly: true/);
+	assert.match(openapiSchema('LoginResponse'), /token:\n\s+type: string\n\s+readOnly: true/);
+});
+
 test('OpenAPI shared error responses include structured examples', () => {
 	assert.match(generator, /validateErrorResponseExamples\(openapi\)/);
 	assert.match(generator, /components\.responses\.\$\{responseName\} example is missing \$\{field\}/);
