@@ -57,6 +57,14 @@ test('dependabot update entries map to tracked repository manifests', () => {
 	}
 });
 
+test('dependabot watches every GitHub Actions workflow file', () => {
+	const workflows = watchedManifest('github-actions', '/');
+	assert.ok(Array.isArray(workflows), 'github-actions root update must list workflow manifests');
+	for (const workflow of workflows) {
+		assert.ok(existsSync(repositoryURL(workflow)), `github-actions Dependabot must track ${workflow}`);
+	}
+});
+
 test('dependabot uses multi-directory updates only for Docker images', () => {
 	for (const update of config.updates) {
 		if (update.ecosystem === 'docker') {
@@ -243,7 +251,7 @@ function watchedManifest(ecosystem, directory) {
 		'docker:/backend': 'backend/Dockerfile',
 		'docker:/mobile': 'mobile/Dockerfile',
 		'docker:/web': 'web/Dockerfile',
-		'github-actions:/': '.github/workflows/ci.yaml',
+			'github-actions:/': ['.github/workflows/ci.yaml', '.github/workflows/codeql.yaml'],
 		'gomod:/backend': 'backend/go.sum',
 		'npm:/mobile': 'mobile/package-lock.json',
 		'npm:/web': 'web/package-lock.json',

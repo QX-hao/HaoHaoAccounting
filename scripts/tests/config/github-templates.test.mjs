@@ -14,6 +14,10 @@ const codeowners = readRepositoryFile('.github/CODEOWNERS');
 const ciWorkflow = readRepositoryFile('.github/workflows/ci.yaml');
 const codeqlWorkflow = readRepositoryFile('.github/workflows/codeql.yaml');
 const rootReadme = readRepositoryFile('readme.md');
+const workflowSources = [
+	['ci.yaml', ciWorkflow],
+	['codeql.yaml', codeqlWorkflow],
+];
 
 const issueAreaOptions = [
 	'Backend API',
@@ -247,23 +251,44 @@ test('codeql workflow scans Go and TypeScript with least required permissions', 
 	assert.match(codeqlWorkflow, /^  pull_request:\n    branches: \[main, dev-pxhao\]$/m);
 	assert.match(codeqlWorkflow, /^  schedule:\n    - cron: '[^']+'$/m);
 	assert.match(codeqlWorkflow, /^  workflow_dispatch:$/m);
-	assert.match(codeqlWorkflow, /^permissions:\n  contents: read\n  security-events: write$/m);
+	assert.match(codeqlWorkflow, /^permissions:\n  actions: read\n  contents: read\n  security-events: write$/m);
 	assert.match(codeqlWorkflow, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: true$/m);
 	assert.match(codeqlWorkflow, /runs-on: ubuntu-24\.04/);
 	assert.match(codeqlWorkflow, /timeout-minutes: 20/);
 	assert.match(codeqlWorkflow, /strategy:\n      fail-fast: false\n      matrix:/);
 	assert.match(codeqlWorkflow, /language: go[\s\S]+build-mode: autobuild/);
 	assert.match(codeqlWorkflow, /language: javascript-typescript[\s\S]+build-mode: none/);
-	assert.match(codeqlWorkflow, /actions\/checkout@v4[\s\S]+persist-credentials: false/);
-	assert.match(codeqlWorkflow, /github\/codeql-action\/init@v3/);
+	assert.match(codeqlWorkflow, /actions\/checkout@[a-f0-9]{40}\s+# v7[\s\S]+persist-credentials: false/);
+	assert.doesNotMatch(codeqlWorkflow, /actions\/checkout@v4/);
+	assert.match(codeqlWorkflow, /github\/codeql-action\/init@[a-f0-9]{40}\s+# v4/);
 	assert.match(codeqlWorkflow, /queries: security-extended/);
-	assert.match(codeqlWorkflow, /if: matrix\.build-mode == 'autobuild'\n        uses: github\/codeql-action\/autobuild@v3/);
-	assert.match(codeqlWorkflow, /github\/codeql-action\/analyze@v3/);
+	assert.match(codeqlWorkflow, /if: matrix\.build-mode == 'autobuild'\n        uses: github\/codeql-action\/autobuild@[a-f0-9]{40}\s+# v4/);
+	assert.match(codeqlWorkflow, /github\/codeql-action\/analyze@[a-f0-9]{40}\s+# v4/);
+	assert.doesNotMatch(codeqlWorkflow, /github\/codeql-action\/(?:init|autobuild|analyze)@v3/);
 	assert.match(codeqlWorkflow, /category: '\/language:\$\{\{ matrix\.language \}\}'/);
+});
+
+test('remote workflow actions are pinned to immutable commits with version comments', () => {
+	for (const [name, workflow] of workflowSources) {
+		const usages = workflowActionUsages(workflow);
+		assert.ok(usages.length > 0, `${name} must use at least one remote action`);
+		for (const usage of usages) {
+			assert.match(usage.ref, /^[a-f0-9]{40}$/, `${name} must pin ${usage.action} to a full commit SHA`);
+			assert.match(usage.versionComment, /^v\d+$/, `${name} must document the reviewed major for ${usage.action}`);
+		}
+	}
 });
 
 function readRepositoryFile(path) {
 	return readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8');
+}
+
+function workflowActionUsages(workflow) {
+	return [...workflow.matchAll(/^\s+-?\s*uses:\s+([^@\s#]+\/[^@\s#]+)@([^\s#]+)(?:\s+#\s+(\S+))?$/gm)].map((match) => ({
+		action: match[1],
+		ref: match[2],
+		versionComment: match[3] ?? '',
+	}));
 }
 
 // Issue Form 没有官方本地校验器，这里用轻量文本断言覆盖本仓库必须保留的字段。

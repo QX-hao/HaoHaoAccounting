@@ -146,8 +146,9 @@ test('CI workflow runs the same verification commands documented for local check
 	}
 	assert.match(ciWorkflow, /permissions:\n\s+contents: read/);
 	assert.match(ciWorkflow, /concurrency:\n\s+group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n\s+cancel-in-progress: true/);
-	assert.match(ciWorkflow, /actions\/setup-node@v4/);
-	assert.match(ciWorkflow, /actions\/setup-go@v5/);
+	assertWorkflowUsesMinimumActionMajor(ciWorkflow, 'actions/checkout', 7);
+	assertWorkflowUsesMinimumActionMajor(ciWorkflow, 'actions/setup-node', 6);
+	assertWorkflowUsesMinimumActionMajor(ciWorkflow, 'actions/setup-go', 6);
 });
 
 test('API contract verification fails on generated and runtime client drift', () => {
@@ -199,7 +200,7 @@ test('CI jobs set bounded timeouts instead of using the GitHub default', () => {
 
 test('CI checkout steps avoid persisting write-capable credentials', () => {
 	assert.match(ciWorkflow, /permissions:\n\s+contents: read/);
-	const checkoutSteps = [...ciWorkflow.matchAll(/- uses: actions\/checkout@v4/g)];
+	const checkoutSteps = [...workflowActionUsages(ciWorkflow)].filter(({ action }) => action === 'actions/checkout');
 	assert.ok(checkoutSteps.length > 0, 'CI must use actions/checkout');
 	for (const match of checkoutSteps) {
 		const step = ciStepFrom(match.index);
@@ -439,6 +440,26 @@ function redisComposeCommandBlock(redis) {
 function ciStepFrom(start) {
 	const nextStep = ciWorkflow.indexOf('\n      - ', start + 1);
 	return ciWorkflow.slice(start, nextStep === -1 ? undefined : nextStep);
+}
+
+function assertWorkflowUsesMinimumActionMajor(workflow, action, minimumMajor) {
+	const usages = workflowActionUsages(workflow).filter((usage) => usage.action === action);
+	assert.ok(usages.length > 0, `${action} must be used by this workflow`);
+
+	for (const { ref, versionComment } of usages) {
+		assert.match(ref, /^[a-f0-9]{40}$/, `${action} must be pinned to a full commit SHA`);
+		const major = Number(versionComment.match(/^v(\d+)$/)?.[1]);
+		assert.ok(major >= minimumMajor, `${action}@${ref} must document v${minimumMajor} or newer`);
+	}
+}
+
+function workflowActionUsages(workflow) {
+	return [...workflow.matchAll(/^\s+-?\s*uses:\s+([^@\s#]+\/[^@\s#]+)@([a-f0-9]{40})\s+#\s+(v\d+)$/gm)].map((match) => ({
+		action: match[1],
+		index: match.index,
+		ref: match[2],
+		versionComment: match[3],
+	}));
 }
 
 function ciJobBlocks() {
